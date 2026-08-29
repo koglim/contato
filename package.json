@@ -1,0 +1,29 @@
+{
+  "name": "contatocerto",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "pnpm --filter @contatocerto/shared build && pnpm --parallel --filter @contatocerto/web --filter @contatocerto/api dev",
+    "dev:web": "pnpm --filter @contatocerto/shared build && pnpm --filter @contatocerto/web dev",
+    "dev:api": "pnpm --filter @contatocerto/shared build && pnpm --filter @contatocerto/api dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm --filter @contatocerto/shared build && pnpm --filter @contatocerto/api test",
+    "typecheck": "pnpm -r run typecheck",
+    "db:up": "docker compose up -d database",
+    "db:down": "docker compose down",
+    "db:migrate": "node-pg-migrate -m database/migrations --envPath .env up",
+    "db:rollback": "node-pg-migrate -m database/migrations --envPath .env down",
+    "db:seed": "node database/seeds/run.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.3",
+    "dotenv": "^17.2.3",
+    "node-pg-migrate": "^8.0.3",
+    "pg": "^8.16.3"
+  }
+}

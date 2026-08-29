@@ -1,0 +1,31 @@
+:root {
+  color: #17231d;
+  background: #f7f5ef;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+main {
+  display: grid;
+  align-content: center;
+  min-height: 100vh;
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.eyebrow {
+  margin: 0 0 1rem;
+  color: #4b6755;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+h1 { margin: 0; font-size: clamp(3.5rem, 12vw, 8rem); line-height: 0.9; }
+
+.description { max-width: 32rem; margin: 1.5rem 0 0; font-size: 1.2rem; line-height: 1.5; }
