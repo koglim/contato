@@ -247,9 +247,9 @@ As tentativas ocorrem nesta ordem:
 
 1. `exact`: texto inteiro igual a um nome, slug ou alias normalizado.
 2. `phrase`: termo inteiro dentro do texto, com fronteiras de tokens — nunca substring parcial de outra palavra.
-3. `fuzzy`: somente após as duas anteriores, por `pg_trgm`, comparando termos com pelo menos cinco caracteres e similaridade mínima de `0.72`.
+3. `fuzzy`: somente após as duas anteriores, por `pg_trgm`, comparando termos com pelo menos cinco caracteres.
 
-O fuzzy retorna `ambiguous` quando os dois primeiros candidatos diferem em até `0.05` de similaridade. Resultados exact e phrase têm confiança `1`; os fuzzy retornam a similaridade do PostgreSQL. Ausência de confiança suficiente retorna `200` com `status: "unresolved"`, e nunca um palpite arbitrário.
+Por padrão, o fuzzy exige similaridade mínima de `0.53` e retorna `ambiguous` quando os dois primeiros candidatos diferem em até `0.10`. Esses parâmetros podem ser calibrados, sem segredos, pelas variáveis `SERVICE_RESOLUTION_FUZZY_THRESHOLD` e `SERVICE_RESOLUTION_FUZZY_AMBIGUITY_GAP`; ambas aceitam apenas números entre `0` e `1`. Resultados exact e phrase têm confiança `1`; os fuzzy retornam a similaridade do PostgreSQL. Ausência de confiança suficiente retorna `200` com `status: "unresolved"`, e nunca um palpite arbitrário.
 
 Exemplo resolvido:
 

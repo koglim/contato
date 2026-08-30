@@ -51,6 +51,6 @@ O repositório executa validação do catálogo, criação de `search_requests`,
 
 `Text → Service Resolution → Location Resolution → Matching Engine`.
 
-O módulo normaliza texto de forma pura (minúsculas, NFD sem diacríticos, pontuação como separador e espaços compactados) e consulta apenas serviços ativos. A consulta SQL parametrizada considera nome, slug e `service_aliases.normalized_alias`, aplicando exact antes de phrase com fronteiras de tokens. Somente se ambos falharem, usa `pg_trgm` com termos de no mínimo cinco caracteres, threshold `0.72` e margem de ambiguidade `0.05`.
+O módulo normaliza texto de forma pura (minúsculas, NFD sem diacríticos, pontuação como separador e espaços compactados) e consulta apenas serviços ativos. A consulta SQL parametrizada considera nome, slug e `service_aliases.normalized_alias`, aplicando exact antes de phrase com fronteiras de tokens. Somente se ambos falharem, usa `pg_trgm` com termos de no mínimo cinco caracteres. O threshold padrão é `0.53` e a margem de ambiguidade é `0.10`; ambos são validados de `0` a `1` pela configuração centralizada e podem ser calibrados pelas variáveis de ambiente do resolver.
 
 Aliases iniciais ficam no seed idempotente do catálogo. O script repete a mesma normalização conceitual da API, mas não compartilha runtime entre TypeScript da aplicação e o seed CommonJS. A execução de `pnpm db:seed` continua uma operação administrativa manual. Um fallback inteligente futuro poderá atuar sobre respostas `unresolved` ou `ambiguous`; não há IA, geocoding, WhatsApp ou matching nesse módulo.

@@ -1,14 +1,14 @@
 import type { ServiceResolutionResponse } from "@contatocerto/shared";
+import { readServiceResolutionConfig, type ServiceResolutionConfig } from "../../config/service-resolution.js";
 import { query } from "../../database/connection.js";
 import { normalizeServiceText } from "./service-resolution.normalization.js";
 import {
-  FUZZY_AMBIGUITY_GAP,
   FUZZY_MIN_TERM_LENGTH,
-  FUZZY_SIMILARITY_THRESHOLD,
   type ServiceResolutionRepository,
 } from "./service-resolution.types.js";
 
-type CandidateRow = { id: string; name: string; slug: string; term: string; confidence?: number | string };
+export type FuzzyCandidate = { id: string; name: string; slug: string; term: string; confidence: number | string };
+type CandidateRow = Omit<FuzzyCandidate, "confidence"> & { confidence?: number | string };
 const DATABASE_NORMALIZED_TERM = "trim(regexp_replace(regexp_replace(lower(unaccent(%s)), '[[:punct:]]+', ' ', 'g'), '\\s+', ' ', 'g'))";
 
 function termsCte() {
@@ -44,7 +44,17 @@ function ambiguous(normalizedText: string, rows: CandidateRow[], method: "exact"
   return { status: "ambiguous", normalized_text: normalizedText, match: null, candidates: rows.slice(0, 3).map((row) => candidate(row, method)) };
 }
 
+export function resolveFuzzyCandidates(normalizedText: string, rows: FuzzyCandidate[], config: ServiceResolutionConfig): ServiceResolutionResponse {
+  if (!rows.length) return unresolved(normalizedText);
+  const top = Number(rows[0].confidence);
+  const second = rows[1] ? Number(rows[1].confidence) : undefined;
+  if (second !== undefined && top - second <= config.fuzzyAmbiguityGap) return ambiguous(normalizedText, rows, "fuzzy");
+  return { status: "resolved", normalized_text: normalizedText, match: candidate(rows[0], "fuzzy"), candidates: [] };
+}
+
 export class PostgresServiceResolutionRepository implements ServiceResolutionRepository {
+  constructor(private readonly config: ServiceResolutionConfig = readServiceResolutionConfig()) {}
+
   async resolve(input: { text: string }): Promise<ServiceResolutionResponse> {
     const normalizedText = normalizeServiceText(input.text);
     const exact = await query<CandidateRow>(
@@ -84,12 +94,8 @@ export class PostgresServiceResolutionRepository implements ServiceResolutionRep
        )
        SELECT id, name, slug, term, confidence FROM best_per_service
        ORDER BY confidence DESC, id ASC LIMIT 3`,
-      [normalizedText, FUZZY_MIN_TERM_LENGTH, FUZZY_SIMILARITY_THRESHOLD],
+      [normalizedText, FUZZY_MIN_TERM_LENGTH, this.config.fuzzyThreshold],
     );
-    if (!fuzzy.rows.length) return unresolved(normalizedText);
-    const top = Number(fuzzy.rows[0].confidence);
-    const second = fuzzy.rows[1] ? Number(fuzzy.rows[1].confidence) : undefined;
-    if (second !== undefined && top - second <= FUZZY_AMBIGUITY_GAP) return ambiguous(normalizedText, fuzzy.rows, "fuzzy");
-    return { status: "resolved", normalized_text: normalizedText, match: candidate(fuzzy.rows[0], "fuzzy"), candidates: [] };
+    return resolveFuzzyCandidates(normalizedText, fuzzy.rows as FuzzyCandidate[], this.config);
   }
 }
