@@ -25,22 +25,22 @@ COPY packages/shared packages/shared
 RUN pnpm --filter @contatocerto/shared build \
   && pnpm --filter @contatocerto/api build
 
-FROM build AS production-dependencies
+FROM build AS runtime-package
 
-RUN pnpm --filter @contatocerto/api deploy --prod --legacy /deploy
+RUN pnpm --filter @contatocerto/api deploy --prod --legacy /runtime \
+  && rm -rf /runtime/node_modules/@contatocerto/shared \
+  && mkdir -p /runtime/node_modules/@contatocerto/shared \
+  && cp packages/shared/package.json /runtime/node_modules/@contatocerto/shared/package.json \
+  && cp -R packages/shared/dist /runtime/node_modules/@contatocerto/shared/dist
 
 FROM node:22-alpine AS runner
 
 ENV NODE_ENV=production
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-
-RUN corepack enable
 
 WORKDIR /app
 
-COPY --from=production-dependencies /deploy ./
+COPY --from=runtime-package /runtime ./
 
 EXPOSE 3333
 
-CMD ["pnpm", "start"]
+CMD ["node", "dist/server.js"]
