@@ -20,6 +20,10 @@ export {
   serviceAreaResponseSchema,
   updateServiceAreaSchema,
 } from "./schemas/service-area.js";
+export {
+  professionalAvailabilityResponseSchema,
+  updateProfessionalAvailabilitySchema,
+} from "./schemas/professional-availability.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -41,3 +45,7 @@ export type {
   ServiceAreaResponse,
   UpdateServiceAreaInput,
 } from "./types/service-area.js";
+export type {
+  ProfessionalAvailabilityResponse,
+  UpdateProfessionalAvailabilityInput,
+} from "./types/professional-availability.js";

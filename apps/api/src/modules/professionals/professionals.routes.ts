@@ -3,6 +3,7 @@ import {
   createProfessionalSchema,
   listProfessionalsQuerySchema,
   updateProfessionalSchema,
+  updateProfessionalAvailabilitySchema,
 } from "@contatocerto/shared";
 import { z } from "zod";
 import { createInternalKeyGuard } from "../internal/internal-auth.js";
@@ -117,6 +118,23 @@ export const professionalsRoutes: FastifyPluginAsync<ProfessionalsRoutesOptions>
       return professional ?? reply.code(404).send({ error: "professional_not_found" });
     } catch (error) {
       app.log.error(error, "Failed to update professional");
+      return reply.code(500).send({ error: "internal_error" });
+    }
+  });
+
+  app.patch("/:professionalId/availability", { preHandler: requireInternalKey }, async (request, reply) => {
+    const params = z.object({ professionalId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return validationError(reply, params.error.issues);
+    const body = updateProfessionalAvailabilitySchema.safeParse(request.body);
+    if (!body.success) return validationError(reply, body.error.issues);
+
+    try {
+      const availability = await repository.updateAvailability(params.data.professionalId, body.data.is_available_now);
+      if (availability === null) return reply.code(404).send({ error: "professional_not_found" });
+      if (availability === "not_active") return reply.code(409).send({ error: "professional_not_active" });
+      return availability;
+    } catch (error) {
+      app.log.error(error, "Failed to update professional availability");
       return reply.code(500).send({ error: "internal_error" });
     }
   });

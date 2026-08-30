@@ -112,6 +112,11 @@ export class PostgresProfessionalsRepository implements ProfessionalsRepository 
       }
     }
 
+    if (input.status !== undefined && input.status !== "active") {
+      assignments.push("is_available_now = CASE WHEN is_available_now THEN FALSE ELSE is_available_now END");
+      assignments.push("available_now_updated_at = CASE WHEN is_available_now THEN NOW() ELSE available_now_updated_at END");
+    }
+
     values.push(id);
     const result = await query<ProfessionalRow>(
       `UPDATE professionals
@@ -122,5 +127,41 @@ export class PostgresProfessionalsRepository implements ProfessionalsRepository 
     );
 
     return result.rows[0] ? toProfessionalResponse(result.rows[0]) : null;
+  }
+
+  async updateAvailability(id: string, isAvailableNow: boolean) {
+    type AvailabilityRow = {
+      professional_id: string | null;
+      is_available_now: boolean | null;
+      available_now_updated_at: Date | null;
+      outcome: "updated" | "not_active";
+    };
+    const result = await query<AvailabilityRow>(
+      `WITH existing AS (
+         SELECT id, status FROM professionals WHERE id = $1
+       ), updated AS (
+         UPDATE professionals
+         SET is_available_now = $2, available_now_updated_at = NOW()
+         WHERE id = (SELECT id FROM existing)
+           AND ($2 = FALSE OR status = 'active')
+         RETURNING id, is_available_now, available_now_updated_at
+       )
+       SELECT id AS professional_id, is_available_now, available_now_updated_at, 'updated'::text AS outcome
+       FROM updated
+       UNION ALL
+       SELECT NULL, NULL, NULL, 'not_active'::text AS outcome
+       FROM existing
+       WHERE NOT EXISTS (SELECT 1 FROM updated)`,
+      [id, isAvailableNow],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    if (row.outcome === "not_active") return "not_active";
+
+    return {
+      professional_id: row.professional_id!,
+      is_available_now: row.is_available_now!,
+      available_now_updated_at: row.available_now_updated_at!.toISOString(),
+    };
   }
 }

@@ -2,6 +2,7 @@ import type {
   CreateProfessionalInput,
   ListProfessionalsQuery,
   ProfessionalResponse,
+  ProfessionalAvailabilityResponse,
   UpdateProfessionalInput,
 } from "@contatocerto/shared";
 
@@ -14,4 +15,8 @@ export type ProfessionalsRepository = {
   findById(id: string): Promise<ProfessionalResponse | null>;
   list(query: ListProfessionalsQuery): Promise<{ items: ProfessionalResponse[]; total: number }>;
   update(id: string, input: UpdateProfessionalInput): Promise<ProfessionalResponse | null>;
+  updateAvailability(
+    id: string,
+    isAvailableNow: boolean,
+  ): Promise<ProfessionalAvailabilityResponse | "not_active" | null>;
 };

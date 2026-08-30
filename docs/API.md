@@ -66,6 +66,28 @@ Permite atualizar `display_name`, `phone_e164`, `email`, `bio`, `profile_image_u
 
 O slug permanece estável quando `display_name` muda. A API não aceita alterações de `id`, `slug`, verificações, disponibilidade ou timestamps.
 
+### `PATCH /internal/professionals/:professionalId/availability`
+
+Confirma a disponibilidade imediata de um profissional. Aceita exclusivamente um booleano real:
+
+```json
+{ "is_available_now": true }
+```
+
+Retorna uma resposta específica da operação:
+
+```json
+{
+  "professional_id": "UUID",
+  "is_available_now": true,
+  "available_now_updated_at": "2026-08-30T12:00:00.000Z"
+}
+```
+
+Somente profissionais com status `active` podem definir `is_available_now` como `true`; caso contrário, retorna `409 professional_not_active`. Definir `false` é permitido para qualquer status. Em ambas as operações, inclusive quando o valor já é igual ao solicitado, `available_now_updated_at` é atualizado por `NOW()` no PostgreSQL. Esse campo registra a última confirmação de disponibilidade; ainda não há expiração automática, e a política de freshness será definida pelo futuro matching.
+
+Quando um profissional passa para `draft` ou `suspended`, a API desliga automaticamente a disponibilidade se ela estava ligada e registra o horário no banco.
+
 ## Catálogo de serviços
 
 ### `GET /internal/catalog/services`
@@ -186,4 +208,5 @@ Remove fisicamente uma área operacional e retorna `204`. Não promove outra ár
 - `404`: `service_area_not_found`.
 - `409`: `professional_slug_conflict` se não for possível reservar um slug único.
 - `409`: `professional_service_already_exists` ou `service_inactive`.
+- `409`: `professional_not_active` ao tentar ativar disponibilidade para um profissional não ativo.
 - `500`: `internal_error`, sem expor SQL, stack trace ou segredos.

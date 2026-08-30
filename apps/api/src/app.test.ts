@@ -5,6 +5,7 @@ import type {
   CreateProfessionalInput,
   ListProfessionalsQuery,
   ProfessionalResponse,
+  ProfessionalAvailabilityResponse,
   ProfessionalServiceResponse,
   ServiceAreaResponse,
   ServiceCatalogItem,
@@ -26,6 +27,7 @@ const internalApiKey = "test-internal-key";
 
 class FakeProfessionalsRepository implements ProfessionalsRepository {
   private readonly professionals = new Map<string, ProfessionalResponse>();
+  private availabilityVersion = 0;
 
   async create(input: CreateProfessionalRecord) {
     if ([...this.professionals.values()].some((professional) => professional.slug === input.slug)) {
@@ -84,13 +86,40 @@ class FakeProfessionalsRepository implements ProfessionalsRepository {
       return null;
     }
 
+    const becameUnavailable = input.status !== undefined && input.status !== "active" && professional.is_available_now;
     const updated = {
       ...professional,
       ...input,
+      is_available_now: becameUnavailable ? false : professional.is_available_now,
+      available_now_updated_at: becameUnavailable ? this.nextAvailabilityTimestamp() : professional.available_now_updated_at,
       updated_at: new Date().toISOString(),
     };
     this.professionals.set(id, updated);
     return updated;
+  }
+
+  async updateAvailability(id: string, isAvailableNow: boolean) {
+    const professional = this.professionals.get(id);
+    if (!professional) return null;
+    if (isAvailableNow && professional.status !== "active") return "not_active" as const;
+
+    const updated: ProfessionalResponse = {
+      ...professional,
+      is_available_now: isAvailableNow,
+      available_now_updated_at: this.nextAvailabilityTimestamp(),
+      updated_at: new Date().toISOString(),
+    };
+    this.professionals.set(id, updated);
+    return {
+      professional_id: updated.id,
+      is_available_now: updated.is_available_now,
+      available_now_updated_at: updated.available_now_updated_at!,
+    } satisfies ProfessionalAvailabilityResponse;
+  }
+
+  private nextAvailabilityTimestamp() {
+    this.availabilityVersion += 1;
+    return new Date(Date.now() + this.availabilityVersion).toISOString();
   }
 }
 
@@ -321,6 +350,72 @@ test("PATCH /internal/professionals/:id returns 404 when absent", async () => {
   assert.equal(response.statusCode, 404);
   assert.deepEqual(response.json(), { error: "professional_not_found" });
 
+  await app.close();
+});
+
+test("availability requires the internal key and validates its UUID and strict body", async () => {
+  const { app } = buildInternalApp();
+  const denied = await app.inject({ method: "PATCH", url: `/internal/professionals/${randomUUID()}/availability`, payload: { is_available_now: false } });
+  const invalidId = await app.inject({ method: "PATCH", url: "/internal/professionals/not-a-uuid/availability", headers: internalHeaders(), payload: { is_available_now: false } });
+  const invalidBody = await app.inject({ method: "PATCH", url: `/internal/professionals/${randomUUID()}/availability`, headers: internalHeaders(), payload: { is_available_now: "true" } });
+  const forbidden = await app.inject({ method: "PATCH", url: `/internal/professionals/${randomUUID()}/availability`, headers: internalHeaders(), payload: { is_available_now: false, available_now_updated_at: "2020-01-01T00:00:00Z" } });
+  assert.equal(denied.statusCode, 401);
+  assert.equal(invalidId.statusCode, 400);
+  assert.equal(invalidBody.statusCode, 400);
+  assert.equal(forbidden.statusCode, 400);
+  await app.close();
+});
+
+test("availability updates active professionals and refreshes its timestamp every time", async () => {
+  const { app } = buildInternalApp();
+  const created = await app.inject({ method: "POST", url: "/internal/professionals", headers: internalHeaders(), payload: createPayload });
+  const id = created.json().id;
+  await app.inject({ method: "PATCH", url: `/internal/professionals/${id}`, headers: internalHeaders(), payload: { status: "active" } });
+  const first = await app.inject({ method: "PATCH", url: `/internal/professionals/${id}/availability`, headers: internalHeaders(), payload: { is_available_now: true } });
+  const second = await app.inject({ method: "PATCH", url: `/internal/professionals/${id}/availability`, headers: internalHeaders(), payload: { is_available_now: true } });
+  const disabled = await app.inject({ method: "PATCH", url: `/internal/professionals/${id}/availability`, headers: internalHeaders(), payload: { is_available_now: false } });
+  assert.equal(first.statusCode, 200);
+  assert.notEqual(first.json().available_now_updated_at, second.json().available_now_updated_at);
+  assert.equal(disabled.json().is_available_now, false);
+  assert.notEqual(disabled.json().available_now_updated_at, second.json().available_now_updated_at);
+  await app.close();
+});
+
+test("availability rejects non-active professionals for true but permits false", async () => {
+  const { app } = buildInternalApp();
+  const draft = await app.inject({ method: "POST", url: "/internal/professionals", headers: internalHeaders(), payload: createPayload });
+  const suspended = await app.inject({ method: "POST", url: "/internal/professionals", headers: internalHeaders(), payload: { ...createPayload, phone_e164: "+5565988888888" } });
+  await app.inject({ method: "PATCH", url: `/internal/professionals/${suspended.json().id}`, headers: internalHeaders(), payload: { status: "suspended" } });
+  const draftTrue = await app.inject({ method: "PATCH", url: `/internal/professionals/${draft.json().id}/availability`, headers: internalHeaders(), payload: { is_available_now: true } });
+  const suspendedTrue = await app.inject({ method: "PATCH", url: `/internal/professionals/${suspended.json().id}/availability`, headers: internalHeaders(), payload: { is_available_now: true } });
+  const draftFalse = await app.inject({ method: "PATCH", url: `/internal/professionals/${draft.json().id}/availability`, headers: internalHeaders(), payload: { is_available_now: false } });
+  const suspendedFalse = await app.inject({ method: "PATCH", url: `/internal/professionals/${suspended.json().id}/availability`, headers: internalHeaders(), payload: { is_available_now: false } });
+  assert.deepEqual(draftTrue.json(), { error: "professional_not_active" });
+  assert.deepEqual(suspendedTrue.json(), { error: "professional_not_active" });
+  assert.equal(draftFalse.statusCode, 200);
+  assert.equal(suspendedFalse.statusCode, 200);
+  await app.close();
+});
+
+test("availability reports absent professionals and status changes disable it atomically", async () => {
+  const { app } = buildInternalApp();
+  const missing = await app.inject({ method: "PATCH", url: `/internal/professionals/${randomUUID()}/availability`, headers: internalHeaders(), payload: { is_available_now: false } });
+  const created = await app.inject({ method: "POST", url: "/internal/professionals", headers: internalHeaders(), payload: createPayload });
+  const id = created.json().id;
+  await app.inject({ method: "PATCH", url: `/internal/professionals/${id}`, headers: internalHeaders(), payload: { status: "active" } });
+  await app.inject({ method: "PATCH", url: `/internal/professionals/${id}/availability`, headers: internalHeaders(), payload: { is_available_now: true } });
+  const suspended = await app.inject({ method: "PATCH", url: `/internal/professionals/${id}`, headers: internalHeaders(), payload: { status: "suspended", display_name: "João Suspenso" } });
+  const fetched = await app.inject({ method: "GET", url: `/internal/professionals/${id}`, headers: internalHeaders() });
+  await app.inject({ method: "PATCH", url: `/internal/professionals/${id}`, headers: internalHeaders(), payload: { status: "active" } });
+  await app.inject({ method: "PATCH", url: `/internal/professionals/${id}/availability`, headers: internalHeaders(), payload: { is_available_now: true } });
+  const draft = await app.inject({ method: "PATCH", url: `/internal/professionals/${id}`, headers: internalHeaders(), payload: { status: "draft" } });
+  const listed = await app.inject({ method: "GET", url: "/internal/professionals", headers: internalHeaders() });
+  assert.deepEqual(missing.json(), { error: "professional_not_found" });
+  assert.equal(suspended.json().display_name, "João Suspenso");
+  assert.equal(fetched.json().is_available_now, false);
+  assert.notEqual(fetched.json().available_now_updated_at, null);
+  assert.equal(draft.json().is_available_now, false);
+  assert.equal(listed.statusCode, 200);
   await app.close();
 });
 
