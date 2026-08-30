@@ -9,6 +9,8 @@ import type {
   ProfessionalServiceResponse,
   ServiceAreaResponse,
   ServiceCatalogItem,
+  MatchingSearchInput,
+  MatchingSearchResponse,
   UpdateProfessionalInput,
 } from "@contatocerto/shared";
 import { buildApp } from "./app.js";
@@ -22,6 +24,7 @@ import type {
   ProfessionalServiceUpdateRecord,
 } from "./modules/professional-services/professional-services.types.js";
 import type { ServiceAreasRepository, ServiceAreaUpdateRecord } from "./modules/service-areas/service-areas.types.js";
+import type { MatchingRepository, MatchingSearchOutcome } from "./modules/matching/matching.types.js";
 
 const internalApiKey = "test-internal-key";
 
@@ -807,5 +810,81 @@ test("service area delete returns 204 and rejects missing or foreign areas", asy
   assert.deepEqual(foreign.json(), { error: "service_area_not_found" });
   assert.equal(deleted.statusCode, 204);
   assert.deepEqual(missing.json(), { error: "service_area_not_found" });
+  await app.close();
+});
+
+class FakeMatchingRepository implements MatchingRepository {
+  lastInput: MatchingSearchInput | null = null;
+  outcome: MatchingSearchOutcome = { kind: "success", response: matchingResponse() };
+
+  async search(input: MatchingSearchInput) {
+    this.lastInput = input;
+    return this.outcome;
+  }
+}
+
+function matchingResponse(overrides: Partial<MatchingSearchResponse> = {}): MatchingSearchResponse {
+  const serviceId = randomUUID();
+  const professionalId = randomUUID();
+  return {
+    search_request_id: randomUUID(), status: "matched", service: { id: serviceId, name: "Eletricista", slug: "eletricista" },
+    location: { latitude: -11.8608, longitude: -55.5091, city: "Sinop", state: "MT", neighborhood: null },
+    matches: [{
+      match_id: randomUUID(), rank_position: 1, distance_meters: 1800, effective_available_now: true,
+      professional: { id: professionalId, display_name: "Ricardo Santos", slug: "ricardo", bio: null, profile_image_url: null, is_verified: false },
+      service: { professional_service_id: randomUUID(), description: null, price_mode: "from", price_from_cents: 15_000, price_to_cents: null },
+      service_area: { id: randomUUID(), label: "Sinop e região", city: "Sinop", state: "MT", radius_meters: 40_000 },
+    }],
+    meta: { count: 1, limit: 3, availability_freshness_minutes: 240 }, ...overrides,
+  };
+}
+
+function buildMatchingApp() {
+  const repository = new FakeMatchingRepository();
+  return { app: buildApp({ matchingRepository: repository, internalApiKey }), repository };
+}
+
+function matchingPayload() {
+  return { raw_text: "Preciso de um eletricista em Sinop", service_id: randomUUID(), latitude: -11.8608, longitude: -55.5091, city: "Sinop", state: "MT", neighborhood: null };
+}
+
+test("matching requires the internal key and validates structured input", async () => {
+  const { app } = buildMatchingApp();
+  const denied = await app.inject({ method: "POST", url: "/internal/matching/search", payload: matchingPayload() });
+  const empty = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: {} });
+  const invalidService = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: { ...matchingPayload(), service_id: "invalid" } });
+  const invalidLatitude = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: { ...matchingPayload(), latitude: 91 } });
+  const invalidLongitude = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: { ...matchingPayload(), longitude: -181 } });
+  const invalidLimit = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: { ...matchingPayload(), limit: 11 } });
+  assert.equal(denied.statusCode, 401);
+  for (const response of [empty, invalidService, invalidLatitude, invalidLongitude, invalidLimit]) assert.equal(response.statusCode, 400);
+  await app.close();
+});
+
+test("matching uses the default limit and returns an auditable, contact-free response", async () => {
+  const { app, repository } = buildMatchingApp();
+  const response = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: matchingPayload() });
+  assert.equal(response.statusCode, 200);
+  assert.equal(repository.lastInput?.limit, 3);
+  assert.equal(response.json().matches[0].rank_position, 1);
+  assert.equal(response.json().matches[0].professional.phone_e164, undefined);
+  assert.equal(response.json().matches[0].professional.email, undefined);
+  assert.equal(response.json().meta.availability_freshness_minutes, 240);
+  await app.close();
+});
+
+test("matching returns service errors and accepts zero results", async () => {
+  const { app, repository } = buildMatchingApp();
+  repository.outcome = { kind: "service_not_found" };
+  const missing = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: matchingPayload() });
+  repository.outcome = { kind: "service_inactive" };
+  const inactive = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: matchingPayload() });
+  repository.outcome = { kind: "success", response: matchingResponse({ status: "ready", matches: [], meta: { count: 0, limit: 3, availability_freshness_minutes: 240 } }) };
+  const empty = await app.inject({ method: "POST", url: "/internal/matching/search", headers: internalHeaders(), payload: matchingPayload() });
+  assert.deepEqual(missing.json(), { error: "service_not_found" });
+  assert.deepEqual(inactive.json(), { error: "service_inactive" });
+  assert.equal(empty.statusCode, 200);
+  assert.deepEqual(empty.json().matches, []);
+  assert.equal(empty.json().status, "ready");
   await app.close();
 });

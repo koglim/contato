@@ -199,6 +199,38 @@ Atualização parcial de `label`, `city`, `state`, `country_code`, `neighborhood
 
 Remove fisicamente uma área operacional e retorna `204`. Não promove outra área automaticamente. Área inexistente ou de outro profissional retorna `404 service_area_not_found`.
 
+## Matching determinístico
+
+### `POST /internal/matching/search`
+
+Rota interna protegida por `X-Internal-Key` para executar o matching quando o serviço e as coordenadas do pedido já foram resolvidos por uma etapa externa. Ela não interpreta texto, não faz geocoding e não é uma API pública de busca.
+
+```json
+{
+  "raw_text": "Preciso de um eletricista perto de casa.",
+  "service_id": "UUID",
+  "latitude": -11.8608,
+  "longitude": -55.5091,
+  "city": "Sinop",
+  "state": "MT",
+  "neighborhood": null,
+  "limit": 3
+}
+```
+
+`raw_text`, `service_id`, `latitude` e `longitude` são obrigatórios. O texto aceita até 2.000 caracteres; latitude e longitude precisam estar nas faixas geográficas válidas. Os metadados de localização são opcionais e `limit` é opcional, com padrão `3` e intervalo de `1` a `10`.
+
+Em uma única transação, a API valida que o serviço existe e está ativo, registra um `search_request` com o ponto PostGIS, identifica os profissionais elegíveis e persiste um `match` para cada resultado. Um profissional só entra se estiver ativo, oferecer o serviço de forma ativa e possuir uma área ativa cujo raio contenha o ponto consultado. Quando possui várias áreas elegíveis, somente a mais próxima é considerada.
+
+O campo `effective_available_now` é verdadeiro apenas quando a disponibilidade está ligada e foi confirmada nos últimos 240 minutos. A disponibilidade não elimina candidatos; a ordenação é: disponibilidade efetiva, menor distância, profissional verificado e UUID do profissional. A resposta não expõe telefone ou e-mail.
+
+Se não houver candidatos, a resposta ainda é `200`, com `matches: []` e `status: "ready"`. Com candidatos, o status é `"matched"`.
+
+Erros específicos:
+
+- `404 service_not_found` para serviço inexistente.
+- `409 service_inactive` para serviço desativado.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.
