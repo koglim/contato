@@ -66,10 +66,87 @@ Permite atualizar `display_name`, `phone_e164`, `email`, `bio`, `profile_image_u
 
 O slug permanece estável quando `display_name` muda. A API não aceita alterações de `id`, `slug`, verificações, disponibilidade ou timestamps.
 
+## Catálogo de serviços
+
+### `GET /internal/catalog/services`
+
+Retorna os serviços ativos do catálogo, já acompanhados de sua categoria. Aceita os filtros opcionais `q` (nome ou slug) e `category_id` (UUID). A ordenação é alfabética por categoria e depois por serviço.
+
+```json
+{
+  "items": [
+    {
+      "id": "UUID",
+      "name": "Eletricista",
+      "slug": "eletricista",
+      "description": null,
+      "is_active": true,
+      "category": { "id": "UUID", "name": "Casa e Manutenção", "slug": "casa-e-manutencao" }
+    }
+  ]
+}
+```
+
+## Serviços oferecidos pelo profissional
+
+As rotas abaixo são internas e exigem `X-Internal-Key`. Valores monetários são sempre inteiros em centavos — por exemplo, `15000` representa R$ 150,00. Nunca envie valores em ponto flutuante.
+
+### `GET /internal/professionals/:professionalId/services`
+
+Lista todos os vínculos do profissional, inclusive os inativos. Retorna `404` com `professional_not_found` quando o profissional não existe; para um profissional sem serviços retorna `{"items":[]}`.
+
+Cada item inclui a configuração do vínculo, serviço, categoria e timestamps ISO.
+
+### `POST /internal/professionals/:professionalId/services`
+
+Vincula um serviço do catálogo a um profissional. O vínculo nasce ativo e inclui `service_id`, `price_mode` e, opcionalmente, `description` de até 2.000 caracteres.
+
+Quatro modos de preço são aceitos:
+
+```json
+{ "service_id": "UUID", "price_mode": "quote" }
+```
+
+`quote` não aceita preços.
+
+```json
+{ "service_id": "UUID", "price_mode": "fixed", "price_from_cents": 12000 }
+```
+
+`fixed` exige `price_from_cents` e não aceita `price_to_cents`.
+
+```json
+{ "service_id": "UUID", "price_mode": "from", "price_from_cents": 15000 }
+```
+
+`from` exige `price_from_cents` e não aceita `price_to_cents`.
+
+```json
+{
+  "service_id": "UUID",
+  "description": "Instalação e manutenção elétrica.",
+  "price_mode": "range",
+  "price_from_cents": 10000,
+  "price_to_cents": 30000
+}
+```
+
+`range` exige ambos os valores, e o máximo deve ser maior ou igual ao mínimo. Todos os valores são inteiros maiores ou iguais a zero.
+
+Uma associação ativa já existente retorna `409 professional_service_already_exists`. Caso a associação exista, mas esteja inativa, o mesmo `POST` atualiza a configuração, reativa o registro existente e retorna `200`; um vínculo novo retorna `201`.
+
+### `PATCH /internal/professionals/:professionalId/services/:professionalServiceId`
+
+Permite atualizar apenas `description`, `price_mode`, `price_from_cents`, `price_to_cents` e `is_active`. O corpo não pode ser vazio. A API valida o estado final do preço antes de persistir; ao mudar para `quote`, os dois preços são automaticamente limpos. Para mudar de `quote` para `fixed`, `from` ou `range`, envie os valores exigidos pelo novo modo.
+
+Use `{ "is_active": false }` para desativar sem apagar histórico. Uma reativação só é permitida se o serviço correspondente no catálogo continuar ativo.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.
 - `401`: `unauthorized`.
 - `404`: `professional_not_found`.
+- `404`: `service_not_found` ou `professional_service_not_found`.
 - `409`: `professional_slug_conflict` se não for possível reservar um slug único.
+- `409`: `professional_service_already_exists` ou `service_inactive`.
 - `500`: `internal_error`, sem expor SQL, stack trace ou segredos.

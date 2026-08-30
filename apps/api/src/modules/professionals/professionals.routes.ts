@@ -1,10 +1,12 @@
-import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyPluginAsync } from "fastify";
 import {
   createProfessionalSchema,
   listProfessionalsQuerySchema,
   updateProfessionalSchema,
 } from "@contatocerto/shared";
 import { z } from "zod";
+import { createInternalKeyGuard } from "../internal/internal-auth.js";
+import { validationError } from "../internal/validation.js";
 import { PostgresProfessionalsRepository } from "./professionals.repository.js";
 import type { ProfessionalsRepository } from "./professionals.types.js";
 
@@ -14,22 +16,6 @@ type ProfessionalsRoutesOptions = {
 };
 
 const professionalIdParamsSchema = z.object({ id: z.string().uuid() });
-
-function validationError(reply: FastifyReply, issues: z.core.$ZodIssue[]) {
-  return reply.code(400).send({
-    error: "validation_error",
-    details: issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
-  });
-}
-
-function unauthorized(reply: FastifyReply) {
-  return reply.code(401).send({ error: "unauthorized" });
-}
-
-function hasInternalKey(request: FastifyRequest, expectedKey: string | undefined) {
-  const providedKey = request.headers["x-internal-key"];
-  return Boolean(expectedKey) && typeof providedKey === "string" && providedKey === expectedKey;
-}
 
 function slugify(value: string) {
   const slug = value
@@ -49,11 +35,7 @@ function isUniqueViolation(error: unknown) {
 export const professionalsRoutes: FastifyPluginAsync<ProfessionalsRoutesOptions> = async (app, options) => {
   const repository = options.repository ?? new PostgresProfessionalsRepository();
   const internalApiKey = options.internalApiKey ?? process.env.INTERNAL_API_KEY;
-  const requireInternalKey = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!hasInternalKey(request, internalApiKey)) {
-      return unauthorized(reply);
-    }
-  };
+  const requireInternalKey = createInternalKeyGuard(internalApiKey);
 
   app.post("/", { preHandler: requireInternalKey }, async (request, reply) => {
     const parsed = createProfessionalSchema.safeParse(request.body);

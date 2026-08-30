@@ -7,6 +7,14 @@ export {
   professionalStatusSchema,
   updateProfessionalSchema,
 } from "./schemas/professional.js";
+export {
+  createProfessionalServiceSchema,
+  listCatalogServicesQuerySchema,
+  priceModeSchema,
+  professionalServiceResponseSchema,
+  serviceCatalogItemSchema,
+  updateProfessionalServiceSchema,
+} from "./schemas/professional-service.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -15,3 +23,11 @@ export type {
   ProfessionalStatus,
   UpdateProfessionalInput,
 } from "./types/professional.js";
+export type {
+  CreateProfessionalServiceInput,
+  ListCatalogServicesQuery,
+  PriceMode,
+  ProfessionalServiceResponse,
+  ServiceCatalogItem,
+  UpdateProfessionalServiceInput,
+} from "./types/professional-service.js";
