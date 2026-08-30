@@ -10,5 +10,6 @@ Defina no ambiente do web:
 - `INTERNAL_API_KEY`: a mesma chave configurada na API;
 - `DASHBOARD_PROFESSIONAL_ID`: UUID do profissional de demonstração;
 - `DASHBOARD_DEMO_PASSWORD`: senha temporária de acesso ao painel.
+- `DASHBOARD_SESSION_SECRET`: segredo longo e aleatório usado para assinar a sessão temporária.
 
-Em desenvolvimento local, use `http://localhost:3333` para a URL da API. A senha gera apenas um cookie HttpOnly de demonstração; não é o sistema de autenticação definitivo.
+Em desenvolvimento local, use `http://localhost:3333` para a URL da API. Após a senha correta, o servidor grava um cookie HttpOnly com um token HMAC SHA-256, contendo somente a expiração. A assinatura é verificada em cada acesso ao painel e BFF; tokens adulterados ou expirados não autenticam. O cookie usa `path=/` para acompanhar tanto `/dashboard` quanto `/api/dashboard`, `Secure` em produção e `SameSite=Lax`. Isso continua sendo acesso temporário, não o sistema de autenticação definitivo.

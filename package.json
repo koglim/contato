@@ -9,7 +9,7 @@
     "dev:api": "pnpm --filter @contatocerto/shared build && pnpm --filter @contatocerto/api dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint",
-    "test": "pnpm --filter @contatocerto/shared build && pnpm --filter @contatocerto/api test",
+    "test": "pnpm --filter @contatocerto/shared build && pnpm --filter @contatocerto/api test && pnpm --filter @contatocerto/web test",
     "typecheck": "pnpm -r run typecheck",
     "db:up": "docker compose up -d database",
     "db:down": "docker compose down",
