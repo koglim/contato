@@ -231,6 +231,46 @@ Erros específicos:
 - `404 service_not_found` para serviço inexistente.
 - `409 service_inactive` para serviço desativado.
 
+## Resolução determinística de serviço
+
+### `POST /internal/service-resolution/resolve`
+
+Rota interna protegida por `X-Internal-Key` que transforma somente o texto em um serviço do catálogo. Ela precede o matching: não recebe localização, não consulta profissionais e não executa o algoritmo geográfico.
+
+```json
+{ "text": "Preciso de um eletricista em Sinop" }
+```
+
+`text` é obrigatório, não pode ser vazio e aceita até 2.000 caracteres. A normalização remove acentos e pontuação, converte para minúsculas e compacta espaços. A resolução considera exclusivamente serviços ativos, usando nome, slug e aliases do catálogo.
+
+As tentativas ocorrem nesta ordem:
+
+1. `exact`: texto inteiro igual a um nome, slug ou alias normalizado.
+2. `phrase`: termo inteiro dentro do texto, com fronteiras de tokens — nunca substring parcial de outra palavra.
+3. `fuzzy`: somente após as duas anteriores, por `pg_trgm`, comparando termos com pelo menos cinco caracteres e similaridade mínima de `0.72`.
+
+O fuzzy retorna `ambiguous` quando os dois primeiros candidatos diferem em até `0.05` de similaridade. Resultados exact e phrase têm confiança `1`; os fuzzy retornam a similaridade do PostgreSQL. Ausência de confiança suficiente retorna `200` com `status: "unresolved"`, e nunca um palpite arbitrário.
+
+Exemplo resolvido:
+
+```json
+{
+  "status": "resolved",
+  "normalized_text": "preciso de um eletricista em sinop",
+  "match": {
+    "service": { "id": "UUID", "name": "Eletricista", "slug": "eletricista" },
+    "method": "phrase",
+    "matched_term": "eletricista",
+    "confidence": 1
+  },
+  "candidates": []
+}
+```
+
+Se mais de um serviço for igualmente relevante, o retorno é `ambiguous`, sem `match`, e contém até três candidatos. A resposta nunca contém dados de profissionais ou contatos.
+
+O seed inicial agora inclui aliases de alta precisão para eletricista, encanador, ar-condicionado, montador de móveis, diarista, pintor e chaveiro. Eles são inseridos de forma idempotente por `pnpm db:seed`; esse comando continua sendo manual e não é disparado pela API ou por deploy.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.

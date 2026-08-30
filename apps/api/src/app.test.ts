@@ -11,6 +11,8 @@ import type {
   ServiceCatalogItem,
   MatchingSearchInput,
   MatchingSearchResponse,
+  ServiceResolutionInput,
+  ServiceResolutionResponse,
   UpdateProfessionalInput,
 } from "@contatocerto/shared";
 import { buildApp } from "./app.js";
@@ -25,6 +27,7 @@ import type {
 } from "./modules/professional-services/professional-services.types.js";
 import type { ServiceAreasRepository, ServiceAreaUpdateRecord } from "./modules/service-areas/service-areas.types.js";
 import type { MatchingRepository, MatchingSearchOutcome } from "./modules/matching/matching.types.js";
+import type { ServiceResolutionRepository } from "./modules/service-resolution/service-resolution.types.js";
 
 const internalApiKey = "test-internal-key";
 
@@ -886,5 +889,92 @@ test("matching returns service errors and accepts zero results", async () => {
   assert.equal(empty.statusCode, 200);
   assert.deepEqual(empty.json().matches, []);
   assert.equal(empty.json().status, "ready");
+  await app.close();
+});
+
+class FakeServiceResolutionRepository implements ServiceResolutionRepository {
+  lastInput: ServiceResolutionInput | null = null;
+  response: ServiceResolutionResponse = serviceResolutionResponse();
+
+  async resolve(input: ServiceResolutionInput) {
+    this.lastInput = input;
+    return this.response;
+  }
+}
+
+function serviceResolutionResponse(overrides: Partial<ServiceResolutionResponse> = {}): ServiceResolutionResponse {
+  return {
+    status: "resolved",
+    normalized_text: "eletricista",
+    match: {
+      service: { id: randomUUID(), name: "Eletricista", slug: "eletricista" },
+      method: "exact",
+      matched_term: "eletricista",
+      confidence: 1,
+    },
+    candidates: [],
+    ...overrides,
+  };
+}
+
+function buildServiceResolutionApp() {
+  const repository = new FakeServiceResolutionRepository();
+  return { app: buildApp({ serviceResolutionRepository: repository, internalApiKey }), repository };
+}
+
+test("service resolution requires the internal key and validates a non-empty text", async () => {
+  const { app } = buildServiceResolutionApp();
+  const denied = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", payload: { text: "eletricista" } });
+  const emptyBody = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", headers: internalHeaders(), payload: {} });
+  const emptyText = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", headers: internalHeaders(), payload: { text: "   " } });
+  assert.equal(denied.statusCode, 401);
+  assert.equal(emptyBody.statusCode, 400);
+  assert.equal(emptyText.statusCode, 400);
+  await app.close();
+});
+
+test("service resolution returns deterministic exact, phrase and alias results without professional data", async () => {
+  const { app, repository } = buildServiceResolutionApp();
+  const exact = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", headers: internalHeaders(), payload: { text: "eletricista" } });
+  repository.response = serviceResolutionResponse({
+    normalized_text: "preciso de um eletricista em sinop",
+    match: { service: { id: randomUUID(), name: "Eletricista", slug: "eletricista" }, method: "phrase", matched_term: "eletricista", confidence: 1 },
+  });
+  const phrase = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", headers: internalHeaders(), payload: { text: "Preciso de um eletricista em Sinop" } });
+  repository.response = serviceResolutionResponse({
+    normalized_text: "quero uma diarista amanha",
+    match: { service: { id: randomUUID(), name: "Diarista", slug: "diarista" }, method: "phrase", matched_term: "diarista", confidence: 1 },
+  });
+  const diarista = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", headers: internalHeaders(), payload: { text: "quero uma diarista amanhã" } });
+  repository.response = serviceResolutionResponse({
+    normalized_text: "tomada queimou",
+    match: { service: { id: randomUUID(), name: "Eletricista", slug: "eletricista" }, method: "phrase", matched_term: "tomada", confidence: 1 },
+  });
+  const alias = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", headers: internalHeaders(), payload: { text: "tomada queimou" } });
+  assert.equal(exact.json().match.method, "exact");
+  assert.equal(phrase.json().match.method, "phrase");
+  assert.equal(diarista.json().match.service.name, "Diarista");
+  assert.equal(alias.json().match.matched_term, "tomada");
+  assert.equal(alias.json().match.professional, undefined);
+  await app.close();
+});
+
+test("service resolution accepts unresolved and ambiguous outcomes as HTTP 200", async () => {
+  const { app, repository } = buildServiceResolutionApp();
+  repository.response = serviceResolutionResponse({ status: "unresolved", normalized_text: "algo desconhecido", match: null, candidates: [] });
+  const unresolved = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", headers: internalHeaders(), payload: { text: "algo desconhecido" } });
+  repository.response = serviceResolutionResponse({
+    status: "ambiguous", normalized_text: "manutencao residencial", match: null,
+    candidates: [
+      { service: { id: randomUUID(), name: "Eletricista", slug: "eletricista" }, method: "fuzzy", matched_term: "eletricista", confidence: 0.78 },
+      { service: { id: randomUUID(), name: "Encanador", slug: "encanador" }, method: "fuzzy", matched_term: "encanador", confidence: 0.75 },
+    ],
+  });
+  const ambiguous = await app.inject({ method: "POST", url: "/internal/service-resolution/resolve", headers: internalHeaders(), payload: { text: "manutenção residencial" } });
+  assert.equal(unresolved.statusCode, 200);
+  assert.equal(unresolved.json().status, "unresolved");
+  assert.equal(ambiguous.statusCode, 200);
+  assert.equal(ambiguous.json().status, "ambiguous");
+  assert.equal(ambiguous.json().candidates.length, 2);
   await app.close();
 });

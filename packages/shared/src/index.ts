@@ -25,6 +25,7 @@ export {
   updateProfessionalAvailabilitySchema,
 } from "./schemas/professional-availability.js";
 export { matchingSearchRequestSchema, matchingSearchResponseSchema } from "./schemas/matching.js";
+export { serviceResolutionRequestSchema, serviceResolutionResponseSchema } from "./schemas/service-resolution.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -51,3 +52,4 @@ export type {
   UpdateProfessionalAvailabilityInput,
 } from "./types/professional-availability.js";
 export type { MatchingSearchInput, MatchingSearchResponse } from "./types/matching.js";
+export type { ServiceResolutionInput, ServiceResolutionResponse } from "./types/service-resolution.js";

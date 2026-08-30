@@ -11,6 +11,8 @@ import { serviceAreasRoutes } from "./modules/service-areas/service-areas.routes
 import type { ServiceAreasRepository } from "./modules/service-areas/service-areas.types.js";
 import { matchingRoutes } from "./modules/matching/matching.routes.js";
 import type { MatchingRepository } from "./modules/matching/matching.types.js";
+import { serviceResolutionRoutes } from "./modules/service-resolution/service-resolution.routes.js";
+import type { ServiceResolutionRepository } from "./modules/service-resolution/service-resolution.types.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -19,6 +21,7 @@ type AppDependencies = {
   professionalServicesRepository?: ProfessionalServicesRepository;
   serviceAreasRepository?: ServiceAreasRepository;
   matchingRepository?: MatchingRepository;
+  serviceResolutionRepository?: ServiceResolutionRepository;
   internalApiKey?: string;
 };
 
@@ -30,6 +33,7 @@ export function buildApp({
   professionalServicesRepository,
   serviceAreasRepository,
   matchingRepository,
+  serviceResolutionRepository,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
 
@@ -70,6 +74,7 @@ export function buildApp({
   });
 
   app.register(matchingRoutes, { prefix: "/internal/matching", repository: matchingRepository, internalApiKey });
+  app.register(serviceResolutionRoutes, { prefix: "/internal/service-resolution", repository: serviceResolutionRepository, internalApiKey });
 
   return app;
 }

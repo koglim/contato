@@ -44,3 +44,13 @@ O helper em `apps/api/src/modules/internal` centraliza a proteção temporária 
 A busca usa `ST_DWithin` para respeitar o raio de cada área e `ST_Distance` para calcular a distância em metros. Uma janela SQL escolhe somente a área elegível mais próxima de cada profissional; depois aplica a ordenação estável por disponibilidade efetiva, distância, verificação e UUID. A disponibilidade é efetiva somente durante 240 minutos após a confirmação, mas não exclui profissionais.
 
 O repositório executa validação do catálogo, criação de `search_requests`, criação de `matches` e atualização de status no mesmo `withTransaction`. O snapshot de explicação persistido em cada match contém apenas disponibilidade efetiva, distância em metros e verificação. Não há score proprietário, ranking por reputação, IA, geocoding ou exposição de dados de contato nessa etapa.
+
+## Service Resolution determinístico
+
+`apps/api/src/modules/service-resolution` é a etapa anterior ao matching. Recebe texto e devolve um `service_id` somente quando há uma resolução determinística confiável. O pipeline futuro é:
+
+`Text → Service Resolution → Location Resolution → Matching Engine`.
+
+O módulo normaliza texto de forma pura (minúsculas, NFD sem diacríticos, pontuação como separador e espaços compactados) e consulta apenas serviços ativos. A consulta SQL parametrizada considera nome, slug e `service_aliases.normalized_alias`, aplicando exact antes de phrase com fronteiras de tokens. Somente se ambos falharem, usa `pg_trgm` com termos de no mínimo cinco caracteres, threshold `0.72` e margem de ambiguidade `0.05`.
+
+Aliases iniciais ficam no seed idempotente do catálogo. O script repete a mesma normalização conceitual da API, mas não compartilha runtime entre TypeScript da aplicação e o seed CommonJS. A execução de `pnpm db:seed` continua uma operação administrativa manual. Um fallback inteligente futuro poderá atuar sobre respostas `unresolved` ou `ambiguous`; não há IA, geocoding, WhatsApp ou matching nesse módulo.
