@@ -1,0 +1,5 @@
+export function formatCurrency(cents: number) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100); }
+export function formatPrice(mode: string, from: number | null, to: number | null) { if (mode === "quote") return "Sob consulta"; if (mode === "range") return `${formatCurrency(from ?? 0)} – ${formatCurrency(to ?? 0)}`; return mode === "from" ? `A partir de ${formatCurrency(from ?? 0)}` : formatCurrency(from ?? 0); }
+export function formatKilometers(meters: number) { return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(meters / 1000)} km`; }
+export function statusLabel(status: string) { return ({ draft: "Cadastro em preparação", active: "Cadastro ativo", suspended: "Cadastro suspenso" } as Record<string, string>)[status] ?? status; }
+export function formatDate(value: string | null) { if (!value) return "Ainda não confirmado"; return new Intl.DateTimeFormat("pt-BR", { dateStyle: "long", timeStyle: "short" }).format(new Date(value)); }
