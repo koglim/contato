@@ -7,12 +7,15 @@ import { catalogRoutes } from "./modules/catalog/catalog.routes.js";
 import type { CatalogRepository } from "./modules/catalog/catalog.types.js";
 import { professionalServicesRoutes } from "./modules/professional-services/professional-services.routes.js";
 import type { ProfessionalServicesRepository } from "./modules/professional-services/professional-services.types.js";
+import { serviceAreasRoutes } from "./modules/service-areas/service-areas.routes.js";
+import type { ServiceAreasRepository } from "./modules/service-areas/service-areas.types.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
   professionalsRepository?: ProfessionalsRepository;
   catalogRepository?: CatalogRepository;
   professionalServicesRepository?: ProfessionalServicesRepository;
+  serviceAreasRepository?: ServiceAreasRepository;
   internalApiKey?: string;
 };
 
@@ -22,6 +25,7 @@ export function buildApp({
   internalApiKey,
   catalogRepository,
   professionalServicesRepository,
+  serviceAreasRepository,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
 
@@ -52,6 +56,12 @@ export function buildApp({
   app.register(professionalServicesRoutes, {
     prefix: "/internal/professionals",
     repository: professionalServicesRepository,
+    internalApiKey,
+  });
+
+  app.register(serviceAreasRoutes, {
+    prefix: "/internal/professionals",
+    repository: serviceAreasRepository,
     internalApiKey,
   });
 

@@ -15,6 +15,11 @@ export {
   serviceCatalogItemSchema,
   updateProfessionalServiceSchema,
 } from "./schemas/professional-service.js";
+export {
+  createServiceAreaSchema,
+  serviceAreaResponseSchema,
+  updateServiceAreaSchema,
+} from "./schemas/service-area.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -31,3 +36,8 @@ export type {
   ServiceCatalogItem,
   UpdateProfessionalServiceInput,
 } from "./types/professional-service.js";
+export type {
+  CreateServiceAreaInput,
+  ServiceAreaResponse,
+  UpdateServiceAreaInput,
+} from "./types/service-area.js";

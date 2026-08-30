@@ -1,6 +1,7 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
-type SqlValue = string | number | boolean | Date | null;
+export type SqlValue = string | number | boolean | Date | null;
+export type DatabaseClient = Pick<PoolClient, "query">;
 
 let pool: Pool | undefined;
 
@@ -24,6 +25,22 @@ export async function checkDatabaseConnection() {
 
 export async function query<T extends QueryResultRow>(text: string, values: SqlValue[] = []) {
   return getPool().query<T>(text, values);
+}
+
+export async function withTransaction<T>(callback: (client: DatabaseClient) => Promise<T>) {
+  const client = await getPool().connect();
+
+  try {
+    await client.query("BEGIN");
+    const result = await callback(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function closeDatabaseConnection() {

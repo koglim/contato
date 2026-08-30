@@ -6,6 +6,7 @@ import type {
   ListProfessionalsQuery,
   ProfessionalResponse,
   ProfessionalServiceResponse,
+  ServiceAreaResponse,
   ServiceCatalogItem,
   UpdateProfessionalInput,
 } from "@contatocerto/shared";
@@ -19,6 +20,7 @@ import type {
   ProfessionalServicesRepository,
   ProfessionalServiceUpdateRecord,
 } from "./modules/professional-services/professional-services.types.js";
+import type { ServiceAreasRepository, ServiceAreaUpdateRecord } from "./modules/service-areas/service-areas.types.js";
 
 const internalApiKey = "test-internal-key";
 
@@ -559,5 +561,156 @@ test("new internal routes reject requests when no internal key is configured", a
   const serviceResponse = await app.inject({ method: "GET", url: serviceUrl() });
   assert.equal(catalogResponse.statusCode, 401);
   assert.equal(serviceResponse.statusCode, 401);
+  await app.close();
+});
+
+class FakeServiceAreasRepository implements ServiceAreasRepository {
+  private readonly professionalIds = new Set([professionalId, anotherProfessionalId]);
+  private readonly areas = new Map<string, ServiceAreaResponse>();
+
+  async professionalExists(id: string) {
+    return this.professionalIds.has(id);
+  }
+
+  async listByProfessional(id: string) {
+    return [...this.areas.values()]
+      .filter((area) => area.professional_id === id)
+      .sort((left, right) => Number(right.is_primary) - Number(left.is_primary) || left.created_at.localeCompare(right.created_at));
+  }
+
+  async findById(id: string, areaId: string) {
+    const area = this.areas.get(areaId);
+    return area?.professional_id === id ? area : null;
+  }
+
+  async create(id: string, input: { label?: string; city: string; state: string; country_code: string; neighborhood?: string | null; latitude: number; longitude: number; radius_meters: number; is_primary: boolean }) {
+    if (input.is_primary) this.clearPrimary(id);
+    const now = new Date().toISOString();
+    const area: ServiceAreaResponse = { id: randomUUID(), professional_id: id, label: input.label ?? null, city: input.city, state: input.state, country_code: input.country_code, neighborhood: input.neighborhood ?? null, latitude: input.latitude, longitude: input.longitude, radius_meters: input.radius_meters, is_primary: input.is_primary, created_at: now, updated_at: now };
+    this.areas.set(area.id, area);
+    return area;
+  }
+
+  async update(id: string, areaId: string, input: ServiceAreaUpdateRecord) {
+    const current = await this.findById(id, areaId);
+    if (!current) return null;
+    if (input.is_primary) this.clearPrimary(id);
+    const updated = { ...current, ...input, updated_at: new Date().toISOString() };
+    this.areas.set(areaId, updated);
+    return updated;
+  }
+
+  async delete(id: string, areaId: string) {
+    if (!(await this.findById(id, areaId))) return false;
+    this.areas.delete(areaId);
+    return true;
+  }
+
+  private clearPrimary(id: string) {
+    for (const [areaId, area] of this.areas) {
+      if (area.professional_id === id && area.is_primary) this.areas.set(areaId, { ...area, is_primary: false });
+    }
+  }
+}
+
+function buildAreasApp() {
+  const repository = new FakeServiceAreasRepository();
+  return { app: buildApp({ serviceAreasRepository: repository, internalApiKey }), repository };
+}
+
+function areasUrl(id = professionalId) {
+  return `/internal/professionals/${id}/service-areas`;
+}
+
+const areaPayload = { label: "Sinop e região", city: "Sinop", state: "MT", country_code: "br", neighborhood: null, latitude: -11.8608, longitude: -55.5091, radius_meters: 30_000, is_primary: true };
+
+test("service areas require a key, identify missing professionals and list empty areas", async () => {
+  const { app } = buildAreasApp();
+  const denied = await app.inject({ method: "GET", url: areasUrl() });
+  const absent = await app.inject({ method: "GET", url: areasUrl(randomUUID()), headers: internalHeaders() });
+  const empty = await app.inject({ method: "GET", url: areasUrl(), headers: internalHeaders() });
+  assert.equal(denied.statusCode, 401);
+  assert.deepEqual(absent.json(), { error: "professional_not_found" });
+  assert.deepEqual(empty.json(), { items: [] });
+  await app.close();
+});
+
+test("service areas creates validated coordinates, normalizes country and orders primary first", async () => {
+  const { app } = buildAreasApp();
+  const first = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload: areaPayload });
+  const second = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload: { ...areaPayload, label: "Bairro", latitude: -11.8, is_primary: false } });
+  const listed = await app.inject({ method: "GET", url: areasUrl(), headers: internalHeaders() });
+  assert.equal(first.statusCode, 201);
+  assert.equal(first.json().country_code, "BR");
+  assert.equal(first.json().latitude, -11.8608);
+  assert.equal(first.json().longitude, -55.5091);
+  assert.equal(second.statusCode, 201);
+  assert.equal(listed.json().items[0].id, first.json().id);
+  await app.close();
+});
+
+test("service areas rejects invalid coordinate and radius ranges", async () => {
+  const { app } = buildAreasApp();
+  for (const payload of [
+    { ...areaPayload, latitude: -91 }, { ...areaPayload, latitude: 91 }, { ...areaPayload, longitude: -181 },
+    { ...areaPayload, longitude: 181 }, { ...areaPayload, radius_meters: 0 }, { ...areaPayload, radius_meters: 200_001 },
+  ]) {
+    const response = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload });
+    assert.equal(response.statusCode, 400);
+  }
+  await app.close();
+});
+
+test("creating a new primary service area demotes the previous primary", async () => {
+  const { app } = buildAreasApp();
+  const first = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload: areaPayload });
+  const second = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload: { ...areaPayload, label: "Nova primária", is_primary: true } });
+  const listed = await app.inject({ method: "GET", url: areasUrl(), headers: internalHeaders() });
+  assert.equal(second.json().is_primary, true);
+  assert.equal(listed.json().items.find((item: { id: string }) => item.id === first.json().id).is_primary, false);
+  await app.close();
+});
+
+test("service area patch updates texts, radius and coordinates from final state", async () => {
+  const { app } = buildAreasApp();
+  const created = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload: areaPayload });
+  const url = `${areasUrl()}/${created.json().id}`;
+  const label = await app.inject({ method: "PATCH", url, headers: internalHeaders(), payload: { label: "Sinop centro", radius_meters: 10_000 } });
+  const latitude = await app.inject({ method: "PATCH", url, headers: internalHeaders(), payload: { latitude: -12 } });
+  const longitude = await app.inject({ method: "PATCH", url, headers: internalHeaders(), payload: { longitude: -56 } });
+  const both = await app.inject({ method: "PATCH", url, headers: internalHeaders(), payload: { latitude: -10, longitude: -54 } });
+  assert.equal(label.json().radius_meters, 10_000);
+  assert.equal(latitude.json().longitude, -55.5091);
+  assert.equal(longitude.json().latitude, -12);
+  assert.deepEqual([both.json().latitude, both.json().longitude], [-10, -54]);
+  await app.close();
+});
+
+test("service area patch manages primary state, validates body and protects ownership", async () => {
+  const { app } = buildAreasApp();
+  const first = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload: areaPayload });
+  const second = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload: { ...areaPayload, label: "Outra", is_primary: false } });
+  const makePrimary = await app.inject({ method: "PATCH", url: `${areasUrl()}/${second.json().id}`, headers: internalHeaders(), payload: { is_primary: true } });
+  const demote = await app.inject({ method: "PATCH", url: `${areasUrl()}/${second.json().id}`, headers: internalHeaders(), payload: { is_primary: false } });
+  const empty = await app.inject({ method: "PATCH", url: `${areasUrl()}/${second.json().id}`, headers: internalHeaders(), payload: {} });
+  const missing = await app.inject({ method: "PATCH", url: `${areasUrl()}/${randomUUID()}`, headers: internalHeaders(), payload: { label: "x" } });
+  const other = await app.inject({ method: "PATCH", url: `${areasUrl(anotherProfessionalId)}/${first.json().id}`, headers: internalHeaders(), payload: { label: "x" } });
+  assert.equal(makePrimary.json().is_primary, true);
+  assert.equal(demote.json().is_primary, false);
+  assert.equal(empty.statusCode, 400);
+  assert.deepEqual(missing.json(), { error: "service_area_not_found" });
+  assert.deepEqual(other.json(), { error: "service_area_not_found" });
+  await app.close();
+});
+
+test("service area delete returns 204 and rejects missing or foreign areas", async () => {
+  const { app } = buildAreasApp();
+  const created = await app.inject({ method: "POST", url: areasUrl(), headers: internalHeaders(), payload: areaPayload });
+  const foreign = await app.inject({ method: "DELETE", url: `${areasUrl(anotherProfessionalId)}/${created.json().id}`, headers: internalHeaders() });
+  const deleted = await app.inject({ method: "DELETE", url: `${areasUrl()}/${created.json().id}`, headers: internalHeaders() });
+  const missing = await app.inject({ method: "DELETE", url: `${areasUrl()}/${created.json().id}`, headers: internalHeaders() });
+  assert.deepEqual(foreign.json(), { error: "service_area_not_found" });
+  assert.equal(deleted.statusCode, 204);
+  assert.deepEqual(missing.json(), { error: "service_area_not_found" });
   await app.close();
 });

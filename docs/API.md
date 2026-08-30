@@ -141,12 +141,49 @@ Permite atualizar apenas `description`, `price_mode`, `price_from_cents`, `price
 
 Use `{ "is_active": false }` para desativar sem apagar histórico. Uma reativação só é permitida se o serviço correspondente no catálogo continuar ativo.
 
+## Áreas de atendimento
+
+As áreas de atendimento usam PostGIS e coordenadas já conhecidas; geocoding será uma etapa futura. O banco armazena o centro como `GEOGRAPHY(Point, 4326)` e o raio sempre em metros.
+
+### `GET /internal/professionals/:professionalId/service-areas`
+
+Lista as áreas do profissional, com a primária primeiro e as demais por ordem de criação. Retorna `404 professional_not_found` se o profissional não existir.
+
+### `POST /internal/professionals/:professionalId/service-areas`
+
+Cria uma área. São obrigatórios `city`, `state`, `country_code`, `latitude`, `longitude` e `radius_meters`; `label`, `neighborhood` e `is_primary` são opcionais. `country_code` é normalizado para letras maiúsculas e `is_primary` inicia como `false` quando ausente.
+
+```json
+{
+  "label": "Sinop e região",
+  "city": "Sinop",
+  "state": "MT",
+  "country_code": "BR",
+  "neighborhood": null,
+  "latitude": -11.8608,
+  "longitude": -55.5091,
+  "radius_meters": 30000,
+  "is_primary": true
+}
+```
+
+Latitude deve estar entre `-90` e `90`; longitude entre `-180` e `180`. O raio deve ser um inteiro entre `1` e `200000` (200 km). Ao criar uma área primária, a API desmarca qualquer primária anterior em uma única transação.
+
+### `PATCH /internal/professionals/:professionalId/service-areas/:areaId`
+
+Atualização parcial de `label`, `city`, `state`, `country_code`, `neighborhood`, `latitude`, `longitude`, `radius_meters` e `is_primary`. Se apenas uma coordenada for enviada, a outra é preservada. `is_primary: true` transfere a primariedade; `false` pode deixar o profissional sem área primária. Área ausente ou pertencente a outro profissional retorna `404 service_area_not_found`.
+
+### `DELETE /internal/professionals/:professionalId/service-areas/:areaId`
+
+Remove fisicamente uma área operacional e retorna `204`. Não promove outra área automaticamente. Área inexistente ou de outro profissional retorna `404 service_area_not_found`.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.
 - `401`: `unauthorized`.
 - `404`: `professional_not_found`.
 - `404`: `service_not_found` ou `professional_service_not_found`.
+- `404`: `service_area_not_found`.
 - `409`: `professional_slug_conflict` se não for possível reservar um slug único.
 - `409`: `professional_service_already_exists` ou `service_inactive`.
 - `500`: `internal_error`, sem expor SQL, stack trace ou segredos.
