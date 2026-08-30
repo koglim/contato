@@ -13,3 +13,17 @@ Defina no ambiente do web:
 - `DASHBOARD_SESSION_SECRET`: segredo longo e aleatório usado para assinar a sessão temporária.
 
 Em desenvolvimento local, use `http://localhost:3333` para a URL da API. Após a senha correta, o servidor grava um cookie HttpOnly com um token HMAC SHA-256, contendo somente a expiração. A assinatura é verificada em cada acesso ao painel e BFF; tokens adulterados ou expirados não autenticam. O cookie usa `path=/` para acompanhar tanto `/dashboard` quanto `/api/dashboard`, `Secure` em produção e `SameSite=Lax`. Isso continua sendo acesso temporário, não o sistema de autenticação definitivo.
+
+## Deploy no EasyPanel
+
+Use o `Dockerfile.web` com a raiz do monorepo como contexto de build. Ele produz uma imagem standalone do Next.js e inicia somente o frontend.
+
+Configure estas variáveis no serviço web, sem valores em arquivos versionados:
+
+- `CONTATOCERTO_API_URL`;
+- `INTERNAL_API_KEY`;
+- `DASHBOARD_PROFESSIONAL_ID`;
+- `DASHBOARD_DEMO_PASSWORD`;
+- `DASHBOARD_SESSION_SECRET`.
+
+O EasyPanel fornece `PORT` quando necessário; a imagem usa `3000` como fallback e escuta em `0.0.0.0`. A URL da API deve ser informada pela rede interna do ambiente, nunca codificada na imagem.
