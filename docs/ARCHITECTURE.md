@@ -81,28 +81,38 @@ O orquestrador recebe por injeção `ServiceResolutionRepository`, `LocationReso
 
 O módulo mantém `service_text` igual à mensagem completa e extrai somente localizações textuais explícitas por regras pequenas e conservadoras. Ele é puro, stateless, não possui repository e não chama banco, geocoder, Search Orchestrator ou qualquer API externa. A existência e canonicalização da localidade continuam sob responsabilidade do Location Resolution.
 
-A evolução prevista é `Deterministic Fast Path → se insuficiente, futuro LLM Fallback → slots estruturados`. O fallback não está implementado nesta etapa; nenhuma IA participa do endpoint atual e as decisões de serviço, localização e ranking permanecem nos módulos determinísticos existentes.
+O endpoint próprio deste módulo continua totalmente determinístico. O fallback LLM não foi incorporado ao interpreter: ele existe apenas na camada Message Search, depois que este fast path retorna `needs_location`. As decisões de serviço, geocoding e ranking permanecem nos módulos determinísticos existentes.
 
 ## Message Search Pipeline
 
 `apps/api/src/modules/message-search` é uma camada de aplicação stateless acima do Message Interpreter e do Search Orchestrator. Ela não possui repository, não persiste dados diretamente e não chama endpoints internos por HTTP.
 
 ```text
-                   raw message
-                       ↓
-             Message Interpreter
-                       ↓
-               structured slots
-                       ↓
-              Search Orchestrator
-             /         |         \
-          Service   Location   Matching
-                       ↓
-                    result
+                       raw message
+                           ↓
+            Deterministic Message Interpreter
+                    /                 \
+          interpreted               needs_location
+              |                           ↓
+              |                 LLM Location Fallback
+              |                     /           \
+              |                 resolved      unresolved/error
+              |                     |               ↓
+              +---------------------+         needs_location
+                           ↓
+                  Search Orchestrator
+                 /         |         \
+              Service   Location   Matching
+                           ↓
+                        result
 ```
 
-O `buildApp` cria o `DeterministicMessageSearchService` com as mesmas instâncias já resolvidas de `MessageInterpretationService` e `SearchOrchestrationService`. Por request, o interpreter é chamado uma vez; se retornar `needs_location`, o pipeline encerra antes do orquestrador. Quando retorna `interpreted`, os slots são encaminhados sem alteração e o orquestrador é chamado uma vez.
+O `buildApp` cria o `HybridMessageSearchService` com as mesmas instâncias já resolvidas de `MessageInterpretationService` e `SearchOrchestrationService`, mais uma abstração injetável `MessageLocationFallbackProvider`. A implementação inicial usa o SDK oficial OpenAI com Responses API e Structured Outputs. O provider é construído sob demanda; ausência de `OPENAI_API_KEY` não impede o servidor nem os health checks de iniciar.
+
+Por request, o interpreter é chamado uma vez. Quando retorna `interpreted`, o provider não é chamado e os slots seguem diretamente ao orquestrador. Quando retorna `needs_location`, o kill switch decide entre preservar o short-circuit da 3.5B ou consultar o fallback. Uma extração válida cria apenas o slot textual com proveniência `llm_fallback`; `service_text` continua sendo a mensagem completa e o Location Resolution continua responsável pelo geocoding real.
 
 O contrato expõe o estágio responsável pelo resultado. `interpretation` indica ausência de localização explícita; `service_resolution` e `location_resolution` preservam as decisões do 3.4; `matching` representa tanto profissionais encontrados quanto uma busca válida sem resultados. Somente o Matching Engine continua responsável por criar `search_requests` e `matches`.
 
-O futuro fallback LLM ficará entre `raw message` e `structured slots`. Ele poderá complementar o fast path quando a interpretação determinística for insuficiente, sem modificar Service Resolution, Location Resolution, Matching ou Search Orchestrator. Nenhum LLM está implementado nesta etapa.
+`MESSAGE_INTERPRETATION_FALLBACK_ENABLED=false` é o padrão e impede qualquer consumo da OpenAI. Quando ligado, timeout/rede, rate limit e falhas do provider são convertidos em razões públicas controladas de `needs_location`, sempre antes do Search Orchestrator. O log de erro contém apenas provider, modelo, categoria e latência — nunca chave, prompt completo ou resposta bruta. O provider usa `store: false`, `reasoning.effort: none`, no máximo 100 tokens de saída, timeout configurável e `maxRetries: 0`; nenhuma tool ou estado de conversa é habilitado.
+
+Esse fallback não altera Service Resolution, Location Resolution, Matching ou Search Orchestrator. Ele não reconhece serviço, não faz geocoding, não calcula ranking e não escolhe profissional. Testes usam providers e clientes falsos, sem rede e sem chamadas reais à OpenAI.

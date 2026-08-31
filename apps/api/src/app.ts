@@ -27,7 +27,13 @@ import { messageInterpretationRoutes } from "./modules/message-interpretation/me
 import { DeterministicMessageInterpreter } from "./modules/message-interpretation/message-interpretation.service.js";
 import type { MessageInterpretationService } from "./modules/message-interpretation/message-interpretation.types.js";
 import { messageSearchRoutes } from "./modules/message-search/message-search.routes.js";
-import { DeterministicMessageSearchService } from "./modules/message-search/message-search.service.js";
+import { HybridMessageSearchService } from "./modules/message-search/message-search.service.js";
+import {
+  readMessageInterpretationFallbackConfig,
+  type MessageInterpretationFallbackConfig,
+} from "./config/message-interpretation-fallback.js";
+import type { MessageLocationFallbackProvider } from "./modules/message-interpretation-fallback/message-location-fallback.types.js";
+import { OpenAIMessageLocationFallbackProvider } from "./modules/message-interpretation-fallback/openai-message-location-fallback.provider.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -41,6 +47,8 @@ type AppDependencies = {
   locationResolutionService?: LocationResolutionService;
   searchOrchestrationService?: SearchOrchestrationService;
   messageInterpretationService?: MessageInterpretationService;
+  messageLocationFallbackProvider?: MessageLocationFallbackProvider;
+  messageInterpretationFallbackConfig?: MessageInterpretationFallbackConfig;
   internalApiKey?: string;
 };
 
@@ -53,6 +61,19 @@ function createLazyLocationResolutionService(provider?: GeocodingProvider): Loca
         readLocationResolutionConfig(),
       );
       return service.resolve(input);
+    },
+  };
+}
+
+function createLazyMessageLocationFallbackProvider(
+  config: MessageInterpretationFallbackConfig,
+): MessageLocationFallbackProvider {
+  let provider: MessageLocationFallbackProvider | undefined;
+  return {
+    name: "openai",
+    resolve(input) {
+      provider ??= new OpenAIMessageLocationFallbackProvider(config);
+      return provider.resolve(input);
     },
   };
 }
@@ -70,8 +91,12 @@ export function buildApp({
   locationResolutionService,
   searchOrchestrationService,
   messageInterpretationService,
+  messageLocationFallbackProvider,
+  messageInterpretationFallbackConfig,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
+  const resolvedMessageInterpretationFallbackConfig =
+    messageInterpretationFallbackConfig ?? readMessageInterpretationFallbackConfig();
   const resolvedServiceResolutionRepository = serviceResolutionRepository ?? new PostgresServiceResolutionRepository();
   const resolvedMatchingRepository = matchingRepository ?? new PostgresMatchingRepository();
   const resolvedLocationResolutionService = locationResolutionService ?? createLazyLocationResolutionService(geocodingProvider);
@@ -81,9 +106,22 @@ export function buildApp({
     resolvedMatchingRepository,
   );
   const resolvedMessageInterpretationService = messageInterpretationService ?? new DeterministicMessageInterpreter();
-  const resolvedMessageSearchService = new DeterministicMessageSearchService(
+  const resolvedMessageLocationFallbackProvider = messageLocationFallbackProvider
+    ?? createLazyMessageLocationFallbackProvider(resolvedMessageInterpretationFallbackConfig);
+  const resolvedMessageSearchService = new HybridMessageSearchService(
     resolvedMessageInterpretationService,
     resolvedSearchOrchestrationService,
+    resolvedMessageLocationFallbackProvider,
+    {
+      enabled: resolvedMessageInterpretationFallbackConfig.enabled,
+      onError: ({ kind, durationMs }) => app.log.warn({
+        provider: resolvedMessageLocationFallbackProvider.name,
+        model: resolvedMessageInterpretationFallbackConfig.model,
+        fallback_status: "error",
+        error_kind: kind,
+        duration_ms: durationMs,
+      }, "Message location fallback failed"),
+    },
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));

@@ -18,17 +18,29 @@ export const messageSearchRequestSchema = messageInterpretationRequestSchema.ext
 const interpretationNeedsLocationSchema = z.object({
   status: z.literal("needs_location"),
   stage: z.literal("interpretation"),
-  reason: z.literal("missing_explicit_location"),
+  reason: z.enum([
+    "missing_explicit_location",
+    "location_not_understood",
+    "fallback_unavailable",
+    "fallback_rate_limited",
+    "fallback_provider_error",
+  ]),
   interpretation: messageNeedsLocationResponseSchema,
   orchestration: z.null(),
 }).strict();
+
+const hybridMessageInterpretedResponseSchema = messageInterpretedResponseSchema.extend({
+  interpretation: messageInterpretedResponseSchema.shape.interpretation.extend({
+    location_strategy: z.enum(["locative_phrase", "llm_fallback"]),
+  }),
+});
 
 function needsServiceSchema(reason: "unresolved" | "ambiguous") {
   return z.object({
     status: z.literal("needs_service"),
     stage: z.literal("service_resolution"),
     reason: z.literal(reason),
-    interpretation: messageInterpretedResponseSchema,
+    interpretation: hybridMessageInterpretedResponseSchema,
     orchestration: searchOrchestrationNeedsServiceResponseSchema.extend({ reason: z.literal(reason) }),
   }).strict();
 }
@@ -38,7 +50,7 @@ function needsLocationSchema(reason: "unresolved" | "ambiguous") {
     status: z.literal("needs_location"),
     stage: z.literal("location_resolution"),
     reason: z.literal(reason),
-    interpretation: messageInterpretedResponseSchema,
+    interpretation: hybridMessageInterpretedResponseSchema,
     orchestration: searchOrchestrationNeedsLocationResponseSchema.extend({ reason: z.literal(reason) }),
   }).strict();
 }
@@ -47,7 +59,7 @@ const matchedSchema = z.object({
   status: z.literal("matched"),
   stage: z.literal("matching"),
   reason: z.null(),
-  interpretation: messageInterpretedResponseSchema,
+  interpretation: hybridMessageInterpretedResponseSchema,
   orchestration: searchOrchestrationMatchedResponseSchema,
 }).strict();
 
@@ -55,7 +67,7 @@ const noMatchesSchema = z.object({
   status: z.literal("no_matches"),
   stage: z.literal("matching"),
   reason: z.null(),
-  interpretation: messageInterpretedResponseSchema,
+  interpretation: hybridMessageInterpretedResponseSchema,
   orchestration: searchOrchestrationNoMatchesResponseSchema,
 }).strict();
 

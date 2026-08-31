@@ -8,6 +8,11 @@ import type {
 import { buildApp } from "../../app.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
 import type { MessageInterpretationService } from "../message-interpretation/message-interpretation.types.js";
+import type {
+  MessageLocationFallbackInput,
+  MessageLocationFallbackProvider,
+  MessageLocationFallbackResult,
+} from "../message-interpretation-fallback/message-location-fallback.types.js";
 import type { SearchOrchestrationOutcome, SearchOrchestrationService } from "../search-orchestration/search-orchestration.types.js";
 
 const internalApiKey = "test-internal-key";
@@ -48,6 +53,17 @@ class FakeSearchOrchestrationService implements SearchOrchestrationService {
     this.received = input;
     if (this.error) throw this.error;
     return this.outcome;
+  }
+}
+
+class FakeMessageLocationFallbackProvider implements MessageLocationFallbackProvider {
+  readonly name = "fake-location-fallback";
+  calls = 0;
+  response: MessageLocationFallbackResult = { status: "resolved", location_text: "sinop" };
+
+  async resolve(_input: MessageLocationFallbackInput) {
+    this.calls += 1;
+    return this.response;
   }
 }
 
@@ -135,6 +151,78 @@ test("message search route returns the interpretation short circuit without orch
   });
   assert.equal(interpreter.calls, 1);
   assert.equal(orchestrator.calls, 0);
+  await app.close();
+});
+
+test("message search route uses the enabled fallback while the deterministic endpoint remains pure", async () => {
+  const interpreter = new FakeMessageInterpretationService();
+  interpreter.response = {
+    ...interpreter.response,
+    raw_text: "preciso de eletricista em sinop",
+    service_text: "preciso de eletricista em sinop",
+  };
+  const orchestrator = new FakeSearchOrchestrationService();
+  const fallback = new FakeMessageLocationFallbackProvider();
+  const config = { enabled: true, apiKey: undefined, model: "test-model", timeoutMs: 100 };
+  const app = buildApp({
+    internalApiKey,
+    messageInterpretationService: interpreter,
+    searchOrchestrationService: orchestrator,
+    messageLocationFallbackProvider: fallback,
+    messageInterpretationFallbackConfig: config,
+  });
+
+  const deterministic = await app.inject({
+    method: "POST",
+    url: "/internal/message-interpretation/interpret",
+    headers: { "x-internal-key": internalApiKey },
+    payload: { raw_text: "preciso de eletricista em sinop" },
+  });
+  assert.equal(deterministic.statusCode, 200);
+  assert.equal(deterministic.json().status, "needs_location");
+  assert.equal(fallback.calls, 0);
+
+  const hybrid = await app.inject({
+    method: "POST",
+    url: "/internal/search/from-message",
+    headers: { "x-internal-key": internalApiKey },
+    payload: { raw_text: "preciso de eletricista em sinop", country_code: "br", limit: 6 },
+  });
+  assert.equal(hybrid.statusCode, 200);
+  assert.equal(fallback.calls, 1);
+  assert.equal(orchestrator.calls, 1);
+  assert.deepEqual(orchestrator.received, {
+    raw_text: "preciso de eletricista em sinop",
+    service_text: "preciso de eletricista em sinop",
+    location_text: "sinop",
+    country_code: "BR",
+    limit: 6,
+  });
+  assert.equal(hybrid.json().interpretation.interpretation.location_strategy, "llm_fallback");
+  await app.close();
+});
+
+test("enabled fallback without an API key keeps health available and degrades lazily", async () => {
+  const interpreter = new FakeMessageInterpretationService();
+  const orchestrator = new FakeSearchOrchestrationService();
+  const app = buildApp({
+    internalApiKey,
+    messageInterpretationService: interpreter,
+    searchOrchestrationService: orchestrator,
+    messageInterpretationFallbackConfig: { enabled: true, apiKey: undefined, model: "test-model", timeoutMs: 100 },
+  });
+
+  assert.equal((await app.inject({ method: "GET", url: "/health" })).statusCode, 200);
+  const result = await app.inject({
+    method: "POST",
+    url: "/internal/search/from-message",
+    headers: { "x-internal-key": internalApiKey },
+    payload: { raw_text: "preciso de eletricista em sinop" },
+  });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.json().reason, "fallback_unavailable");
+  assert.equal(orchestrator.calls, 0);
+  assert.equal(result.body.includes("OPENAI_API_KEY"), false);
   await app.close();
 });
 

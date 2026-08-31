@@ -357,9 +357,17 @@ Rota interna protegida por `X-Internal-Key` que conecta o Message Interpreter ao
 
 `raw_text` aceita de 1 a 2.000 caracteres. `country_code` é opcional, normalizado para ISO alpha-2 maiúsculo e usa `BR` por padrão. `limit` é opcional, usa `3` por padrão e aceita de 1 a 10.
 
-O fluxo é `Message Interpreter → Search Orchestrator → Service Resolution → Location Resolution → Matching`. Os slots produzidos pelo interpreter são repassados sem reconstrução ou nova normalização, e não há chamada HTTP entre módulos.
+O fluxo híbrido é `Message Interpreter (fast path) → LLM Location Fallback, quando necessário → Search Orchestrator → Service Resolution → Location Resolution → Matching`. Não há chamada HTTP entre os módulos internos; a única chamada externa opcional desta camada é ao provider do fallback.
 
-Quando o interpreter não encontra uma localização explícita, a resposta é HTTP 200 com `status: needs_location`, `stage: interpretation`, `reason: missing_explicit_location` e `orchestration: null`. Nesse caso o Search Orchestrator não é chamado, portanto não há geocoding, SQL, `search_request` ou matching.
+O fallback é desligado por padrão com `MESSAGE_INTERPRETATION_FALLBACK_ENABLED=false`. Nesse estado, o comportamento da 3.5B é preservado: quando o interpreter não encontra uma localização explícita, a resposta é HTTP 200 com `status: needs_location`, `stage: interpretation`, `reason: missing_explicit_location` e `orchestration: null`. A OpenAI não é chamada.
+
+Quando o fallback está ligado e o fast path retorna `needs_location`, a API usa o modelo configurado em `MESSAGE_INTERPRETATION_FALLBACK_MODEL` (padrão `gpt-5.6-luna`) somente para extrair uma localização textual explícita. O serviço continua sendo resolvido deterministicamente a partir da mensagem completa. O LLM não geocodifica, não escolhe profissionais e não faz ranking; a existência e as coordenadas da localidade ainda são validadas pelo Location Resolution 3.3.
+
+Uma localização extraída pelo fallback produz uma interpretação interna com `location_strategy: llm_fallback`, preserva `raw_text`, `service_text`, `country_code` e `limit`, e então segue para o Search Orchestrator. O endpoint determinístico `/internal/message-interpretation/interpret` não muda e nunca chama OpenAI.
+
+Se o fallback não entender a localização, o retorno usa `reason: location_not_understood`. Timeout ou rede usam `fallback_unavailable`, limite do provider usa `fallback_rate_limited`, e resposta inválida, incompleta, recusada ou erro do provider usa `fallback_provider_error`. Todos esses estados retornam HTTP 200, `stage: interpretation` e `orchestration: null`; nenhum geocoding, SQL, `search_request` ou matching é executado. Detalhes técnicos e segredos não entram no body.
+
+A integração usa a Responses API com Structured Outputs, `store: false`, `reasoning.effort: none`, limite de 100 tokens de saída, timeout configurável (padrão 5 segundos) e zero retries automáticos. `OPENAI_API_KEY` é exclusivamente server-side. Se o fallback estiver ligado sem essa chave, a API e o `/health` continuam iniciando; somente um request que realmente precise do fallback degrada para `fallback_unavailable`.
 
 Quando a interpretação termina, os estados do orquestrador são preservados com o estágio correspondente:
 
@@ -371,7 +379,7 @@ Assim, `needs_location` na etapa `interpretation` significa que a mensagem não 
 
 A corrida de serviço indisponível continua retornando `409 service_unavailable`. Falhas técnicas do geocoder permanecem `503 geocoding_unavailable`, `429 geocoding_rate_limited` ou `502 geocoding_provider_error`; erros inesperados retornam `500 internal_error`. A resposta não adiciona telefone ou e-mail.
 
-O endpoint é o fast path determinístico e não usa OpenAI, outro LLM ou WhatsApp. Um fallback inteligente futuro poderá atuar antes da formação dos slots, sem alterar o Search Orchestrator.
+O endpoint continua priorizando o fast path determinístico. A OpenAI só pode ser chamada pelo pipeline quando esse fast path não extrai uma localização e o kill switch está ligado. Não há integração com WhatsApp nesta etapa.
 
 ## Erros
 

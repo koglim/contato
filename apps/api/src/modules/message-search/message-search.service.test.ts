@@ -11,8 +11,14 @@ import {
   type ServiceResolutionResponse,
 } from "@contatocerto/shared";
 import type { MessageInterpretationService } from "../message-interpretation/message-interpretation.types.js";
+import {
+  MessageLocationFallbackProviderError,
+  type MessageLocationFallbackInput,
+  type MessageLocationFallbackProvider,
+  type MessageLocationFallbackResult,
+} from "../message-interpretation-fallback/message-location-fallback.types.js";
 import type { SearchOrchestrationOutcome, SearchOrchestrationService } from "../search-orchestration/search-orchestration.types.js";
-import { DeterministicMessageSearchService } from "./message-search.service.js";
+import { HybridMessageSearchService } from "./message-search.service.js";
 
 const serviceId = "11111111-1111-4111-8111-111111111111";
 const serviceResolved: ServiceResolutionResponse = {
@@ -117,10 +123,40 @@ class FakeSearchOrchestrationService implements SearchOrchestrationService {
   }
 }
 
-function createService(interpretation: MessageInterpretationResponse, outcome: SearchOrchestrationOutcome) {
+class FakeMessageLocationFallbackProvider implements MessageLocationFallbackProvider {
+  readonly name = "fake-location-fallback";
+  calls = 0;
+  received: MessageLocationFallbackInput | undefined;
+  response: MessageLocationFallbackResult = { status: "unresolved", location_text: null };
+  error: Error | undefined;
+
+  async resolve(input: MessageLocationFallbackInput) {
+    this.calls += 1;
+    this.received = input;
+    if (this.error) throw this.error;
+    return this.response;
+  }
+}
+
+function createService(
+  interpretation: MessageInterpretationResponse,
+  outcome: SearchOrchestrationOutcome,
+  fallbackEnabled = false,
+) {
   const interpreter = new FakeMessageInterpretationService(interpretation);
   const orchestrator = new FakeSearchOrchestrationService(outcome);
-  return { interpreter, orchestrator, service: new DeterministicMessageSearchService(interpreter, orchestrator) };
+  const fallback = new FakeMessageLocationFallbackProvider();
+  const fallbackErrors: Array<{ kind: string; durationMs: number }> = [];
+  return {
+    interpreter,
+    orchestrator,
+    fallback,
+    fallbackErrors,
+    service: new HybridMessageSearchService(interpreter, orchestrator, fallback, {
+      enabled: fallbackEnabled,
+      onError: (event) => fallbackErrors.push(event),
+    }),
+  };
 }
 
 const input = { raw_text: interpreted.raw_text, country_code: "BR", limit: 3 } as const;
@@ -130,6 +166,7 @@ test("message search stops at interpretation when an explicit location is missin
   const outcome = await context.service.search({ ...input, raw_text: needsLocationInterpretation.raw_text });
   assert.equal(context.interpreter.calls, 1);
   assert.deepEqual(context.interpreter.received, { raw_text: needsLocationInterpretation.raw_text, country_code: "BR" });
+  assert.equal(context.fallback.calls, 0);
   assert.equal(context.orchestrator.calls, 0);
   assert.deepEqual(outcome, {
     kind: "response",
@@ -144,9 +181,10 @@ test("message search stops at interpretation when an explicit location is missin
 });
 
 test("message search passes the interpreter slots unchanged to orchestration exactly once", async () => {
-  const context = createService(interpreted, { kind: "response", response: needsService("unresolved") });
+  const context = createService(interpreted, { kind: "response", response: needsService("unresolved") }, true);
   await context.service.search({ ...input, limit: 7 });
   assert.equal(context.interpreter.calls, 1);
+  assert.equal(context.fallback.calls, 0);
   assert.equal(context.orchestrator.calls, 1);
   assert.deepEqual(context.orchestrator.received, {
     raw_text: interpreted.raw_text,
@@ -155,6 +193,78 @@ test("message search passes the interpreter slots unchanged to orchestration exa
     country_code: interpreted.country_code,
     limit: 7,
   });
+});
+
+test("message search uses a resolved fallback once and preserves original orchestration inputs", async () => {
+  const context = createService(needsLocationInterpretation, { kind: "response", response: matched }, true);
+  context.fallback.response = { status: "resolved", location_text: "sinop" };
+
+  const outcome = await context.service.search({
+    raw_text: needsLocationInterpretation.raw_text,
+    country_code: "BR",
+    limit: 7,
+  });
+
+  assert.equal(context.fallback.calls, 1);
+  assert.deepEqual(context.fallback.received, {
+    raw_text: needsLocationInterpretation.raw_text,
+    country_code: "BR",
+  });
+  assert.equal(context.orchestrator.calls, 1);
+  assert.deepEqual(context.orchestrator.received, {
+    raw_text: needsLocationInterpretation.raw_text,
+    service_text: needsLocationInterpretation.raw_text,
+    location_text: "sinop",
+    country_code: "BR",
+    limit: 7,
+  });
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") {
+    assert.equal(outcome.response.interpretation.interpretation.location_strategy, "llm_fallback");
+    assert.equal(messageSearchResponseSchema.safeParse(outcome.response).success, true);
+  }
+});
+
+test("message search stops safely when the fallback cannot understand a location", async () => {
+  const context = createService(needsLocationInterpretation, { kind: "response", response: matched }, true);
+  const outcome = await context.service.search({ ...input, raw_text: needsLocationInterpretation.raw_text });
+  assert.equal(context.fallback.calls, 1);
+  assert.equal(context.orchestrator.calls, 0);
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") {
+    assert.equal(outcome.response.status, "needs_location");
+    assert.equal(outcome.response.stage, "interpretation");
+    assert.equal(outcome.response.reason, "location_not_understood");
+    assert.equal(outcome.response.orchestration, null);
+  }
+});
+
+test("message search degrades every fallback error without exposing details or calling orchestration", async () => {
+  for (const [kind, reason] of [
+    ["unavailable", "fallback_unavailable"],
+    ["rate_limited", "fallback_rate_limited"],
+    ["provider_error", "fallback_provider_error"],
+  ] as const) {
+    const context = createService(needsLocationInterpretation, { kind: "response", response: matched }, true);
+    context.fallback.error = new MessageLocationFallbackProviderError(kind, { cause: new Error("sensitive detail") });
+    const outcome = await context.service.search({ ...input, raw_text: needsLocationInterpretation.raw_text });
+    assert.equal(context.orchestrator.calls, 0);
+    assert.equal(context.fallbackErrors.length, 1);
+    assert.equal(context.fallbackErrors[0]?.kind, kind);
+    assert.equal(outcome.kind, "response");
+    if (outcome.kind === "response") {
+      assert.equal(outcome.response.reason, reason);
+      assert.equal(JSON.stringify(outcome.response).includes("sensitive detail"), false);
+      assert.equal(messageSearchResponseSchema.safeParse(outcome.response).success, true);
+    }
+  }
+
+  const unknown = createService(needsLocationInterpretation, { kind: "response", response: matched }, true);
+  unknown.fallback.error = new Error("malformed provider result");
+  const unknownOutcome = await unknown.service.search({ ...input, raw_text: needsLocationInterpretation.raw_text });
+  assert.equal(unknown.orchestrator.calls, 0);
+  assert.equal(unknownOutcome.kind, "response");
+  if (unknownOutcome.kind === "response") assert.equal(unknownOutcome.response.reason, "fallback_provider_error");
 });
 
 test("message search maps every orchestration response to its exact public stage", async () => {
