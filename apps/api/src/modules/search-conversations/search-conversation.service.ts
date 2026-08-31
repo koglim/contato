@@ -61,7 +61,11 @@ export class DefaultSearchConversationService implements SearchConversationServi
     if (invalidState) return { kind: invalidState };
 
     const processingToken = randomUUID();
-    const conversation = await this.repository.claimPendingLocation(conversationId, processingToken);
+    const conversation = await this.repository.claimPendingLocation(
+      conversationId,
+      processingToken,
+      this.config.processingLeaseSeconds,
+    );
     if (!conversation) {
       const current = await this.repository.findById(conversationId);
       const currentInvalidState = this.invalidState(current);

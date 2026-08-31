@@ -219,6 +219,7 @@ class FakeSearchConversationRepository implements SearchConversationRepository {
   claim: SearchConversationRecord | null = conversation();
   touched: unknown[] | undefined;
   completed: unknown[] | undefined;
+  claimArguments: unknown[] | undefined;
   releases = 0;
 
   async createPendingLocation(input: CreatePendingLocationConversation) {
@@ -230,7 +231,8 @@ class FakeSearchConversationRepository implements SearchConversationRepository {
     return this.record;
   }
 
-  async claimPendingLocation() {
+  async claimPendingLocation(id: string, processingToken: string, processingLeaseSeconds: number) {
+    this.claimArguments = [id, processingToken, processingLeaseSeconds];
     return this.claim;
   }
 
@@ -253,7 +255,10 @@ function context() {
   const repository = new FakeSearchConversationRepository();
   const messageSearch = new FakeMessageSearchService();
   const orchestrator = new FakeSearchOrchestrator();
-  const service = new DefaultSearchConversationService(repository, messageSearch, orchestrator, { ttlMinutes: 30 });
+  const service = new DefaultSearchConversationService(repository, messageSearch, orchestrator, {
+    ttlMinutes: 30,
+    processingLeaseSeconds: 60,
+  });
   return { repository, messageSearch, orchestrator, service };
 }
 
@@ -324,6 +329,16 @@ test("conversation continuation atomically rejects a simultaneous processor", as
   current.repository.claim = null;
   assert.deepEqual(await current.service.continueWithLocation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_processing" });
   assert.equal(current.orchestrator.calls, 0);
+});
+
+test("conversation continuation passes the lease and processes a repository-reclaimed stale claim", async () => {
+  const current = context();
+  const outcome = await current.service.continueWithLocation(conversationId, { raw_text: "Sinop" });
+  assert.equal(current.repository.claimArguments?.[0], conversationId);
+  assert.equal(typeof current.repository.claimArguments?.[1], "string");
+  assert.equal(current.repository.claimArguments?.[2], 60);
+  assert.equal(current.orchestrator.calls, 1);
+  assert.equal(outcome.kind, "response");
 });
 
 test("pending location goes directly to orchestration and completes matched or no_matches", async () => {

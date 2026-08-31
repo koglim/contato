@@ -36,7 +36,11 @@ export type CreatePendingLocationConversation = {
 export interface SearchConversationRepository {
   createPendingLocation(input: CreatePendingLocationConversation): Promise<SearchConversationRecord>;
   findById(id: string): Promise<SearchConversationRecord | null>;
-  claimPendingLocation(id: string, processingToken: string): Promise<SearchConversationRecord | null>;
+  claimPendingLocation(
+    id: string,
+    processingToken: string,
+    processingLeaseSeconds: number,
+  ): Promise<SearchConversationRecord | null>;
   touchPendingLocation(id: string, processingToken: string, lastMessageText: string, ttlMinutes: number): Promise<boolean>;
   complete(id: string, processingToken: string, lastMessageText: string, searchRequestId: string | null): Promise<boolean>;
   releaseClaim(id: string, processingToken: string): Promise<void>;

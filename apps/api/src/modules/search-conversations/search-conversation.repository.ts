@@ -79,7 +79,7 @@ export class PostgresSearchConversationRepository implements SearchConversationR
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
-  async claimPendingLocation(id: string, processingToken: string) {
+  async claimPendingLocation(id: string, processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<SearchConversationRow>(
       `UPDATE search_conversations
        SET processing_token = $2, processing_started_at = NOW()
@@ -87,9 +87,12 @@ export class PostgresSearchConversationRepository implements SearchConversationR
          AND status = 'active'
          AND pending_slot = 'location'
          AND expires_at > NOW()
-         AND processing_token IS NULL
+         AND (
+           processing_token IS NULL
+           OR processing_started_at <= NOW() - ($3 * INTERVAL '1 second')
+         )
        RETURNING ${conversationColumns}`,
-      [id, processingToken],
+      [id, processingToken, processingLeaseSeconds],
     );
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }

@@ -69,14 +69,29 @@ test("search conversation repository finds records and exposes database expirati
   assert.match(context.calls[0]!.text, /expires_at <= NOW\(\)/u);
 });
 
-test("search conversation repository claims only one active non-expired location continuation", async () => {
+test("search conversation repository claims a conversation without a processing token", async () => {
   const token = randomUUID();
-  const context = fakeDatabase([[row()], []]);
-  assert.equal((await context.repository.claimPendingLocation(conversationId, token))?.id, conversationId);
-  assert.equal(await context.repository.claimPendingLocation(conversationId, randomUUID()), null);
-  assert.match(context.calls[0]!.text, /processing_token IS NULL/u);
+  const context = fakeDatabase([[row()]]);
+  assert.equal((await context.repository.claimPendingLocation(conversationId, token, 60))?.id, conversationId);
+  assert.match(context.calls[0]!.text, /SET processing_token = \$2, processing_started_at = NOW\(\)/u);
   assert.match(context.calls[0]!.text, /expires_at > NOW\(\)/u);
-  assert.deepEqual(context.calls[0]!.values, [conversationId, token]);
+  assert.deepEqual(context.calls[0]!.values, [conversationId, token, 60]);
+});
+
+test("search conversation repository does not reclaim a recent processing lease", async () => {
+  const context = fakeDatabase([[]]);
+  assert.equal(await context.repository.claimPendingLocation(conversationId, randomUUID(), 60), null);
+  assert.match(context.calls[0]!.text, /processing_token IS NULL/u);
+  assert.match(context.calls[0]!.text, /processing_started_at <=/u);
+  assert.match(context.calls[0]!.text, /\$3 \* INTERVAL '1 second'/u);
+});
+
+test("search conversation repository can replace an abandoned processing lease", async () => {
+  const replacementToken = randomUUID();
+  const context = fakeDatabase([[row()]]);
+  assert.equal((await context.repository.claimPendingLocation(conversationId, replacementToken, 60))?.id, conversationId);
+  assert.match(context.calls[0]!.text, /processing_token IS NULL\s+OR processing_started_at <=/u);
+  assert.deepEqual(context.calls[0]!.values, [conversationId, replacementToken, 60]);
 });
 
 test("search conversation repository renews, completes and releases with the same processing token", async () => {

@@ -413,7 +413,7 @@ Somente `needs_location` com `stage: interpretation` cria uma conversa ativa:
 }
 ```
 
-A conversa preserva a mensagem original, `service_text`, país e limite. Seu TTL é controlado por `SEARCH_CONVERSATION_TTL_MINUTES`, com padrão de 30 minutos.
+A conversa preserva a mensagem original, `service_text`, país e limite. Seu TTL é controlado por `SEARCH_CONVERSATION_TTL_MINUTES`, com padrão de 30 minutos. O claim de processamento possui lease recuperável configurada por `SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS`, com padrão de 60 segundos.
 
 ### `POST /internal/search/conversations/:conversationId/messages`
 
@@ -434,7 +434,7 @@ Erros de estado:
 - `409 conversation_not_active`: conversa concluída, cancelada ou alterada durante o processamento.
 - `409 conversation_processing`: outra mensagem já reservou a mesma conversa.
 
-Cada continuação usa um `processing_token` obtido por atualização condicional no PostgreSQL. A chamada externa ao geocoder acontece depois dessa reserva, sem manter transação ou row lock aberto. Assim, duas mensagens simultâneas não executam o matching em paralelo. Idempotency keys de webhook ainda não fazem parte desta etapa.
+Cada continuação usa um `processing_token` obtido por atualização condicional no PostgreSQL. A chamada externa ao geocoder acontece depois dessa reserva, sem manter transação ou row lock aberto. Assim, duas mensagens simultâneas não executam o matching em paralelo. Um claim com `processing_started_at` anterior à lease pode ser reassumido com um novo token, recuperando crashes ou restarts abruptos. Claims recentes continuam retornando `conversation_processing`. Idempotency keys de webhook ainda não fazem parte desta etapa.
 
 ## Erros
 
