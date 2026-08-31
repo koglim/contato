@@ -1,9 +1,9 @@
 import type { ExplicitLocation } from "./message-interpretation.types.js";
 
-const LOCATION_WORD = String.raw`\p{Lu}[\p{L}\p{M}'’.-]*`;
-const LOCATION_CONNECTOR = String.raw`(?:da|das|de|do|dos|e)`;
-const LOCATION_NAME = String.raw`${LOCATION_WORD}(?:(?:\s+${LOCATION_WORD})|(?:\s+${LOCATION_CONNECTOR}\s+${LOCATION_WORD}))*`;
-const LOCATION_VALUE = new RegExp(String.raw`^(${LOCATION_NAME})(?:\s*,\s*([A-Z]{2}))?$`, "u");
+const LOCATION_WORD = String.raw`\p{L}[\p{L}\p{M}'’.-]*`;
+const LOCATION_NAME = String.raw`${LOCATION_WORD}(?:\s+${LOCATION_WORD})*`;
+const LOCATION_VALUE = new RegExp(String.raw`^(${LOCATION_NAME})(?:\s*,\s*([A-Za-z]{2}))?$`, "u");
+const UNSAFE_TRAILING_CONTEXT = /(?:\s+para\s+(?:hoje|amanh[ãa])(?:\s|$)|\s+e\s+(?:preciso|quero|necessito|busco|procuro)\b)/iu;
 const EXPLICIT_MARKERS = [
   /\baqui\s+em\s+/giu,
   /\bna\s+cidade\s+de\s+/giu,
@@ -21,9 +21,10 @@ function normalizeForComparison(value: string) {
 
 function validLocation(value: string) {
   const cleaned = removeTerminalPunctuation(value);
+  if (UNSAFE_TRAILING_CONTEXT.test(cleaned)) return null;
   const match = LOCATION_VALUE.exec(cleaned);
   if (!match) return null;
-  const text = match[2] ? `${match[1]}, ${match[2]}` : match[1];
+  const text = match[2] ? `${match[1]}, ${match[2].toUpperCase()}` : match[1];
   return OBVIOUSLY_GENERIC.has(normalizeForComparison(text)) ? null : text;
 }
 
