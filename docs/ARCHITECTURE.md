@@ -62,3 +62,13 @@ Aliases iniciais ficam no seed idempotente do catálogo. O script repete a mesma
 O módulo é stateless e usa uma interface `GeocodingProvider`. A implementação inicial usa HeiGIT/openrouteservice em `https://api.heigit.org/pelias/v1/search`, com chave server-side no header `Authorization`, limite de país e timeout de cinco segundos. Um provider futuro (Mapbox, Google ou Pelias próprio) pode substituir esse adapter sem mudar a decisão do domínio.
 
 O serviço valida a resposta GeoJSON externamente, preserva a ordem de relevância do provider, elimina duplicados estáveis e só seleciona um resultado quando a confiança real passa o threshold configurado e não há concorrente dentro do gap. Sem confiança, o resultado é `unresolved`; falhas do provider são erros técnicos separados. Não há persistência, cache, retry automático ou fallback Nominatim nessa etapa. Localizações GPS que já tragam latitude/longitude não devem passar por geocoding no futuro.
+
+## Search Orchestrator determinístico
+
+`apps/api/src/modules/search-orchestration` coordena os módulos sem persistência própria e sem HTTP interno:
+
+`Input estruturado → Service Resolution (qual) → Location Resolution (onde) → Matching Engine (quem)`.
+
+O texto de serviço é sempre resolvido primeiro. Se estiver `unresolved` ou `ambiguous`, o fluxo encerra em `needs_service`. Somente um serviço resolvido permite uma consulta de localização; uma localização não resolvida ou ambígua encerra em `needs_location`. Apenas os dois resultados resolvidos chegam ao Matching Engine, que continua sendo o único componente a criar `search_requests` e `matches` em sua própria transação.
+
+O orquestrador recebe por injeção `ServiceResolutionRepository`, `LocationResolutionService` e `MatchingRepository`; por isso testes usam fakes e não dependem de rede, banco ou chamadas para `localhost`. Ele não interpreta mensagem natural, não usa IA e não implementa WhatsApp. O `raw_text` original é preservado para auditoria do matching.

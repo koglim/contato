@@ -10,11 +10,19 @@ import type { ProfessionalServicesRepository } from "./modules/professional-serv
 import { serviceAreasRoutes } from "./modules/service-areas/service-areas.routes.js";
 import type { ServiceAreasRepository } from "./modules/service-areas/service-areas.types.js";
 import { matchingRoutes } from "./modules/matching/matching.routes.js";
+import { PostgresMatchingRepository } from "./modules/matching/matching.repository.js";
 import type { MatchingRepository } from "./modules/matching/matching.types.js";
 import { serviceResolutionRoutes } from "./modules/service-resolution/service-resolution.routes.js";
+import { PostgresServiceResolutionRepository } from "./modules/service-resolution/service-resolution.repository.js";
 import type { ServiceResolutionRepository } from "./modules/service-resolution/service-resolution.types.js";
 import { locationResolutionRoutes } from "./modules/location-resolution/location-resolution.routes.js";
+import { readLocationResolutionConfig } from "./config/location-resolution.js";
+import { OpenRouteServiceGeocodingProvider } from "./modules/location-resolution/providers/openrouteservice-geocoding.provider.js";
+import { DeterministicLocationResolutionService } from "./modules/location-resolution/location-resolution.service.js";
 import type { GeocodingProvider, LocationResolutionService } from "./modules/location-resolution/location-resolution.types.js";
+import { searchOrchestrationRoutes } from "./modules/search-orchestration/search-orchestration.routes.js";
+import { DeterministicSearchOrchestrator } from "./modules/search-orchestration/search-orchestration.service.js";
+import type { SearchOrchestrationService } from "./modules/search-orchestration/search-orchestration.types.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -26,8 +34,22 @@ type AppDependencies = {
   serviceResolutionRepository?: ServiceResolutionRepository;
   geocodingProvider?: GeocodingProvider;
   locationResolutionService?: LocationResolutionService;
+  searchOrchestrationService?: SearchOrchestrationService;
   internalApiKey?: string;
 };
+
+function createLazyLocationResolutionService(provider?: GeocodingProvider): LocationResolutionService {
+  let service: LocationResolutionService | undefined;
+  return {
+    resolve(input) {
+      service ??= new DeterministicLocationResolutionService(
+        provider ?? new OpenRouteServiceGeocodingProvider(),
+        readLocationResolutionConfig(),
+      );
+      return service.resolve(input);
+    },
+  };
+}
 
 export function buildApp({
   checkDatabase = checkDatabaseConnection,
@@ -40,8 +62,17 @@ export function buildApp({
   serviceResolutionRepository,
   geocodingProvider,
   locationResolutionService,
+  searchOrchestrationService,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
+  const resolvedServiceResolutionRepository = serviceResolutionRepository ?? new PostgresServiceResolutionRepository();
+  const resolvedMatchingRepository = matchingRepository ?? new PostgresMatchingRepository();
+  const resolvedLocationResolutionService = locationResolutionService ?? createLazyLocationResolutionService(geocodingProvider);
+  const resolvedSearchOrchestrationService = searchOrchestrationService ?? new DeterministicSearchOrchestrator(
+    resolvedServiceResolutionRepository,
+    resolvedLocationResolutionService,
+    resolvedMatchingRepository,
+  );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
 
@@ -79,9 +110,10 @@ export function buildApp({
     internalApiKey,
   });
 
-  app.register(matchingRoutes, { prefix: "/internal/matching", repository: matchingRepository, internalApiKey });
-  app.register(serviceResolutionRoutes, { prefix: "/internal/service-resolution", repository: serviceResolutionRepository, internalApiKey });
-  app.register(locationResolutionRoutes, { prefix: "/internal/location-resolution", provider: geocodingProvider, service: locationResolutionService, internalApiKey });
+  app.register(matchingRoutes, { prefix: "/internal/matching", repository: resolvedMatchingRepository, internalApiKey });
+  app.register(serviceResolutionRoutes, { prefix: "/internal/service-resolution", repository: resolvedServiceResolutionRepository, internalApiKey });
+  app.register(locationResolutionRoutes, { prefix: "/internal/location-resolution", service: resolvedLocationResolutionService, internalApiKey });
+  app.register(searchOrchestrationRoutes, { prefix: "/internal/search", service: resolvedSearchOrchestrationService, internalApiKey });
 
   return app;
 }

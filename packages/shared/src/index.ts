@@ -31,6 +31,10 @@ export {
   locationResolutionRequestSchema,
   locationResolutionResponseSchema,
 } from "./schemas/location-resolution.js";
+export {
+  searchOrchestrationRequestSchema,
+  searchOrchestrationResponseSchema,
+} from "./schemas/search-orchestration.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -63,3 +67,7 @@ export type {
   LocationResolutionInput,
   LocationResolutionResponse,
 } from "./types/location-resolution.js";
+export type {
+  SearchOrchestrationInput,
+  SearchOrchestrationResponse,
+} from "./types/search-orchestration.js";

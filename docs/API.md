@@ -297,6 +297,32 @@ Erros técnicos do provider são distintos de `unresolved`:
 
 Coordenadas GPS já conhecidas futuramente poderão ir diretamente ao matching; o geocoder existe apenas para localização textual.
 
+## Orquestração de busca
+
+### `POST /internal/search/orchestrate`
+
+Rota interna protegida por `X-Internal-Key` que coordena os módulos determinísticos existentes sem chamar a própria API via HTTP. Ela recebe os textos já separados; não extrai serviço ou localização de `raw_text`.
+
+```json
+{
+  "raw_text": "Preciso de um eletricista em Sinop",
+  "service_text": "eletricista",
+  "location_text": "Sinop, MT",
+  "country_code": "BR",
+  "limit": 3
+}
+```
+
+`raw_text` e `service_text` aceitam 1 a 2.000 caracteres. `location_text` aceita 2 a 500. `country_code` usa `BR` por padrão e `limit` usa `3`, limitado a 10 profissionais. O limite do geocoder continua interno e fixo em 5 candidatos.
+
+O fluxo é sequencial: resolve o serviço; somente se ele estiver `resolved`, resolve a localização; somente se ambos estiverem `resolved`, chama o Matching Engine. Assim, `needs_service` retorna `reason` `unresolved` ou `ambiguous` sem geocoding ou matching, e `needs_location` retorna a mesma razão sem matching. Em ambos os casos a resposta é HTTP 200.
+
+Quando matching encontra profissionais, o status é `matched`; quando recebe uma localização e serviço válidos, mas não encontra ninguém elegível, é `no_matches`. Ambos retornam as resoluções e a resposta original do matching, sem telefone ou e-mail.
+
+O matching recebe o `raw_text` original, o `service_id` resolvido e latitude, longitude, cidade, estado e bairro do `location_resolution.match`. Se o serviço for removido ou inativado entre a resolução e o matching, a rota retorna `409 service_unavailable`.
+
+Falhas técnicas do geocoder permanecem distintas de uma localização não resolvida: `503 geocoding_unavailable`, `429 geocoding_rate_limited` e `502 geocoding_provider_error`. Falhas inesperadas retornam `500 internal_error` sem detalhes internos.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.
