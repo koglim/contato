@@ -40,6 +40,13 @@ export {
   messageInterpretationResponseSchema,
 } from "./schemas/message-interpretation.js";
 export { messageSearchRequestSchema, messageSearchResponseSchema } from "./schemas/message-search.js";
+export {
+  continueSearchConversationParamsSchema,
+  continueSearchConversationRequestSchema,
+  continueSearchConversationResponseSchema,
+  startSearchConversationRequestSchema,
+  startSearchConversationResponseSchema,
+} from "./schemas/search-conversation.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -81,3 +88,9 @@ export type {
   MessageInterpretationResponse,
 } from "./types/message-interpretation.js";
 export type { MessageSearchInput, MessageSearchResponse } from "./types/message-search.js";
+export type {
+  ContinueSearchConversationInput,
+  ContinueSearchConversationResponse,
+  StartSearchConversationInput,
+  StartSearchConversationResponse,
+} from "./types/search-conversation.js";

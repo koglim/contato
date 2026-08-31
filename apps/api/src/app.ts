@@ -34,6 +34,15 @@ import {
 } from "./config/message-interpretation-fallback.js";
 import type { MessageLocationFallbackProvider } from "./modules/message-interpretation-fallback/message-location-fallback.types.js";
 import { OpenAIMessageLocationFallbackProvider } from "./modules/message-interpretation-fallback/openai-message-location-fallback.provider.js";
+import type { MessageSearchService } from "./modules/message-search/message-search.types.js";
+import { readSearchConversationConfig, type SearchConversationConfig } from "./config/search-conversation.js";
+import { searchConversationRoutes } from "./modules/search-conversations/search-conversation.routes.js";
+import { PostgresSearchConversationRepository } from "./modules/search-conversations/search-conversation.repository.js";
+import { DefaultSearchConversationService } from "./modules/search-conversations/search-conversation.service.js";
+import type {
+  SearchConversationRepository,
+  SearchConversationService,
+} from "./modules/search-conversations/search-conversation.types.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -49,6 +58,10 @@ type AppDependencies = {
   messageInterpretationService?: MessageInterpretationService;
   messageLocationFallbackProvider?: MessageLocationFallbackProvider;
   messageInterpretationFallbackConfig?: MessageInterpretationFallbackConfig;
+  messageSearchService?: MessageSearchService;
+  searchConversationRepository?: SearchConversationRepository;
+  searchConversationService?: SearchConversationService;
+  searchConversationConfig?: SearchConversationConfig;
   internalApiKey?: string;
 };
 
@@ -93,6 +106,10 @@ export function buildApp({
   messageInterpretationService,
   messageLocationFallbackProvider,
   messageInterpretationFallbackConfig,
+  messageSearchService,
+  searchConversationRepository,
+  searchConversationService,
+  searchConversationConfig,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
   const resolvedMessageInterpretationFallbackConfig =
@@ -108,20 +125,27 @@ export function buildApp({
   const resolvedMessageInterpretationService = messageInterpretationService ?? new DeterministicMessageInterpreter();
   const resolvedMessageLocationFallbackProvider = messageLocationFallbackProvider
     ?? createLazyMessageLocationFallbackProvider(resolvedMessageInterpretationFallbackConfig);
-  const resolvedMessageSearchService = new HybridMessageSearchService(
-    resolvedMessageInterpretationService,
+  const resolvedMessageSearchService = messageSearchService ?? new HybridMessageSearchService(
+      resolvedMessageInterpretationService,
+      resolvedSearchOrchestrationService,
+      resolvedMessageLocationFallbackProvider,
+      {
+        enabled: resolvedMessageInterpretationFallbackConfig.enabled,
+        onError: ({ kind, durationMs }) => app.log.warn({
+          provider: resolvedMessageLocationFallbackProvider.name,
+          model: resolvedMessageInterpretationFallbackConfig.model,
+          fallback_status: "error",
+          error_kind: kind,
+          duration_ms: durationMs,
+        }, "Message location fallback failed"),
+      },
+    );
+  const resolvedSearchConversationConfig = searchConversationConfig ?? readSearchConversationConfig();
+  const resolvedSearchConversationService = searchConversationService ?? new DefaultSearchConversationService(
+    searchConversationRepository ?? new PostgresSearchConversationRepository(),
+    resolvedMessageSearchService,
     resolvedSearchOrchestrationService,
-    resolvedMessageLocationFallbackProvider,
-    {
-      enabled: resolvedMessageInterpretationFallbackConfig.enabled,
-      onError: ({ kind, durationMs }) => app.log.warn({
-        provider: resolvedMessageLocationFallbackProvider.name,
-        model: resolvedMessageInterpretationFallbackConfig.model,
-        fallback_status: "error",
-        error_kind: kind,
-        duration_ms: durationMs,
-      }, "Message location fallback failed"),
-    },
+    resolvedSearchConversationConfig,
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
@@ -166,6 +190,7 @@ export function buildApp({
   app.register(searchOrchestrationRoutes, { prefix: "/internal/search", service: resolvedSearchOrchestrationService, internalApiKey });
   app.register(messageInterpretationRoutes, { prefix: "/internal/message-interpretation", service: resolvedMessageInterpretationService, internalApiKey });
   app.register(messageSearchRoutes, { prefix: "/internal/search", service: resolvedMessageSearchService, internalApiKey });
+  app.register(searchConversationRoutes, { prefix: "/internal/search/conversations", service: resolvedSearchConversationService, internalApiKey });
 
   return app;
 }

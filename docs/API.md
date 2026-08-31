@@ -381,6 +381,61 @@ A corrida de serviço indisponível continua retornando `409 service_unavailable
 
 O endpoint continua priorizando o fast path determinístico. A OpenAI só pode ser chamada pelo pipeline quando esse fast path não extrai uma localização e o kill switch está ligado. Não há integração com WhatsApp nesta etapa.
 
+## Conversa transitória de busca
+
+As rotas abaixo permitem completar somente uma localização ausente em um segundo turno. `search_conversations` guarda estado transitório da interação; `search_requests` continua sendo a busca de negócio criada exclusivamente pelo Matching quando serviço e localização já estão resolvidos.
+
+### `POST /internal/search/conversations`
+
+Inicia uma busca usando exatamente o Message Search híbrido 3.5C:
+
+```json
+{
+  "raw_text": "preciso de eletricista perto daqui",
+  "country_code": "BR",
+  "limit": 3
+}
+```
+
+Se o resultado for `matched` ou `no_matches`, nenhuma conversa é persistida e a resposta contém `conversation_id: null` e `conversation_status: completed`. O mesmo ocorre para `needs_service` e para uma localização que já chegou ao Location Resolution, pois a 3.6A ainda não sabe continuar esses estados.
+
+Somente `needs_location` com `stage: interpretation` cria uma conversa ativa:
+
+```json
+{
+  "conversation_id": "UUID",
+  "conversation_status": "active",
+  "pending_slot": "location",
+  "result": {
+    "status": "needs_location",
+    "stage": "interpretation"
+  }
+}
+```
+
+A conversa preserva a mensagem original, `service_text`, país e limite. Seu TTL é controlado por `SEARCH_CONVERSATION_TTL_MINUTES`, com padrão de 30 minutos.
+
+### `POST /internal/search/conversations/:conversationId/messages`
+
+Continua uma conversa que aguarda localização:
+
+```json
+{ "raw_text": "Sinop" }
+```
+
+Como o contexto já informa que a resposta é uma localização, o texto é enviado diretamente como `location_text` ao Search Orchestrator. O segundo turno não chama Message Interpreter nem OpenAI. A mensagem original continua sendo usada como `raw_text` e `service_text` para que o Service Resolution reconheça a necessidade anterior.
+
+Se o orquestrador retornar `matched` ou `no_matches`, a conversa passa para `completed`, limpa `pending_slot` e salva o `search_request_id` criado pelo Matching. Se a localização for `unresolved` ou `ambiguous`, a conversa permanece ativa em `pending_slot: location` e seu TTL é renovado. Um inesperado `needs_service` encerra a conversa, porque continuação de serviço está fora da 3.6A.
+
+Erros de estado:
+
+- `404 conversation_not_found`: UUID não encontrado.
+- `410 conversation_expired`: TTL encerrado; a conversa não é reutilizada.
+- `409 conversation_not_active`: conversa concluída, cancelada ou alterada durante o processamento.
+- `409 conversation_processing`: outra mensagem já reservou a mesma conversa.
+
+Cada continuação usa um `processing_token` obtido por atualização condicional no PostgreSQL. A chamada externa ao geocoder acontece depois dessa reserva, sem manter transação ou row lock aberto. Assim, duas mensagens simultâneas não executam o matching em paralelo. Idempotency keys de webhook ainda não fazem parte desta etapa.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.

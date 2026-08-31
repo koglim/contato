@@ -116,3 +116,29 @@ O contrato expõe o estágio responsável pelo resultado. `interpretation` indic
 `MESSAGE_INTERPRETATION_FALLBACK_ENABLED=false` é o padrão e impede qualquer consumo da OpenAI. Quando ligado, timeout/rede, rate limit e falhas do provider são convertidos em razões públicas controladas de `needs_location`, sempre antes do Search Orchestrator. O log de erro contém apenas provider, modelo, categoria e latência — nunca chave, prompt completo ou resposta bruta. O provider usa `store: false`, `reasoning.effort: none`, no máximo 100 tokens de saída, timeout configurável e `maxRetries: 0`; nenhuma tool ou estado de conversa é habilitado.
 
 Esse fallback não altera Service Resolution, Location Resolution, Matching ou Search Orchestrator. Ele não reconhece serviço, não faz geocoding, não calcula ranking e não escolhe profissional. Testes usam providers e clientes falsos, sem rede e sem chamadas reais à OpenAI.
+
+## Search Conversation State
+
+`apps/api/src/modules/search-conversations` adiciona memória curta apenas para coletar uma localização ausente. Ela não é histórico de conversa, agente ou memória de longo prazo:
+
+```text
+Turno 1: mensagem → Message Search 3.5C → needs_location / interpretation
+                                           ↓
+                                search_conversation ativa
+                                           ↓
+Turno 2: "Sinop" ──────────────────────────┘
+                     ↓
+              Search Orchestrator
+                     ↓
+                  Matching
+                     ↓
+          search_request de negócio
+```
+
+`search_conversations` é o estado transitório que preserva a primeira mensagem, o texto de serviço, país, limite e o slot pendente. `search_requests` não foi reutilizada como sessão: permanece sendo criada pelo Matching somente quando a busca possui dados suficientes. Isso mantém intactos os módulos 3.1–3.5C e separa coleta conversacional de auditoria do marketplace.
+
+O início reutiliza a mesma instância de `MessageSearchService`. Apenas `needs_location` no estágio `interpretation` abre uma conversa com `pending_slot = location`; resultados finais ou estados ainda não suportados não deixam sessão pendente. Na continuação, a resposta curta é semanticamente uma localização e segue diretamente ao Search Orchestrator. Portanto o segundo turno não chama o Message Interpreter nem o provider OpenAI.
+
+O TTL padrão é de 30 minutos e pode ser ajustado por `SEARCH_CONVERSATION_TTL_MINUTES`. A validade é calculada pelo relógio do PostgreSQL. Não há cron de limpeza: registros vencidos são tratados logicamente como expirados e não podem ser retomados. Uma localização ainda ambígua ou não resolvida renova o TTL; `matched` e `no_matches` completam a conversa e vinculam o `search_request_id`. `needs_service` também encerra a conversa, pois coleta de serviço não pertence à 3.6A.
+
+Concorrência usa um claim atômico com `processing_token` e `processing_started_at`. Somente uma atualização de conversa ativa, não expirada e sem token pode reservar o processamento. O geocoder roda fora de transação longa; conclusão ou renovação exige o mesmo token e então o remove. Uma segunda mensagem simultânea recebe `conversation_processing`, enquanto chamadas sequenciais após conclusão recebem `conversation_not_active`. Idempotência de webhooks será responsabilidade da futura camada de canal.

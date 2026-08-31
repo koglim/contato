@@ -9,7 +9,6 @@ import { buildApp } from "../../app.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
 import type { MessageInterpretationService } from "../message-interpretation/message-interpretation.types.js";
 import type {
-  MessageLocationFallbackInput,
   MessageLocationFallbackProvider,
   MessageLocationFallbackResult,
 } from "../message-interpretation-fallback/message-location-fallback.types.js";
@@ -61,7 +60,7 @@ class FakeMessageLocationFallbackProvider implements MessageLocationFallbackProv
   calls = 0;
   response: MessageLocationFallbackResult = { status: "resolved", location_text: "sinop" };
 
-  async resolve(_input: MessageLocationFallbackInput) {
+  async resolve() {
     this.calls += 1;
     return this.response;
   }
