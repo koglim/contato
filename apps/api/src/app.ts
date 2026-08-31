@@ -23,6 +23,9 @@ import type { GeocodingProvider, LocationResolutionService } from "./modules/loc
 import { searchOrchestrationRoutes } from "./modules/search-orchestration/search-orchestration.routes.js";
 import { DeterministicSearchOrchestrator } from "./modules/search-orchestration/search-orchestration.service.js";
 import type { SearchOrchestrationService } from "./modules/search-orchestration/search-orchestration.types.js";
+import { messageInterpretationRoutes } from "./modules/message-interpretation/message-interpretation.routes.js";
+import { DeterministicMessageInterpreter } from "./modules/message-interpretation/message-interpretation.service.js";
+import type { MessageInterpretationService } from "./modules/message-interpretation/message-interpretation.types.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -35,6 +38,7 @@ type AppDependencies = {
   geocodingProvider?: GeocodingProvider;
   locationResolutionService?: LocationResolutionService;
   searchOrchestrationService?: SearchOrchestrationService;
+  messageInterpretationService?: MessageInterpretationService;
   internalApiKey?: string;
 };
 
@@ -63,6 +67,7 @@ export function buildApp({
   geocodingProvider,
   locationResolutionService,
   searchOrchestrationService,
+  messageInterpretationService,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
   const resolvedServiceResolutionRepository = serviceResolutionRepository ?? new PostgresServiceResolutionRepository();
@@ -73,6 +78,7 @@ export function buildApp({
     resolvedLocationResolutionService,
     resolvedMatchingRepository,
   );
+  const resolvedMessageInterpretationService = messageInterpretationService ?? new DeterministicMessageInterpreter();
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
 
@@ -114,6 +120,7 @@ export function buildApp({
   app.register(serviceResolutionRoutes, { prefix: "/internal/service-resolution", repository: resolvedServiceResolutionRepository, internalApiKey });
   app.register(locationResolutionRoutes, { prefix: "/internal/location-resolution", service: resolvedLocationResolutionService, internalApiKey });
   app.register(searchOrchestrationRoutes, { prefix: "/internal/search", service: resolvedSearchOrchestrationService, internalApiKey });
+  app.register(messageInterpretationRoutes, { prefix: "/internal/message-interpretation", service: resolvedMessageInterpretationService, internalApiKey });
 
   return app;
 }

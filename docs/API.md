@@ -323,6 +323,24 @@ O matching recebe o `raw_text` original, o `service_id` resolvido e latitude, lo
 
 Falhas técnicas do geocoder permanecem distintas de uma localização não resolvida: `503 geocoding_unavailable`, `429 geocoding_rate_limited` e `502 geocoding_provider_error`. Falhas inesperadas retornam `500 internal_error` sem detalhes internos.
 
+## Interpretação determinística de mensagem
+
+### `POST /internal/message-interpretation/interpret`
+
+Rota interna protegida por `X-Internal-Key` que transforma uma única mensagem em slots básicos, apenas em memória:
+
+```json
+{ "raw_text": "Minha tomada queimou aqui em Sinop", "country_code": "BR" }
+```
+
+Quando encontra uma localização explícita, retorna `interpreted`, preserva a mensagem completa em `raw_text` e `service_text`, e preenche `location_text`. Manter o texto integral como serviço é intencional: o Service Resolution 3.2 já encontra nomes e aliases dentro de frases e continua sendo o único responsável por reconhecer o serviço.
+
+O fast path reconhece somente expressões conservadoras como `aqui em Sinop`, `na cidade de Cuiabá`, `no município de Sinop` e `em Sinop, MT` no final da mensagem. Acentos, vírgula e UF informada são preservados; somente espaços externos e pontuação terminal são removidos.
+
+Quando não há uma localização textual explícita ou a expressão é genérica (`em casa`, `no trabalho`, `na empresa`, `no meu apartamento`), retorna HTTP 200 com `needs_location`, `location_text: null` e estratégia `none`. Não há confiança numérica artificial.
+
+Este endpoint não valida se a cidade existe, não geocodifica e ainda não chama o Search Orchestrator. Também não usa banco, HTTP, HeiGIT, OpenAI ou biblioteca NLP.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.

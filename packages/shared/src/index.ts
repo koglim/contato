@@ -35,6 +35,10 @@ export {
   searchOrchestrationRequestSchema,
   searchOrchestrationResponseSchema,
 } from "./schemas/search-orchestration.js";
+export {
+  messageInterpretationRequestSchema,
+  messageInterpretationResponseSchema,
+} from "./schemas/message-interpretation.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -71,3 +75,7 @@ export type {
   SearchOrchestrationInput,
   SearchOrchestrationResponse,
 } from "./types/search-orchestration.js";
+export type {
+  MessageInterpretationInput,
+  MessageInterpretationResponse,
+} from "./types/message-interpretation.js";

@@ -72,3 +72,13 @@ O serviço valida a resposta GeoJSON externamente, preserva a ordem de relevânc
 O texto de serviço é sempre resolvido primeiro. Se estiver `unresolved` ou `ambiguous`, o fluxo encerra em `needs_service`. Somente um serviço resolvido permite uma consulta de localização; uma localização não resolvida ou ambígua encerra em `needs_location`. Apenas os dois resultados resolvidos chegam ao Matching Engine, que continua sendo o único componente a criar `search_requests` e `matches` em sua própria transação.
 
 O orquestrador recebe por injeção `ServiceResolutionRepository`, `LocationResolutionService` e `MatchingRepository`; por isso testes usam fakes e não dependem de rede, banco ou chamadas para `localhost`. Ele não interpreta mensagem natural, não usa IA e não implementa WhatsApp. O `raw_text` original é preservado para auditoria do matching.
+
+## Message Interpreter — fast path determinístico
+
+`apps/api/src/modules/message-interpretation` executa o primeiro passo de interpretação em memória:
+
+`Natural language text → Message Interpreter → structured slots`.
+
+O módulo mantém `service_text` igual à mensagem completa e extrai somente localizações textuais explícitas por regras pequenas e conservadoras. Ele é puro, stateless, não possui repository e não chama banco, geocoder, Search Orchestrator ou qualquer API externa. A existência e canonicalização da localidade continuam sob responsabilidade do Location Resolution.
+
+A evolução prevista é `Deterministic Fast Path → se insuficiente, futuro LLM Fallback → slots estruturados`. O fallback não está implementado nesta etapa; nenhuma IA participa do endpoint atual e as decisões de serviço, localização e ranking permanecem nos módulos determinísticos existentes.
