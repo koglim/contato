@@ -64,7 +64,7 @@ export class OpenRouteServiceGeocodingProvider implements GeocodingProvider {
   }
 
   async geocode(input: GeocodingProviderInput): Promise<LocationResolutionCandidate[]> {
-    const url = new URL("geocode/search", `${this.config.baseUrl.replace(/\/$/u, "")}/`);
+    const url = new URL("search", `${this.config.baseUrl.replace(/\/$/u, "")}/`);
     url.search = new URLSearchParams({ text: input.query, "boundary.country": input.country_code, size: String(input.limit) }).toString();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), GEOCODING_TIMEOUT_MS);

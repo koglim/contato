@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const DEFAULT_OPENROUTESERVICE_BASE_URL = "https://api.heigit.org";
+export const DEFAULT_OPENROUTESERVICE_BASE_URL = "https://api.heigit.org/pelias/v1";
 export const DEFAULT_LOCATION_RESOLUTION_CONFIDENCE_THRESHOLD = 0.85;
 export const DEFAULT_LOCATION_RESOLUTION_AMBIGUITY_GAP = 0.1;
 

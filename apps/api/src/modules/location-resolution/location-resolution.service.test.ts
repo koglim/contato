@@ -16,7 +16,7 @@ class FakeProvider implements GeocodingProvider {
 }
 function resolve(results: LocationResolutionCandidate[], config = { confidenceThreshold: 0.85, ambiguityGap: 0.1 }) {
   const provider = new FakeProvider(results);
-  return { provider, service: new DeterministicLocationResolutionService(provider, { apiKey: undefined, baseUrl: "https://api.heigit.org", ...config }) };
+  return { provider, service: new DeterministicLocationResolutionService(provider, { apiKey: undefined, baseUrl: "https://api.heigit.org/pelias/v1", ...config }) };
 }
 
 test("location resolution preserves provider order and applies confidence decisions", async () => {

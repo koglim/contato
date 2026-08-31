@@ -3,7 +3,7 @@ import test from "node:test";
 import { OpenRouteServiceGeocodingProvider } from "./openrouteservice-geocoding.provider.js";
 import { GeocodingProviderError } from "../location-resolution.types.js";
 
-const config = { apiKey: "secret-key", baseUrl: "https://api.heigit.org", confidenceThreshold: 0.85, ambiguityGap: 0.1 };
+const config = { apiKey: "secret-key", baseUrl: "https://api.heigit.org/pelias/v1", confidenceThreshold: 0.85, ambiguityGap: 0.1 };
 const input = { query: "Sinop, MT", country_code: "BR", limit: 5 } as const;
 
 function payload(features: unknown[]) {
@@ -28,7 +28,7 @@ test("geocoding provider uses Authorization and encodes the documented query par
   const results = await provider.geocode(input);
   assert.equal(provider.name, "openrouteservice");
   assert.equal(requestedUrl?.origin, "https://api.heigit.org");
-  assert.equal(requestedUrl?.pathname, "/geocode/search");
+  assert.equal(requestedUrl?.pathname, "/pelias/v1/search");
   assert.equal(requestedUrl?.searchParams.get("text"), "Sinop, MT");
   assert.equal(requestedUrl?.searchParams.get("boundary.country"), "BR");
   assert.equal(requestedUrl?.searchParams.get("size"), "5");

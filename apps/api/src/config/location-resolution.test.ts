@@ -8,6 +8,7 @@ import {
 } from "./location-resolution.js";
 
 test("location resolution configuration uses documented defaults", () => {
+  assert.equal(DEFAULT_OPENROUTESERVICE_BASE_URL, "https://api.heigit.org/pelias/v1");
   assert.deepEqual(readLocationResolutionConfig({}), {
     apiKey: undefined,
     baseUrl: DEFAULT_OPENROUTESERVICE_BASE_URL,
