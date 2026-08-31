@@ -82,3 +82,27 @@ O orquestrador recebe por injeção `ServiceResolutionRepository`, `LocationReso
 O módulo mantém `service_text` igual à mensagem completa e extrai somente localizações textuais explícitas por regras pequenas e conservadoras. Ele é puro, stateless, não possui repository e não chama banco, geocoder, Search Orchestrator ou qualquer API externa. A existência e canonicalização da localidade continuam sob responsabilidade do Location Resolution.
 
 A evolução prevista é `Deterministic Fast Path → se insuficiente, futuro LLM Fallback → slots estruturados`. O fallback não está implementado nesta etapa; nenhuma IA participa do endpoint atual e as decisões de serviço, localização e ranking permanecem nos módulos determinísticos existentes.
+
+## Message Search Pipeline
+
+`apps/api/src/modules/message-search` é uma camada de aplicação stateless acima do Message Interpreter e do Search Orchestrator. Ela não possui repository, não persiste dados diretamente e não chama endpoints internos por HTTP.
+
+```text
+                   raw message
+                       ↓
+             Message Interpreter
+                       ↓
+               structured slots
+                       ↓
+              Search Orchestrator
+             /         |         \
+          Service   Location   Matching
+                       ↓
+                    result
+```
+
+O `buildApp` cria o `DeterministicMessageSearchService` com as mesmas instâncias já resolvidas de `MessageInterpretationService` e `SearchOrchestrationService`. Por request, o interpreter é chamado uma vez; se retornar `needs_location`, o pipeline encerra antes do orquestrador. Quando retorna `interpreted`, os slots são encaminhados sem alteração e o orquestrador é chamado uma vez.
+
+O contrato expõe o estágio responsável pelo resultado. `interpretation` indica ausência de localização explícita; `service_resolution` e `location_resolution` preservam as decisões do 3.4; `matching` representa tanto profissionais encontrados quanto uma busca válida sem resultados. Somente o Matching Engine continua responsável por criar `search_requests` e `matches`.
+
+O futuro fallback LLM ficará entre `raw message` e `structured slots`. Ele poderá complementar o fast path quando a interpretação determinística for insuficiente, sem modificar Service Resolution, Location Resolution, Matching ou Search Orchestrator. Nenhum LLM está implementado nesta etapa.

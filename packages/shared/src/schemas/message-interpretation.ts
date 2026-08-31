@@ -16,7 +16,7 @@ const baseResponseSchema = z.object({
   }),
 });
 
-const interpretedResponseSchema = baseResponseSchema.extend({
+export const messageInterpretedResponseSchema = baseResponseSchema.extend({
   status: z.literal("interpreted"),
   location_text: z.string().min(1),
   interpretation: baseResponseSchema.shape.interpretation.extend({
@@ -24,7 +24,7 @@ const interpretedResponseSchema = baseResponseSchema.extend({
   }),
 });
 
-const needsLocationResponseSchema = baseResponseSchema.extend({
+export const messageNeedsLocationResponseSchema = baseResponseSchema.extend({
   status: z.literal("needs_location"),
   location_text: z.null(),
   interpretation: baseResponseSchema.shape.interpretation.extend({
@@ -33,6 +33,6 @@ const needsLocationResponseSchema = baseResponseSchema.extend({
 });
 
 export const messageInterpretationResponseSchema = z.discriminatedUnion("status", [
-  interpretedResponseSchema,
-  needsLocationResponseSchema,
+  messageInterpretedResponseSchema,
+  messageNeedsLocationResponseSchema,
 ]);

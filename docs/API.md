@@ -341,6 +341,38 @@ Quando não há uma localização textual explícita ou a expressão é genéric
 
 Este endpoint não valida se a cidade existe, não geocodifica e ainda não chama o Search Orchestrator. Também não usa banco, HTTP, HeiGIT, OpenAI ou biblioteca NLP.
 
+## Busca a partir de uma mensagem
+
+### `POST /internal/search/from-message`
+
+Rota interna protegida por `X-Internal-Key` que conecta o Message Interpreter ao Search Orchestrator diretamente em memória:
+
+```json
+{
+  "raw_text": "minha tomada queimou aqui em sinop",
+  "country_code": "BR",
+  "limit": 3
+}
+```
+
+`raw_text` aceita de 1 a 2.000 caracteres. `country_code` é opcional, normalizado para ISO alpha-2 maiúsculo e usa `BR` por padrão. `limit` é opcional, usa `3` por padrão e aceita de 1 a 10.
+
+O fluxo é `Message Interpreter → Search Orchestrator → Service Resolution → Location Resolution → Matching`. Os slots produzidos pelo interpreter são repassados sem reconstrução ou nova normalização, e não há chamada HTTP entre módulos.
+
+Quando o interpreter não encontra uma localização explícita, a resposta é HTTP 200 com `status: needs_location`, `stage: interpretation`, `reason: missing_explicit_location` e `orchestration: null`. Nesse caso o Search Orchestrator não é chamado, portanto não há geocoding, SQL, `search_request` ou matching.
+
+Quando a interpretação termina, os estados do orquestrador são preservados com o estágio correspondente:
+
+- `needs_service` usa `stage: service_resolution` e razão `unresolved` ou `ambiguous`.
+- `needs_location` usa `stage: location_resolution` e razão `unresolved` ou `ambiguous`.
+- `matched` e `no_matches` usam `stage: matching` e `reason: null`.
+
+Assim, `needs_location` na etapa `interpretation` significa que a mensagem não trouxe uma localização explícita confiável; na etapa `location_resolution`, significa que um texto foi extraído, mas o geocoder não o resolveu com segurança.
+
+A corrida de serviço indisponível continua retornando `409 service_unavailable`. Falhas técnicas do geocoder permanecem `503 geocoding_unavailable`, `429 geocoding_rate_limited` ou `502 geocoding_provider_error`; erros inesperados retornam `500 internal_error`. A resposta não adiciona telefone ou e-mail.
+
+O endpoint é o fast path determinístico e não usa OpenAI, outro LLM ou WhatsApp. Um fallback inteligente futuro poderá atuar antes da formação dos slots, sem alterar o Search Orchestrator.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.

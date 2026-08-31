@@ -39,6 +39,7 @@ export {
   messageInterpretationRequestSchema,
   messageInterpretationResponseSchema,
 } from "./schemas/message-interpretation.js";
+export { messageSearchRequestSchema, messageSearchResponseSchema } from "./schemas/message-search.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -79,3 +80,4 @@ export type {
   MessageInterpretationInput,
   MessageInterpretationResponse,
 } from "./types/message-interpretation.js";
+export type { MessageSearchInput, MessageSearchResponse } from "./types/message-search.js";

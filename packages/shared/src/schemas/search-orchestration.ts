@@ -13,7 +13,7 @@ export const searchOrchestrationRequestSchema = z.object({
   limit: z.number().int().min(1).max(10).default(3),
 }).strict();
 
-const needsServiceResponseSchema = z.object({
+export const searchOrchestrationNeedsServiceResponseSchema = z.object({
   status: z.literal("needs_service"),
   reason: z.enum(["unresolved", "ambiguous"]),
   service_resolution: serviceResolutionResponseSchema,
@@ -21,7 +21,7 @@ const needsServiceResponseSchema = z.object({
   matching: z.null(),
 });
 
-const needsLocationResponseSchema = z.object({
+export const searchOrchestrationNeedsLocationResponseSchema = z.object({
   status: z.literal("needs_location"),
   reason: z.enum(["unresolved", "ambiguous"]),
   service_resolution: serviceResolutionResponseSchema,
@@ -29,7 +29,7 @@ const needsLocationResponseSchema = z.object({
   matching: z.null(),
 });
 
-const matchedResponseSchema = z.object({
+export const searchOrchestrationMatchedResponseSchema = z.object({
   status: z.literal("matched"),
   reason: z.null(),
   service_resolution: serviceResolutionResponseSchema,
@@ -37,7 +37,7 @@ const matchedResponseSchema = z.object({
   matching: matchingSearchResponseSchema.refine((value) => value.matches.length > 0),
 });
 
-const noMatchesResponseSchema = z.object({
+export const searchOrchestrationNoMatchesResponseSchema = z.object({
   status: z.literal("no_matches"),
   reason: z.null(),
   service_resolution: serviceResolutionResponseSchema,
@@ -46,8 +46,8 @@ const noMatchesResponseSchema = z.object({
 });
 
 export const searchOrchestrationResponseSchema = z.discriminatedUnion("status", [
-  needsServiceResponseSchema,
-  needsLocationResponseSchema,
-  matchedResponseSchema,
-  noMatchesResponseSchema,
+  searchOrchestrationNeedsServiceResponseSchema,
+  searchOrchestrationNeedsLocationResponseSchema,
+  searchOrchestrationMatchedResponseSchema,
+  searchOrchestrationNoMatchesResponseSchema,
 ]);

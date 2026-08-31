@@ -26,6 +26,8 @@ import type { SearchOrchestrationService } from "./modules/search-orchestration/
 import { messageInterpretationRoutes } from "./modules/message-interpretation/message-interpretation.routes.js";
 import { DeterministicMessageInterpreter } from "./modules/message-interpretation/message-interpretation.service.js";
 import type { MessageInterpretationService } from "./modules/message-interpretation/message-interpretation.types.js";
+import { messageSearchRoutes } from "./modules/message-search/message-search.routes.js";
+import { DeterministicMessageSearchService } from "./modules/message-search/message-search.service.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -79,6 +81,10 @@ export function buildApp({
     resolvedMatchingRepository,
   );
   const resolvedMessageInterpretationService = messageInterpretationService ?? new DeterministicMessageInterpreter();
+  const resolvedMessageSearchService = new DeterministicMessageSearchService(
+    resolvedMessageInterpretationService,
+    resolvedSearchOrchestrationService,
+  );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
 
@@ -121,6 +127,7 @@ export function buildApp({
   app.register(locationResolutionRoutes, { prefix: "/internal/location-resolution", service: resolvedLocationResolutionService, internalApiKey });
   app.register(searchOrchestrationRoutes, { prefix: "/internal/search", service: resolvedSearchOrchestrationService, internalApiKey });
   app.register(messageInterpretationRoutes, { prefix: "/internal/message-interpretation", service: resolvedMessageInterpretationService, internalApiKey });
+  app.register(messageSearchRoutes, { prefix: "/internal/search", service: resolvedMessageSearchService, internalApiKey });
 
   return app;
 }
