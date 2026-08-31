@@ -13,6 +13,8 @@ import type {
   MatchingSearchResponse,
   ServiceResolutionInput,
   ServiceResolutionResponse,
+  LocationResolutionInput,
+  LocationResolutionResponse,
   UpdateProfessionalInput,
 } from "@contatocerto/shared";
 import { buildApp } from "./app.js";
@@ -28,6 +30,7 @@ import type {
 import type { ServiceAreasRepository, ServiceAreaUpdateRecord } from "./modules/service-areas/service-areas.types.js";
 import type { MatchingRepository, MatchingSearchOutcome } from "./modules/matching/matching.types.js";
 import type { ServiceResolutionRepository } from "./modules/service-resolution/service-resolution.types.js";
+import { GeocodingProviderError, type LocationResolutionService } from "./modules/location-resolution/location-resolution.types.js";
 
 const internalApiKey = "test-internal-key";
 
@@ -976,5 +979,75 @@ test("service resolution accepts unresolved and ambiguous outcomes as HTTP 200",
   assert.equal(ambiguous.statusCode, 200);
   assert.equal(ambiguous.json().status, "ambiguous");
   assert.equal(ambiguous.json().candidates.length, 2);
+  await app.close();
+});
+
+class FakeLocationResolutionService implements LocationResolutionService {
+  lastInput: LocationResolutionInput | null = null;
+  response: LocationResolutionResponse = locationResolutionResponse();
+  error: Error | null = null;
+
+  async resolve(input: LocationResolutionInput) {
+    this.lastInput = input;
+    if (this.error) throw this.error;
+    return this.response;
+  }
+}
+
+function locationResolutionResponse(overrides: Partial<LocationResolutionResponse> = {}): LocationResolutionResponse {
+  return {
+    status: "resolved", query: "Sinop, MT", country_code: "BR",
+    match: { label: "Sinop, Mato Grosso, Brasil", latitude: -11.8608, longitude: -55.5091, city: "Sinop", state: "MT", country_code: "BR", neighborhood: null, confidence: 1, layer: "locality" },
+    candidates: [], provider: "openrouteservice", ...overrides,
+  };
+}
+
+function buildLocationResolutionApp() {
+  const service = new FakeLocationResolutionService();
+  return { app: buildApp({ locationResolutionService: service, internalApiKey }), service };
+}
+
+test("location resolution requires the internal key and validates its bounded input", async () => {
+  const { app } = buildLocationResolutionApp();
+  const denied = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", payload: { query: "Sinop" } });
+  const empty = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: {} });
+  const blank = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: " " } });
+  const long = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "a".repeat(501) } });
+  const country = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "Sinop", country_code: "Brazil" } });
+  const limit = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "Sinop", limit: 11 } });
+  assert.equal(denied.statusCode, 401);
+  for (const result of [empty, blank, long, country, limit]) assert.equal(result.statusCode, 400);
+  await app.close();
+});
+
+test("location resolution normalizes request defaults and returns all safe statuses", async () => {
+  const { app, service } = buildLocationResolutionApp();
+  const resolved = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "  Sinop,   MT " } });
+  assert.equal(resolved.statusCode, 200);
+  assert.deepEqual(service.lastInput, { query: "Sinop, MT", country_code: "BR", limit: 5 });
+  assert.equal(resolved.json().match.latitude, -11.8608);
+  assert.equal(resolved.json().match.longitude, -55.5091);
+  service.response = locationResolutionResponse({ status: "ambiguous", match: null, candidates: [locationResolutionResponse().match!] });
+  const ambiguous = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "Sinop", country_code: "br", limit: 1 } });
+  service.response = locationResolutionResponse({ status: "unresolved", match: null, candidates: [] });
+  const unresolved = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "Nada" } });
+  assert.equal(service.lastInput?.country_code, "BR");
+  assert.equal(service.lastInput?.limit, 5);
+  assert.equal(ambiguous.json().status, "ambiguous");
+  assert.equal(unresolved.json().status, "unresolved");
+  await app.close();
+});
+
+test("location resolution maps provider failures without exposing upstream details", async () => {
+  const { app, service } = buildLocationResolutionApp();
+  service.error = new GeocodingProviderError("unavailable");
+  const unavailable = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "Sinop" } });
+  service.error = new GeocodingProviderError("rate_limited");
+  const limited = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "Sinop" } });
+  service.error = new GeocodingProviderError("provider_error");
+  const broken = await app.inject({ method: "POST", url: "/internal/location-resolution/resolve", headers: internalHeaders(), payload: { query: "Sinop" } });
+  assert.deepEqual([unavailable.statusCode, unavailable.json()], [503, { error: "geocoding_unavailable" }]);
+  assert.deepEqual([limited.statusCode, limited.json()], [429, { error: "geocoding_rate_limited" }]);
+  assert.deepEqual([broken.statusCode, broken.json()], [502, { error: "geocoding_provider_error" }]);
   await app.close();
 });

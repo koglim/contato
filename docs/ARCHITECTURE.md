@@ -54,3 +54,11 @@ O repositório executa validação do catálogo, criação de `search_requests`,
 O módulo normaliza texto de forma pura (minúsculas, NFD sem diacríticos, pontuação como separador e espaços compactados) e consulta apenas serviços ativos. A consulta SQL parametrizada considera nome, slug e `service_aliases.normalized_alias`, aplicando exact antes de phrase com fronteiras de tokens. Somente se ambos falharem, usa `pg_trgm` com termos de no mínimo cinco caracteres. O threshold padrão é `0.53` e a margem de ambiguidade é `0.10`; ambos são validados de `0` a `1` pela configuração centralizada e podem ser calibrados pelas variáveis de ambiente do resolver.
 
 Aliases iniciais ficam no seed idempotente do catálogo. O script repete a mesma normalização conceitual da API, mas não compartilha runtime entre TypeScript da aplicação e o seed CommonJS. A execução de `pnpm db:seed` continua uma operação administrativa manual. Um fallback inteligente futuro poderá atuar sobre respostas `unresolved` ou `ambiguous`; não há IA, geocoding, WhatsApp ou matching nesse módulo.
+
+## Location Resolution determinístico
+
+`apps/api/src/modules/location-resolution` descobre **onde** o pedido deve ser atendido a partir de uma consulta textual já isolada. Ele é independente do Service Resolution, que descobre **qual** serviço, e do Matching Engine, que descobre **quem** pode atender: `Text → Service Resolution → Location Resolution → Matching Engine`.
+
+O módulo é stateless e usa uma interface `GeocodingProvider`. A implementação inicial usa HeiGIT/openrouteservice em `https://api.heigit.org/geocode/search`, com chave server-side no header `Authorization`, limite de país e timeout de cinco segundos. Um provider futuro (Mapbox, Google ou Pelias próprio) pode substituir esse adapter sem mudar a decisão do domínio.
+
+O serviço valida a resposta GeoJSON externamente, preserva a ordem de relevância do provider, elimina duplicados estáveis e só seleciona um resultado quando a confiança real passa o threshold configurado e não há concorrente dentro do gap. Sem confiança, o resultado é `unresolved`; falhas do provider são erros técnicos separados. Não há persistência, cache, retry automático ou fallback Nominatim nessa etapa. Localizações GPS que já tragam latitude/longitude não devem passar por geocoding no futuro.

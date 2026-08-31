@@ -13,6 +13,8 @@ import { matchingRoutes } from "./modules/matching/matching.routes.js";
 import type { MatchingRepository } from "./modules/matching/matching.types.js";
 import { serviceResolutionRoutes } from "./modules/service-resolution/service-resolution.routes.js";
 import type { ServiceResolutionRepository } from "./modules/service-resolution/service-resolution.types.js";
+import { locationResolutionRoutes } from "./modules/location-resolution/location-resolution.routes.js";
+import type { GeocodingProvider, LocationResolutionService } from "./modules/location-resolution/location-resolution.types.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -22,6 +24,8 @@ type AppDependencies = {
   serviceAreasRepository?: ServiceAreasRepository;
   matchingRepository?: MatchingRepository;
   serviceResolutionRepository?: ServiceResolutionRepository;
+  geocodingProvider?: GeocodingProvider;
+  locationResolutionService?: LocationResolutionService;
   internalApiKey?: string;
 };
 
@@ -34,6 +38,8 @@ export function buildApp({
   serviceAreasRepository,
   matchingRepository,
   serviceResolutionRepository,
+  geocodingProvider,
+  locationResolutionService,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
 
@@ -75,6 +81,7 @@ export function buildApp({
 
   app.register(matchingRoutes, { prefix: "/internal/matching", repository: matchingRepository, internalApiKey });
   app.register(serviceResolutionRoutes, { prefix: "/internal/service-resolution", repository: serviceResolutionRepository, internalApiKey });
+  app.register(locationResolutionRoutes, { prefix: "/internal/location-resolution", provider: geocodingProvider, service: locationResolutionService, internalApiKey });
 
   return app;
 }

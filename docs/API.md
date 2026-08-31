@@ -271,6 +271,32 @@ Se mais de um serviço for igualmente relevante, o retorno é `ambiguous`, sem `
 
 O seed inicial agora inclui aliases de alta precisão para eletricista, encanador, ar-condicionado, montador de móveis, diarista, pintor e chaveiro. Eles são inseridos de forma idempotente por `pnpm db:seed`; esse comando continua sendo manual e não é disparado pela API ou por deploy.
 
+## Resolução de localização
+
+### `POST /internal/location-resolution/resolve`
+
+Rota interna protegida por `X-Internal-Key` que converte uma **consulta de localização já isolada** em coordenadas estruturadas. Não extrai localização de uma frase completa, não consulta profissionais e não chama o matching.
+
+```json
+{ "query": "Sinop, MT", "country_code": "BR", "limit": 5 }
+```
+
+`query` aceita de 2 a 500 caracteres e preserva texto útil para endereços (acentos, vírgulas, hífens e números); apenas espaços nas extremidades ou repetidos são normalizados. `country_code` é ISO alpha-2, normalizado para maiúsculas e padrão `BR`; `limit` tem padrão `5` e máximo `10`.
+
+O provider inicial é o geocoder do ecossistema openrouteservice/HeiGIT, acessado apenas no servidor pelo host padrão `https://api.heigit.org`. A chave `OPENROUTESERVICE_API_KEY` é enviada no header `Authorization`, nunca na URL ou na resposta. A busca usa `boundary.country` para restringir o país e tem timeout de 5 segundos.
+
+O payload GeoJSON é mapeado defensivamente: `coordinates[0]` é longitude e `coordinates[1]` é latitude. A API retorna somente label, coordenadas, cidade/estado/bairro quando presentes, confiança e layer — nunca o payload, headers ou quota do provider.
+
+O resultado é `resolved` quando a confiança do primeiro candidato alcança `LOCATION_RESOLUTION_CONFIDENCE_THRESHOLD` (padrão `0.85`) e não há segundo candidato dentro de `LOCATION_RESOLUTION_AMBIGUITY_GAP` (padrão `0.10`). É `ambiguous` quando há competidor próximo e `unresolved` quando não há resultado confiável. Ambos os parâmetros aceitam apenas números de `0` a `1`.
+
+Erros técnicos do provider são distintos de `unresolved`:
+
+- `503 geocoding_unavailable`: timeout, falha de rede ou configuração indisponível.
+- `429 geocoding_rate_limited`: limite do upstream.
+- `502 geocoding_provider_error`: resposta inesperada, 5xx ou payload inválido.
+
+Coordenadas GPS já conhecidas futuramente poderão ir diretamente ao matching; o geocoder existe apenas para localização textual.
+
 ## Erros
 
 - `400`: `validation_error`, com detalhes de validação.
