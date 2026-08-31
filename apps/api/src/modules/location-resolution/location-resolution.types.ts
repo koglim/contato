@@ -3,7 +3,7 @@ import type { LocationResolutionCandidate, LocationResolutionInput, LocationReso
 export const GEOCODING_TIMEOUT_MS = 5_000;
 export type GeocodingProviderInput = Pick<LocationResolutionInput, "query" | "country_code" | "limit">;
 export type GeocodingProvider = {
-  readonly name: "openrouteservice";
+  readonly name: string;
   geocode(input: GeocodingProviderInput): Promise<LocationResolutionCandidate[]>;
 };
 export type LocationResolutionService = {

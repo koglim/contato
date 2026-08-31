@@ -26,5 +26,5 @@ export const locationResolutionResponseSchema = z.object({
   country_code: countryCodeSchema,
   match: locationResolutionCandidateSchema.nullable(),
   candidates: z.array(locationResolutionCandidateSchema).max(10),
-  provider: z.literal("openrouteservice"),
+  provider: z.string().min(1),
 });

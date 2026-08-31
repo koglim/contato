@@ -26,6 +26,7 @@ test("geocoding provider uses Authorization and encodes the documented query par
     return new Response(JSON.stringify(payload([feature(), feature()])), { status: 200 });
   });
   const results = await provider.geocode(input);
+  assert.equal(provider.name, "openrouteservice");
   assert.equal(requestedUrl?.origin, "https://api.heigit.org");
   assert.equal(requestedUrl?.pathname, "/geocode/search");
   assert.equal(requestedUrl?.searchParams.get("text"), "Sinop, MT");
