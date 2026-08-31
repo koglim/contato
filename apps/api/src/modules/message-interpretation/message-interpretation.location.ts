@@ -19,11 +19,11 @@ function normalizeForComparison(value: string) {
   return value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("pt-BR");
 }
 
-function validLocation(value: string) {
+function validLocation(value: string, requireState = false) {
   const cleaned = removeTerminalPunctuation(value);
   if (UNSAFE_TRAILING_CONTEXT.test(cleaned)) return null;
   const match = LOCATION_VALUE.exec(cleaned);
-  if (!match) return null;
+  if (!match || (requireState && !match[2])) return null;
   const text = match[2] ? `${match[1]}, ${match[2].toUpperCase()}` : match[1];
   return OBVIOUSLY_GENERIC.has(normalizeForComparison(text)) ? null : text;
 }
@@ -45,6 +45,6 @@ export function extractExplicitLocation(rawText: string): ExplicitLocation | nul
   }
 
   const generic = /\bem\s+(.+)$/iu.exec(rawText);
-  const text = generic ? validLocation(generic[1]) : null;
+  const text = generic ? validLocation(generic[1], true) : null;
   return text ? { text, strategy: "locative_phrase" } : null;
 }
