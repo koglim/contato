@@ -383,7 +383,7 @@ O endpoint continua priorizando o fast path determinístico. A OpenAI só pode s
 
 ## Conversa transitória de busca
 
-As rotas abaixo permitem completar somente uma localização ausente em um segundo turno. `search_conversations` guarda estado transitório da interação; `search_requests` continua sendo a busca de negócio criada exclusivamente pelo Matching quando serviço e localização já estão resolvidos.
+As rotas abaixo permitem completar serviço e localização em múltiplos turnos. `search_conversations` guarda somente o estado transitório da interação; `search_requests` continua sendo a busca de negócio criada exclusivamente pelo Matching quando ambos os slots estão resolvidos.
 
 ### `POST /internal/search/conversations`
 
@@ -397,9 +397,9 @@ Inicia uma busca usando exatamente o Message Search híbrido 3.5C:
 }
 ```
 
-Se o resultado for `matched` ou `no_matches`, nenhuma conversa é persistida e a resposta contém `conversation_id: null` e `conversation_status: completed`. O mesmo ocorre para `needs_service` e para uma localização que já chegou ao Location Resolution, pois a 3.6A ainda não sabe continuar esses estados.
+Se o resultado for `matched` ou `no_matches`, nenhuma conversa é persistida e a resposta contém `conversation_id: null` e `conversation_status: completed`. Uma localização que já chegou ao Location Resolution sem resolver continua sem abrir conversa no start.
 
-Somente `needs_location` com `stage: interpretation` cria uma conversa ativa:
+`needs_location` com `stage: interpretation` cria uma conversa ativa aguardando localização:
 
 ```json
 {
@@ -413,19 +413,43 @@ Somente `needs_location` com `stage: interpretation` cria uma conversa ativa:
 }
 ```
 
-A conversa preserva a mensagem original, `service_text`, país e limite. Seu TTL é controlado por `SEARCH_CONVERSATION_TTL_MINUTES`, com padrão de 30 minutos. O claim de processamento possui lease recuperável configurada por `SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS`, com padrão de 60 segundos.
+`needs_service` com `stage: service_resolution` e `interpretation.location_text` utilizável cria uma conversa aguardando serviço:
+
+```json
+{
+  "conversation_id": "UUID",
+  "conversation_status": "active",
+  "pending_slot": "service",
+  "result": {
+    "status": "needs_service",
+    "stage": "service_resolution"
+  }
+}
+```
+
+A conversa preserva a mensagem original, `service_text`, `location_text` quando disponível, país e limite. Seu TTL é controlado por `SEARCH_CONVERSATION_TTL_MINUTES`, com padrão de 30 minutos. O claim de processamento possui lease recuperável configurada por `SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS`, com padrão de 60 segundos.
 
 ### `POST /internal/search/conversations/:conversationId/messages`
 
-Continua uma conversa que aguarda localização:
+Continua uma conversa usando o significado semântico de `pending_slot`:
 
 ```json
 { "raw_text": "Sinop" }
 ```
 
-Como o contexto já informa que a resposta é uma localização, o texto é enviado diretamente como `location_text` ao Search Orchestrator. O segundo turno não chama Message Interpreter nem OpenAI. A mensagem original continua sendo usada como `raw_text` e `service_text` para que o Service Resolution reconheça a necessidade anterior.
+Se `pending_slot = location`, o texto atual segue diretamente como `location_text`; se `pending_slot = service`, segue como `service_text` e reutiliza a localização armazenada. Nenhuma continuação chama Message Interpreter, Message Search ou OpenAI. A mensagem do primeiro turno permanece como `raw_text` do Search Orchestrator.
 
-Se o orquestrador retornar `matched` ou `no_matches`, a conversa passa para `completed`, limpa `pending_slot` e salva o `search_request_id` criado pelo Matching. Se a localização for `unresolved` ou `ambiguous`, a conversa permanece ativa em `pending_slot: location` e seu TTL é renovado. Um inesperado `needs_service` encerra a conversa, porque continuação de serviço está fora da 3.6A.
+Se o orquestrador retornar `matched` ou `no_matches`, a conversa passa para `completed`, limpa `pending_slot` e salva o `search_request_id` criado pelo Matching. `needs_location` mantém ou altera o slot para `location`; `needs_service` mantém ou altera para `service`. Toda resposta que mantém a conversa ativa preserva as tentativas de serviço/localização e renova o TTL.
+
+```text
+ACTIVE/location ── reply ──┬─ matched | no_matches → COMPLETED
+                            ├─ needs_location       → ACTIVE/location
+                            └─ needs_service        → ACTIVE/service
+
+ACTIVE/service  ── reply ──┬─ matched | no_matches → COMPLETED
+                            ├─ needs_service        → ACTIVE/service
+                            └─ needs_location       → ACTIVE/location
+```
 
 Erros de estado:
 

@@ -119,26 +119,23 @@ Esse fallback não altera Service Resolution, Location Resolution, Matching ou S
 
 ## Search Conversation State
 
-`apps/api/src/modules/search-conversations` adiciona memória curta apenas para coletar uma localização ausente. Ela não é histórico de conversa, agente ou memória de longo prazo:
+`apps/api/src/modules/search-conversations` adiciona memória curta para coletar serviço e localização. Ela não é histórico de conversa, agente ou memória de longo prazo:
 
 ```text
-Turno 1: mensagem → Message Search 3.5C → needs_location / interpretation
-                                           ↓
-                                search_conversation ativa
-                                           ↓
-Turno 2: "Sinop" ──────────────────────────┘
-                     ↓
-              Search Orchestrator
-                     ↓
-                  Matching
-                     ↓
-          search_request de negócio
+START: mensagem → Message Search 3.5C
+                    ├─ needs_location → ACTIVE/location
+                    ├─ needs_service  → ACTIVE/service (se location_text existe)
+                    └─ resultado final → sem conversa pendente
+
+ACTIVE/location ↔ ACTIVE/service → Search Orchestrator → Matching → COMPLETED
 ```
 
-`search_conversations` é o estado transitório que preserva a primeira mensagem, o texto de serviço, país, limite e o slot pendente. `search_requests` não foi reutilizada como sessão: permanece sendo criada pelo Matching somente quando a busca possui dados suficientes. Isso mantém intactos os módulos 3.1–3.5C e separa coleta conversacional de auditoria do marketplace.
+`search_conversations` é o estado transitório que preserva a primeira mensagem, as tentativas de serviço/localização, país, limite e o slot pendente. `search_requests` não foi reutilizada como sessão: permanece sendo criada pelo Matching somente quando a busca possui dados suficientes. Isso mantém intactos os módulos 3.1–3.5C e separa coleta conversacional de auditoria do marketplace.
 
-O início reutiliza a mesma instância de `MessageSearchService`. Apenas `needs_location` no estágio `interpretation` abre uma conversa com `pending_slot = location`; resultados finais ou estados ainda não suportados não deixam sessão pendente. Na continuação, a resposta curta é semanticamente uma localização e segue diretamente ao Search Orchestrator. Portanto o segundo turno não chama o Message Interpreter nem o provider OpenAI.
+O início reutiliza a mesma instância de `MessageSearchService`. `needs_location` no estágio `interpretation` abre `pending_slot = location`; `needs_service` abre `pending_slot = service` somente quando a interpretação já contém `location_text` utilizável. Nas continuações, o slot define semanticamente a resposta: a mensagem atual substitui `location_text` ou `service_text` e segue diretamente ao Search Orchestrator. Portanto nenhum turno de continuação chama Message Search, Message Interpreter ou o provider OpenAI.
 
-O TTL padrão é de 30 minutos e pode ser ajustado por `SEARCH_CONVERSATION_TTL_MINUTES`. A validade é calculada pelo relógio do PostgreSQL. Não há cron de limpeza: registros vencidos são tratados logicamente como expirados e não podem ser retomados. Uma localização ainda ambígua ou não resolvida renova o TTL; `matched` e `no_matches` completam a conversa e vinculam o `search_request_id`. `needs_service` também encerra a conversa, pois coleta de serviço não pertence à 3.6A.
+`location_text` permanece nullable no banco para representar corretamente conversas que ainda aguardam localização. A exigência de uma localização reutilizável em `pending_slot = service` é uma invariável da aplicação, validada na criação e antes da continuação, sem um CHECK rígido que limite futuras evoluções de slots.
+
+O TTL padrão é de 30 minutos e pode ser ajustado por `SEARCH_CONVERSATION_TTL_MINUTES`. A validade é calculada pelo relógio do PostgreSQL. Não há cron de limpeza: registros vencidos são tratados logicamente como expirados e não podem ser retomados. `needs_location` e `needs_service` mantêm a conversa ativa, atualizam o slot correspondente e renovam o TTL; `matched` e `no_matches` completam a conversa e vinculam o `search_request_id`.
 
 Concorrência usa um claim atômico com `processing_token` e `processing_started_at`. Uma conversa ativa e não expirada pode ser reservada quando não possui token ou quando a lease anterior já venceu; a lease padrão de 60 segundos é configurada por `SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS`. Ao reassumir um claim abandonado por crash ou restart, a atualização grava um novo token e reinicia `processing_started_at`. O geocoder roda fora de transação longa; conclusão ou renovação exige o mesmo token e então o remove. Uma segunda mensagem durante uma lease recente recebe `conversation_processing`, enquanto chamadas sequenciais após conclusão recebem `conversation_not_active`. Idempotência de webhooks será responsabilidade da futura camada de canal.

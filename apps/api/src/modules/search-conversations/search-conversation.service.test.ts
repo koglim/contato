@@ -13,9 +13,11 @@ import type { MessageSearchOutcome, MessageSearchService } from "../message-sear
 import type { SearchOrchestrationOutcome, SearchOrchestrationService } from "../search-orchestration/search-orchestration.types.js";
 import { DefaultSearchConversationService } from "./search-conversation.service.js";
 import type {
-  CreatePendingLocationConversation,
+  CompleteSearchConversation,
+  CreatePendingConversation,
   SearchConversationRecord,
   SearchConversationRepository,
+  UpdatePendingConversation,
 } from "./search-conversation.types.js";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
@@ -25,7 +27,7 @@ const startInput: StartSearchConversationInput = { raw_text: originalRawText, co
 
 const serviceResolved: ServiceResolutionResponse = {
   status: "resolved",
-  normalized_text: "preciso de eletricista perto daqui",
+  normalized_text: "eletricista",
   match: {
     service: { id: "33333333-3333-4333-8333-333333333333", name: "Eletricista", slug: "eletricista" },
     method: "phrase",
@@ -125,13 +127,15 @@ function needsLocation(reason: "unresolved" | "ambiguous"): SearchOrchestrationR
   };
 }
 
-const needsService: SearchOrchestrationResponse = {
-  status: "needs_service",
-  reason: "unresolved",
-  service_resolution: { status: "unresolved", normalized_text: originalRawText, match: null, candidates: [] },
-  location_resolution: null,
-  matching: null,
-};
+function needsService(reason: "unresolved" | "ambiguous" = "unresolved"): SearchOrchestrationResponse {
+  return {
+    status: "needs_service",
+    reason,
+    service_resolution: { status: reason, normalized_text: "alguem", match: null, candidates: [] },
+    location_resolution: null,
+    matching: null,
+  };
+}
 
 const needsLocationAtInterpretation: MessageSearchResponse = {
   status: "needs_location",
@@ -147,6 +151,24 @@ const needsLocationAtInterpretation: MessageSearchResponse = {
   },
   orchestration: null,
 };
+
+function messageNeedsService(locationText = "Sinop"): MessageSearchResponse {
+  const rawText = "preciso de alguém aqui em Sinop";
+  return {
+    status: "needs_service",
+    stage: "service_resolution",
+    reason: "unresolved",
+    interpretation: {
+      status: "interpreted",
+      raw_text: rawText,
+      service_text: rawText,
+      location_text: locationText,
+      country_code: "BR",
+      interpretation: { service_strategy: "full_message", location_strategy: "locative_phrase" },
+    },
+    orchestration: needsService("unresolved"),
+  };
+}
 
 function completedMessageSearch(orchestration: typeof matched | typeof noMatches): MessageSearchResponse {
   return {
@@ -174,6 +196,7 @@ function conversation(overrides: Partial<SearchConversationRecord> = {}): Search
     pendingSlot: "location",
     originalRawText,
     serviceText: originalRawText,
+    locationText: null,
     countryCode: "BR",
     limitValue: 3,
     lastMessageText: originalRawText,
@@ -214,35 +237,35 @@ class FakeSearchOrchestrator implements SearchOrchestrationService {
 }
 
 class FakeSearchConversationRepository implements SearchConversationRepository {
-  created: CreatePendingLocationConversation | undefined;
+  created: CreatePendingConversation | undefined;
   record: SearchConversationRecord | null = conversation();
-  claim: SearchConversationRecord | null = conversation();
-  touched: unknown[] | undefined;
-  completed: unknown[] | undefined;
+  claimResult: SearchConversationRecord | null = conversation();
+  updated: UpdatePendingConversation | undefined;
+  completed: CompleteSearchConversation | undefined;
   claimArguments: unknown[] | undefined;
   releases = 0;
 
-  async createPendingLocation(input: CreatePendingLocationConversation) {
+  async createPending(input: CreatePendingConversation) {
     this.created = input;
-    return conversation();
+    return conversation({ pendingSlot: input.pendingSlot, serviceText: input.serviceText, locationText: input.locationText });
   }
 
   async findById() {
     return this.record;
   }
 
-  async claimPendingLocation(id: string, processingToken: string, processingLeaseSeconds: number) {
+  async claim(id: string, processingToken: string, processingLeaseSeconds: number) {
     this.claimArguments = [id, processingToken, processingLeaseSeconds];
-    return this.claim;
+    return this.claimResult;
   }
 
-  async touchPendingLocation(id: string, token: string, text: string, ttl: number) {
-    this.touched = [id, token, text, ttl];
+  async updatePending(input: UpdatePendingConversation) {
+    this.updated = input;
     return true;
   }
 
-  async complete(id: string, token: string, text: string, requestId: string | null) {
-    this.completed = [id, token, text, requestId];
+  async complete(input: CompleteSearchConversation) {
+    this.completed = input;
     return true;
   }
 
@@ -262,43 +285,61 @@ function context() {
   return { repository, messageSearch, orchestrator, service };
 }
 
-test("conversation start creates state only for interpretation-stage missing location", async () => {
-  const active = context();
-  const outcome = await active.service.start(startInput);
-  assert.equal(active.messageSearch.calls, 1);
-  assert.deepEqual(active.messageSearch.received, startInput);
-  assert.deepEqual(active.repository.created, {
+test("start creates pending location and preserves the 3.6A state", async () => {
+  const current = context();
+  const outcome = await current.service.start(startInput);
+  assert.equal(current.messageSearch.calls, 1);
+  assert.deepEqual(current.messageSearch.received, startInput);
+  assert.deepEqual(current.repository.created, {
+    pendingSlot: "location",
     originalRawText,
     serviceText: originalRawText,
+    locationText: null,
     countryCode: "BR",
     limitValue: 3,
     ttlMinutes: 30,
   });
   assert.equal(outcome.kind, "response");
-  if (outcome.kind === "response") {
-    assert.equal(outcome.response.conversation_id, conversationId);
-    assert.equal(outcome.response.conversation_status, "active");
-    assert.equal("pending_slot" in outcome.response && outcome.response.pending_slot, "location");
-  }
-
-  for (const orchestration of [matched, noMatches] as const) {
-    const completed = context();
-    completed.messageSearch.outcome = { kind: "response", response: completedMessageSearch(orchestration) };
-    const completedOutcome = await completed.service.start(startInput);
-    assert.equal(completed.repository.created, undefined);
-    assert.equal(completedOutcome.kind, "response");
-    if (completedOutcome.kind === "response") {
-      assert.equal(completedOutcome.response.conversation_id, null);
-      assert.equal(completedOutcome.response.conversation_status, "completed");
-    }
-  }
+  if (outcome.kind === "response") assert.equal("pending_slot" in outcome.response && outcome.response.pending_slot, "location");
 });
 
-test("conversation start does not open unsupported service or geocoding continuations", async () => {
-  for (const response of [
-    { ...completedMessageSearch(noMatches), status: "needs_service", stage: "service_resolution", reason: "unresolved", orchestration: needsService },
-    { ...completedMessageSearch(noMatches), status: "needs_location", stage: "location_resolution", reason: "unresolved", orchestration: needsLocation("unresolved") },
-  ] as MessageSearchResponse[]) {
+test("start creates pending service only when a reusable location is present", async () => {
+  const current = context();
+  current.messageSearch.outcome = { kind: "response", response: messageNeedsService() };
+  const outcome = await current.service.start({ raw_text: "preciso de alguém aqui em Sinop", country_code: "BR", limit: 4 });
+  assert.deepEqual(current.repository.created, {
+    pendingSlot: "service",
+    originalRawText: "preciso de alguém aqui em Sinop",
+    serviceText: "preciso de alguém aqui em Sinop",
+    locationText: "Sinop",
+    countryCode: "BR",
+    limitValue: 4,
+    ttlMinutes: 30,
+  });
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") assert.equal("pending_slot" in outcome.response && outcome.response.pending_slot, "service");
+
+  const withoutLocation = context();
+  withoutLocation.messageSearch.outcome = { kind: "response", response: messageNeedsService(" ") };
+  const safeOutcome = await withoutLocation.service.start(startInput);
+  assert.equal(withoutLocation.repository.created, undefined);
+  assert.equal(safeOutcome.kind, "response");
+  if (safeOutcome.kind === "response") assert.equal(safeOutcome.response.conversation_id, null);
+});
+
+test("start does not persist matched, no_matches or location-resolution states", async () => {
+  const responses: MessageSearchResponse[] = [
+    completedMessageSearch(matched),
+    completedMessageSearch(noMatches),
+    {
+      ...completedMessageSearch(noMatches),
+      status: "needs_location",
+      stage: "location_resolution",
+      reason: "unresolved",
+      orchestration: needsLocation("unresolved"),
+    },
+  ];
+  for (const response of responses) {
     const current = context();
     current.messageSearch.outcome = { kind: "response", response };
     const outcome = await current.service.start(startInput);
@@ -308,46 +349,43 @@ test("conversation start does not open unsupported service or geocoding continua
   }
 });
 
-test("conversation continuation returns controlled missing, expired and inactive states", async () => {
+test("continuation returns controlled missing, expired and inactive states", async () => {
   const missing = context();
   missing.repository.record = null;
-  assert.deepEqual(await missing.service.continueWithLocation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_not_found" });
+  assert.deepEqual(await missing.service.continueConversation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_not_found" });
 
   const expired = context();
   expired.repository.record = conversation({ isExpired: true });
-  assert.deepEqual(await expired.service.continueWithLocation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_expired" });
+  assert.deepEqual(await expired.service.continueConversation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_expired" });
 
   for (const status of ["completed", "cancelled"] as const) {
     const inactive = context();
     inactive.repository.record = conversation({ status, pendingSlot: null });
-    assert.deepEqual(await inactive.service.continueWithLocation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_not_active" });
+    assert.deepEqual(await inactive.service.continueConversation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_not_active" });
   }
 });
 
-test("conversation continuation atomically rejects a simultaneous processor", async () => {
-  const current = context();
-  current.repository.claim = null;
-  assert.deepEqual(await current.service.continueWithLocation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_processing" });
-  assert.equal(current.orchestrator.calls, 0);
-});
+test("recent claims are rejected while reclaimed stale claims keep the lease", async () => {
+  const recent = context();
+  recent.repository.claimResult = null;
+  assert.deepEqual(await recent.service.continueConversation(conversationId, { raw_text: "Sinop" }), { kind: "conversation_processing" });
+  assert.equal(recent.orchestrator.calls, 0);
 
-test("conversation continuation passes the lease and processes a repository-reclaimed stale claim", async () => {
-  const current = context();
-  const outcome = await current.service.continueWithLocation(conversationId, { raw_text: "Sinop" });
-  assert.equal(current.repository.claimArguments?.[0], conversationId);
-  assert.equal(typeof current.repository.claimArguments?.[1], "string");
-  assert.equal(current.repository.claimArguments?.[2], 60);
-  assert.equal(current.orchestrator.calls, 1);
+  const stale = context();
+  const outcome = await stale.service.continueConversation(conversationId, { raw_text: "Sinop" });
+  assert.equal(stale.repository.claimArguments?.[0], conversationId);
+  assert.equal(typeof stale.repository.claimArguments?.[1], "string");
+  assert.equal(stale.repository.claimArguments?.[2], 60);
+  assert.equal(stale.orchestrator.calls, 1);
   assert.equal(outcome.kind, "response");
 });
 
-test("pending location goes directly to orchestration and completes matched or no_matches", async () => {
+test("pending location sends the reply as location and completes matched or no_matches", async () => {
   for (const response of [matched, noMatches] as const) {
     const current = context();
     current.orchestrator.outcome = { kind: "response", response };
-    const outcome = await current.service.continueWithLocation(conversationId, { raw_text: "Sinop" });
+    const outcome = await current.service.continueConversation(conversationId, { raw_text: "Sinop" });
     assert.equal(current.messageSearch.calls, 0);
-    assert.equal(current.orchestrator.calls, 1);
     assert.deepEqual(current.orchestrator.received, {
       raw_text: originalRawText,
       service_text: originalRawText,
@@ -355,50 +393,89 @@ test("pending location goes directly to orchestration and completes matched or n
       country_code: "BR",
       limit: 3,
     });
-    assert.equal(current.repository.completed?.[0], conversationId);
-    assert.equal(current.repository.completed?.[2], "Sinop");
-    assert.equal(current.repository.completed?.[3], searchRequestId);
+    assert.equal(current.repository.completed?.serviceText, originalRawText);
+    assert.equal(current.repository.completed?.locationText, "Sinop");
+    assert.equal(current.repository.completed?.searchRequestId, searchRequestId);
     assert.equal(outcome.kind, "response");
-    if (outcome.kind === "response") {
-      assert.equal(outcome.response.conversation_status, "completed");
-      assert.equal(outcome.response.pending_slot, null);
-    }
+    if (outcome.kind === "response") assert.equal(outcome.response.conversation_status, "completed");
   }
 });
 
-test("unresolved or ambiguous location keeps the conversation active and renews TTL", async () => {
-  for (const reason of ["unresolved", "ambiguous"] as const) {
+test("pending location keeps location or transitions to service and renews TTL", async () => {
+  for (const response of [needsLocation("unresolved"), needsLocation("ambiguous"), needsService()] as const) {
     const current = context();
-    current.orchestrator.outcome = { kind: "response", response: needsLocation(reason) };
-    const outcome = await current.service.continueWithLocation(conversationId, { raw_text: "Centro" });
-    assert.equal(current.repository.completed, undefined);
-    assert.equal(current.repository.touched?.[0], conversationId);
-    assert.equal(current.repository.touched?.[2], "Centro");
-    assert.equal(current.repository.touched?.[3], 30);
+    current.orchestrator.outcome = { kind: "response", response };
+    const outcome = await current.service.continueConversation(conversationId, { raw_text: "Sinop" });
+    const expectedSlot = response.status === "needs_service" ? "service" : "location";
+    assert.equal(current.repository.updated?.pendingSlot, expectedSlot);
+    assert.equal(current.repository.updated?.serviceText, originalRawText);
+    assert.equal(current.repository.updated?.locationText, "Sinop");
+    assert.equal(current.repository.updated?.ttlMinutes, 30);
     assert.equal(outcome.kind, "response");
-    if (outcome.kind === "response") {
-      assert.equal(outcome.response.conversation_status, "active");
-      assert.equal(outcome.response.pending_slot, "location");
-      assert.equal(outcome.response.result.reason, reason);
-    }
+    if (outcome.kind === "response") assert.equal(outcome.response.pending_slot, expectedSlot);
   }
 });
 
-test("unsupported needs_service completes safely and provider failures release the claim", async () => {
-  const unsupported = context();
-  unsupported.orchestrator.outcome = { kind: "response", response: needsService };
-  const outcome = await unsupported.service.continueWithLocation(conversationId, { raw_text: "Sinop" });
-  assert.equal(unsupported.repository.completed?.[3], null);
-  assert.equal(outcome.kind, "response");
-  if (outcome.kind === "response") assert.equal(outcome.response.conversation_status, "completed");
+test("pending service sends the reply as service and reuses the stored location", async () => {
+  for (const response of [matched, noMatches] as const) {
+    const current = context();
+    const serviceConversation = conversation({ pendingSlot: "service", locationText: "Sinop" });
+    current.repository.record = serviceConversation;
+    current.repository.claimResult = serviceConversation;
+    current.orchestrator.outcome = { kind: "response", response };
+    const outcome = await current.service.continueConversation(conversationId, { raw_text: "eletricista" });
+    assert.equal(current.messageSearch.calls, 0);
+    assert.deepEqual(current.orchestrator.received, {
+      raw_text: originalRawText,
+      service_text: "eletricista",
+      location_text: "Sinop",
+      country_code: "BR",
+      limit: 3,
+    });
+    assert.equal(current.repository.completed?.serviceText, "eletricista");
+    assert.equal(current.repository.completed?.locationText, "Sinop");
+    assert.equal(current.repository.completed?.searchRequestId, searchRequestId);
+    assert.equal(outcome.kind, "response");
+    if (outcome.kind === "response") assert.equal(outcome.response.conversation_status, "completed");
+  }
+});
+
+test("pending service keeps service or transitions to location and preserves useful slots", async () => {
+  for (const response of [needsService("unresolved"), needsService("ambiguous"), needsLocation("unresolved")] as const) {
+    const current = context();
+    const serviceConversation = conversation({ pendingSlot: "service", locationText: "Sinop" });
+    current.repository.record = serviceConversation;
+    current.repository.claimResult = serviceConversation;
+    current.orchestrator.outcome = { kind: "response", response };
+    const outcome = await current.service.continueConversation(conversationId, { raw_text: "eletricista" });
+    const expectedSlot = response.status === "needs_location" ? "location" : "service";
+    assert.equal(current.repository.updated?.pendingSlot, expectedSlot);
+    assert.equal(current.repository.updated?.serviceText, "eletricista");
+    assert.equal(current.repository.updated?.locationText, "Sinop");
+    assert.equal(current.repository.updated?.ttlMinutes, 30);
+    assert.equal(outcome.kind, "response");
+    if (outcome.kind === "response") assert.equal(outcome.response.pending_slot, expectedSlot);
+  }
+});
+
+test("continuation rejects inconsistent service state and releases provider failures", async () => {
+  const inconsistent = context();
+  const invalidConversation = conversation({ pendingSlot: "service", locationText: null });
+  inconsistent.repository.record = invalidConversation;
+  inconsistent.repository.claimResult = invalidConversation;
+  assert.deepEqual(
+    await inconsistent.service.continueConversation(conversationId, { raw_text: "eletricista" }),
+    { kind: "conversation_not_active" },
+  );
+  assert.equal(inconsistent.repository.releases, 1);
 
   const unavailable = context();
   unavailable.orchestrator.outcome = { kind: "service_unavailable" };
-  assert.deepEqual(await unavailable.service.continueWithLocation(conversationId, { raw_text: "Sinop" }), { kind: "service_unavailable" });
+  assert.deepEqual(await unavailable.service.continueConversation(conversationId, { raw_text: "Sinop" }), { kind: "service_unavailable" });
   assert.equal(unavailable.repository.releases, 1);
 
   const broken = context();
   broken.orchestrator.error = new Error("geocoder failed");
-  await assert.rejects(() => broken.service.continueWithLocation(conversationId, { raw_text: "Sinop" }), /geocoder failed/u);
+  await assert.rejects(() => broken.service.continueConversation(conversationId, { raw_text: "Sinop" }), /geocoder failed/u);
   assert.equal(broken.repository.releases, 1);
 });

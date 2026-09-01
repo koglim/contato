@@ -50,7 +50,7 @@ export const searchConversationRoutes: FastifyPluginAsync<SearchConversationRout
     if (!body.success) return validationError(reply, body.error.issues);
 
     try {
-      const outcome = await options.service.continueWithLocation(params.data.conversationId, body.data);
+      const outcome = await options.service.continueConversation(params.data.conversationId, body.data);
       if (outcome.kind === "conversation_not_found") return reply.code(404).send({ error: "conversation_not_found" });
       if (outcome.kind === "conversation_expired") return reply.code(410).send({ error: "conversation_expired" });
       if (outcome.kind === "conversation_not_active") return reply.code(409).send({ error: "conversation_not_active" });

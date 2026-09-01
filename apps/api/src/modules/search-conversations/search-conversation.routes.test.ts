@@ -38,6 +38,32 @@ const startResponse: StartSearchConversationResponse = {
   },
 };
 
+const startServiceResponse: StartSearchConversationResponse = {
+  conversation_id: conversationId,
+  conversation_status: "active",
+  pending_slot: "service",
+  result: {
+    status: "needs_service",
+    stage: "service_resolution",
+    reason: "unresolved",
+    interpretation: {
+      status: "interpreted",
+      raw_text: "preciso de alguém aqui em Sinop",
+      service_text: "preciso de alguém aqui em Sinop",
+      location_text: "Sinop",
+      country_code: "BR",
+      interpretation: { service_strategy: "full_message", location_strategy: "locative_phrase" },
+    },
+    orchestration: {
+      status: "needs_service",
+      reason: "unresolved",
+      service_resolution: { status: "unresolved", normalized_text: "preciso de alguem", match: null, candidates: [] },
+      location_resolution: null,
+      matching: null,
+    },
+  },
+};
+
 const continueResponse: ContinueSearchConversationResponse = {
   conversation_id: conversationId,
   conversation_status: "active",
@@ -68,6 +94,19 @@ const continueResponse: ContinueSearchConversationResponse = {
   },
 };
 
+const continueServiceResponse: ContinueSearchConversationResponse = {
+  conversation_id: conversationId,
+  conversation_status: "active",
+  pending_slot: "service",
+  result: {
+    status: "needs_service",
+    reason: "unresolved",
+    service_resolution: { status: "unresolved", normalized_text: "manutencao", match: null, candidates: [] },
+    location_resolution: null,
+    matching: null,
+  },
+};
+
 class FakeSearchConversationService implements SearchConversationService {
   startCalls = 0;
   continueCalls = 0;
@@ -84,7 +123,7 @@ class FakeSearchConversationService implements SearchConversationService {
     return this.startOutcome;
   }
 
-  async continueWithLocation(id: string, input: ContinueSearchConversationInput) {
+  async continueConversation(id: string, input: ContinueSearchConversationInput) {
     this.continueCalls += 1;
     this.continueInput = { id, input };
     if (this.error) throw this.error;
@@ -141,6 +180,20 @@ test("search conversation start normalizes defaults and returns pending location
   await app.close();
 });
 
+test("search conversation start returns a contract-safe pending service state", async () => {
+  const { app, service } = context();
+  service.startOutcome = { kind: "response", response: startServiceResponse };
+  const response = await app.inject({
+    method: "POST",
+    url: "/internal/search/conversations",
+    headers: { "x-internal-key": internalApiKey },
+    payload: { raw_text: "preciso de alguém aqui em Sinop", country_code: "BR" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), startServiceResponse);
+  await app.close();
+});
+
 test("search conversation continue maps state errors to stable HTTP responses", async () => {
   for (const [kind, status, error] of [
     ["conversation_not_found", 404, "conversation_not_found"],
@@ -176,6 +229,20 @@ test("search conversation continue accepts a location reply and returns a contac
   assert.deepEqual(response.json(), continueResponse);
   assert.equal(response.body.includes('"phone"'), false);
   assert.equal(response.body.includes('"email"'), false);
+  await app.close();
+});
+
+test("search conversation continue accepts the pending service response contract", async () => {
+  const { app, service } = context();
+  service.continueOutcome = { kind: "response", response: continueServiceResponse };
+  const response = await app.inject({
+    method: "POST",
+    url: `/internal/search/conversations/${conversationId}/messages`,
+    headers: { "x-internal-key": internalApiKey },
+    payload: { raw_text: "eletricista" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), continueServiceResponse);
   await app.close();
 });
 

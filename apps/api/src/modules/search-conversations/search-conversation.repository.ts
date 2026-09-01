@@ -1,19 +1,23 @@
 import type { QueryResultRow } from "pg";
 import { query, type SqlValue } from "../../database/connection.js";
 import type {
-  CreatePendingLocationConversation,
+  CompleteSearchConversation,
+  CreatePendingConversation,
   SearchConversationRecord,
   SearchConversationRepository,
+  SearchConversationPendingSlot,
   SearchConversationStatus,
+  UpdatePendingConversation,
 } from "./search-conversation.types.js";
 
 type SearchConversationRow = {
   id: string;
   customer_id: string | null;
   status: SearchConversationStatus;
-  pending_slot: "location" | null;
+  pending_slot: SearchConversationPendingSlot | null;
   original_raw_text: string;
   service_text: string;
+  location_text: string | null;
   country_code: string;
   limit_value: number;
   last_message_text: string | null;
@@ -31,7 +35,7 @@ export type SearchConversationQuery = <T extends QueryResultRow>(
 ) => Promise<{ rows: T[] }>;
 
 const conversationColumns = `
-  id, customer_id, status, pending_slot, original_raw_text, service_text, country_code,
+  id, customer_id, status, pending_slot, original_raw_text, service_text, location_text, country_code,
   limit_value, last_message_text, search_request_id, expires_at, created_at, updated_at,
   completed_at, (expires_at <= NOW()) AS is_expired
 `;
@@ -44,6 +48,7 @@ function toRecord(row: SearchConversationRow): SearchConversationRecord {
     pendingSlot: row.pending_slot,
     originalRawText: row.original_raw_text,
     serviceText: row.service_text,
+    locationText: row.location_text,
     countryCode: row.country_code,
     limitValue: row.limit_value,
     lastMessageText: row.last_message_text,
@@ -59,14 +64,22 @@ function toRecord(row: SearchConversationRow): SearchConversationRecord {
 export class PostgresSearchConversationRepository implements SearchConversationRepository {
   constructor(private readonly execute: SearchConversationQuery = query) {}
 
-  async createPendingLocation(input: CreatePendingLocationConversation) {
+  async createPending(input: CreatePendingConversation) {
     const result = await this.execute<SearchConversationRow>(
       `INSERT INTO search_conversations (
-         status, pending_slot, original_raw_text, service_text, country_code,
+         status, pending_slot, original_raw_text, service_text, location_text, country_code,
          limit_value, last_message_text, expires_at
-       ) VALUES ('active', 'location', $1, $2, $3, $4, $1, NOW() + ($5 * INTERVAL '1 minute'))
+       ) VALUES ('active', $1, $2, $3, $4, $5, $6, $2, NOW() + ($7 * INTERVAL '1 minute'))
        RETURNING ${conversationColumns}`,
-      [input.originalRawText, input.serviceText, input.countryCode, input.limitValue, input.ttlMinutes],
+      [
+        input.pendingSlot,
+        input.originalRawText,
+        input.serviceText,
+        input.locationText,
+        input.countryCode,
+        input.limitValue,
+        input.ttlMinutes,
+      ],
     );
     return toRecord(result.rows[0]);
   }
@@ -79,13 +92,13 @@ export class PostgresSearchConversationRepository implements SearchConversationR
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
-  async claimPendingLocation(id: string, processingToken: string, processingLeaseSeconds: number) {
+  async claim(id: string, processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<SearchConversationRow>(
       `UPDATE search_conversations
        SET processing_token = $2, processing_started_at = NOW()
        WHERE id = $1
          AND status = 'active'
-         AND pending_slot = 'location'
+         AND pending_slot IN ('location', 'service')
          AND expires_at > NOW()
          AND (
            processing_token IS NULL
@@ -97,33 +110,53 @@ export class PostgresSearchConversationRepository implements SearchConversationR
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
-  async touchPendingLocation(id: string, processingToken: string, lastMessageText: string, ttlMinutes: number) {
+  async updatePending(input: UpdatePendingConversation) {
     const result = await this.execute<{ id: string }>(
       `UPDATE search_conversations
-       SET last_message_text = $3,
-           expires_at = NOW() + ($4 * INTERVAL '1 minute'),
+       SET pending_slot = $3,
+           service_text = $4,
+           location_text = $5,
+           last_message_text = $6,
+           expires_at = NOW() + ($7 * INTERVAL '1 minute'),
            processing_token = NULL,
            processing_started_at = NULL
        WHERE id = $1 AND status = 'active' AND processing_token = $2
        RETURNING id`,
-      [id, processingToken, lastMessageText, ttlMinutes],
+      [
+        input.id,
+        input.processingToken,
+        input.pendingSlot,
+        input.serviceText,
+        input.locationText,
+        input.lastMessageText,
+        input.ttlMinutes,
+      ],
     );
     return result.rows.length === 1;
   }
 
-  async complete(id: string, processingToken: string, lastMessageText: string, searchRequestId: string | null) {
+  async complete(input: CompleteSearchConversation) {
     const result = await this.execute<{ id: string }>(
       `UPDATE search_conversations
        SET status = 'completed',
            pending_slot = NULL,
-           last_message_text = $3,
-           search_request_id = $4,
+           service_text = $3,
+           location_text = $4,
+           last_message_text = $5,
+           search_request_id = $6,
            processing_token = NULL,
            processing_started_at = NULL,
            completed_at = NOW()
        WHERE id = $1 AND status = 'active' AND processing_token = $2
        RETURNING id`,
-      [id, processingToken, lastMessageText, searchRequestId],
+      [
+        input.id,
+        input.processingToken,
+        input.serviceText,
+        input.locationText,
+        input.lastMessageText,
+        input.searchRequestId,
+      ],
     );
     return result.rows.length === 1;
   }

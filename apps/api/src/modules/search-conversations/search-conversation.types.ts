@@ -6,14 +6,16 @@ import type {
 } from "@contatocerto/shared";
 
 export type SearchConversationStatus = "active" | "completed" | "cancelled" | "expired";
+export type SearchConversationPendingSlot = "location" | "service";
 
 export type SearchConversationRecord = {
   id: string;
   customerId: string | null;
   status: SearchConversationStatus;
-  pendingSlot: "location" | null;
+  pendingSlot: SearchConversationPendingSlot | null;
   originalRawText: string;
   serviceText: string;
+  locationText: string | null;
   countryCode: string;
   limitValue: number;
   lastMessageText: string | null;
@@ -25,24 +27,45 @@ export type SearchConversationRecord = {
   isExpired: boolean;
 };
 
-export type CreatePendingLocationConversation = {
+export type CreatePendingConversation = {
+  pendingSlot: SearchConversationPendingSlot;
   originalRawText: string;
   serviceText: string;
+  locationText: string | null;
   countryCode: string;
   limitValue: number;
   ttlMinutes: number;
 };
 
+export type UpdatePendingConversation = {
+  id: string;
+  processingToken: string;
+  pendingSlot: SearchConversationPendingSlot;
+  serviceText: string;
+  locationText: string | null;
+  lastMessageText: string;
+  ttlMinutes: number;
+};
+
+export type CompleteSearchConversation = {
+  id: string;
+  processingToken: string;
+  serviceText: string;
+  locationText: string;
+  lastMessageText: string;
+  searchRequestId: string;
+};
+
 export interface SearchConversationRepository {
-  createPendingLocation(input: CreatePendingLocationConversation): Promise<SearchConversationRecord>;
+  createPending(input: CreatePendingConversation): Promise<SearchConversationRecord>;
   findById(id: string): Promise<SearchConversationRecord | null>;
-  claimPendingLocation(
+  claim(
     id: string,
     processingToken: string,
     processingLeaseSeconds: number,
   ): Promise<SearchConversationRecord | null>;
-  touchPendingLocation(id: string, processingToken: string, lastMessageText: string, ttlMinutes: number): Promise<boolean>;
-  complete(id: string, processingToken: string, lastMessageText: string, searchRequestId: string | null): Promise<boolean>;
+  updatePending(input: UpdatePendingConversation): Promise<boolean>;
+  complete(input: CompleteSearchConversation): Promise<boolean>;
   releaseClaim(id: string, processingToken: string): Promise<void>;
 }
 
@@ -60,5 +83,5 @@ export type ContinueSearchConversationOutcome =
 
 export interface SearchConversationService {
   start(input: StartSearchConversationInput): Promise<StartSearchConversationOutcome>;
-  continueWithLocation(conversationId: string, input: ContinueSearchConversationInput): Promise<ContinueSearchConversationOutcome>;
+  continueConversation(conversationId: string, input: ContinueSearchConversationInput): Promise<ContinueSearchConversationOutcome>;
 }

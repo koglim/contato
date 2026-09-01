@@ -11,6 +11,10 @@ import type {
   StartSearchConversationOutcome,
 } from "./search-conversation.types.js";
 
+function hasUsableLocation(locationText: string | null) {
+  return locationText !== null && locationText.trim().length > 0;
+}
+
 export class DefaultSearchConversationService implements SearchConversationService {
   constructor(
     private readonly repository: SearchConversationRepository,
@@ -24,9 +28,11 @@ export class DefaultSearchConversationService implements SearchConversationServi
     if (search.kind === "service_unavailable") return search;
 
     if (search.response.status === "needs_location" && search.response.stage === "interpretation") {
-      const conversation = await this.repository.createPendingLocation({
+      const conversation = await this.repository.createPending({
+        pendingSlot: "location",
         originalRawText: input.raw_text,
         serviceText: search.response.interpretation.service_text,
+        locationText: null,
         countryCode: input.country_code,
         limitValue: input.limit,
         ttlMinutes: this.config.ttlMinutes,
@@ -42,6 +48,31 @@ export class DefaultSearchConversationService implements SearchConversationServi
       };
     }
 
+    if (
+      search.response.status === "needs_service"
+      && search.response.stage === "service_resolution"
+      && hasUsableLocation(search.response.interpretation.location_text)
+    ) {
+      const conversation = await this.repository.createPending({
+        pendingSlot: "service",
+        originalRawText: input.raw_text,
+        serviceText: search.response.interpretation.service_text,
+        locationText: search.response.interpretation.location_text,
+        countryCode: input.country_code,
+        limitValue: input.limit,
+        ttlMinutes: this.config.ttlMinutes,
+      });
+      return {
+        kind: "response",
+        response: {
+          conversation_id: conversation.id,
+          conversation_status: "active",
+          pending_slot: "service",
+          result: search.response,
+        },
+      };
+    }
+
     return {
       kind: "response",
       response: {
@@ -52,7 +83,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
     };
   }
 
-  async continueWithLocation(
+  async continueConversation(
     conversationId: string,
     input: ContinueSearchConversationInput,
   ): Promise<ContinueSearchConversationOutcome> {
@@ -61,7 +92,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
     if (invalidState) return { kind: invalidState };
 
     const processingToken = randomUUID();
-    const conversation = await this.repository.claimPendingLocation(
+    const conversation = await this.repository.claim(
       conversationId,
       processingToken,
       this.config.processingLeaseSeconds,
@@ -72,12 +103,20 @@ export class DefaultSearchConversationService implements SearchConversationServi
       return { kind: currentInvalidState ?? "conversation_processing" };
     }
 
+    if (conversation.pendingSlot === null || (conversation.pendingSlot === "service" && !hasUsableLocation(conversation.locationText))) {
+      await this.repository.releaseClaim(conversationId, processingToken);
+      return { kind: "conversation_not_active" };
+    }
+
+    const serviceText = conversation.pendingSlot === "service" ? input.raw_text : conversation.serviceText;
+    const locationText = conversation.pendingSlot === "location" ? input.raw_text : conversation.locationText!;
+
     let orchestration;
     try {
       orchestration = await this.searchOrchestrationService.orchestrate({
         raw_text: conversation.originalRawText,
-        service_text: conversation.serviceText,
-        location_text: input.raw_text,
+        service_text: serviceText,
+        location_text: locationText,
         country_code: conversation.countryCode,
         limit: conversation.limitValue,
       });
@@ -92,12 +131,15 @@ export class DefaultSearchConversationService implements SearchConversationServi
     }
 
     if (orchestration.response.status === "needs_location") {
-      const updated = await this.repository.touchPendingLocation(
-        conversationId,
+      const updated = await this.repository.updatePending({
+        id: conversationId,
         processingToken,
-        input.raw_text,
-        this.config.ttlMinutes,
-      );
+        pendingSlot: "location",
+        serviceText,
+        locationText,
+        lastMessageText: input.raw_text,
+        ttlMinutes: this.config.ttlMinutes,
+      });
       if (!updated) return { kind: "conversation_not_active" };
       return {
         kind: "response",
@@ -110,15 +152,36 @@ export class DefaultSearchConversationService implements SearchConversationServi
       };
     }
 
-    const searchRequestId = orchestration.response.status === "matched" || orchestration.response.status === "no_matches"
-      ? orchestration.response.matching.search_request_id
-      : null;
-    const completed = await this.repository.complete(
-      conversationId,
+    if (orchestration.response.status === "needs_service") {
+      const updated = await this.repository.updatePending({
+        id: conversationId,
+        processingToken,
+        pendingSlot: "service",
+        serviceText,
+        locationText,
+        lastMessageText: input.raw_text,
+        ttlMinutes: this.config.ttlMinutes,
+      });
+      if (!updated) return { kind: "conversation_not_active" };
+      return {
+        kind: "response",
+        response: {
+          conversation_id: conversationId,
+          conversation_status: "active",
+          pending_slot: "service",
+          result: orchestration.response,
+        },
+      };
+    }
+
+    const completed = await this.repository.complete({
+      id: conversationId,
       processingToken,
-      input.raw_text,
-      searchRequestId,
-    );
+      serviceText,
+      locationText,
+      lastMessageText: input.raw_text,
+      searchRequestId: orchestration.response.matching.search_request_id,
+    });
     if (!completed) return { kind: "conversation_not_active" };
 
     return {
@@ -135,7 +198,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
   private invalidState(record: SearchConversationRecord | null) {
     if (!record) return "conversation_not_found" as const;
     if (record.isExpired || record.status === "expired") return "conversation_expired" as const;
-    if (record.status !== "active" || record.pendingSlot !== "location") return "conversation_not_active" as const;
+    if (record.status !== "active" || record.pendingSlot === null) return "conversation_not_active" as const;
     return null;
   }
 }

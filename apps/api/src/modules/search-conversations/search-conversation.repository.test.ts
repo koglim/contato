@@ -15,6 +15,7 @@ function row(overrides: Record<string, unknown> = {}) {
     pending_slot: "location",
     original_raw_text: "preciso de eletricista perto daqui",
     service_text: "preciso de eletricista perto daqui",
+    location_text: null,
     country_code: "BR",
     limit_value: 3,
     last_message_text: "preciso de eletricista perto daqui",
@@ -37,11 +38,13 @@ function fakeDatabase(results: QueryResultRow[][]) {
   return { calls, repository: new PostgresSearchConversationRepository(execute) };
 }
 
-test("search conversation repository creates and maps a pending location with database TTL", async () => {
+test("search conversation repository creates and maps either pending slot with database TTL", async () => {
   const context = fakeDatabase([[row()]]);
-  const created = await context.repository.createPendingLocation({
+  const created = await context.repository.createPending({
+    pendingSlot: "location",
     originalRawText: "preciso de eletricista perto daqui",
     serviceText: "preciso de eletricista perto daqui",
+    locationText: null,
     countryCode: "BR",
     limitValue: 3,
     ttlMinutes: 30,
@@ -52,10 +55,34 @@ test("search conversation repository creates and maps a pending location with da
   assert.match(context.calls[0]!.text, /INSERT INTO search_conversations/u);
   assert.match(context.calls[0]!.text, /INTERVAL '1 minute'/u);
   assert.deepEqual(context.calls[0]!.values, [
+    "location",
     "preciso de eletricista perto daqui",
     "preciso de eletricista perto daqui",
+    null,
     "BR",
     3,
+    30,
+  ]);
+
+  const serviceContext = fakeDatabase([[row({ pending_slot: "service", location_text: "Sinop" })]]);
+  const pendingService = await serviceContext.repository.createPending({
+    pendingSlot: "service",
+    originalRawText: "preciso de alguém em Sinop",
+    serviceText: "preciso de alguém em Sinop",
+    locationText: "Sinop",
+    countryCode: "BR",
+    limitValue: 4,
+    ttlMinutes: 30,
+  });
+  assert.equal(pendingService.pendingSlot, "service");
+  assert.equal(pendingService.locationText, "Sinop");
+  assert.deepEqual(serviceContext.calls[0]!.values, [
+    "service",
+    "preciso de alguém em Sinop",
+    "preciso de alguém em Sinop",
+    "Sinop",
+    "BR",
+    4,
     30,
   ]);
 });
@@ -72,15 +99,16 @@ test("search conversation repository finds records and exposes database expirati
 test("search conversation repository claims a conversation without a processing token", async () => {
   const token = randomUUID();
   const context = fakeDatabase([[row()]]);
-  assert.equal((await context.repository.claimPendingLocation(conversationId, token, 60))?.id, conversationId);
+  assert.equal((await context.repository.claim(conversationId, token, 60))?.id, conversationId);
   assert.match(context.calls[0]!.text, /SET processing_token = \$2, processing_started_at = NOW\(\)/u);
+  assert.match(context.calls[0]!.text, /pending_slot IN \('location', 'service'\)/u);
   assert.match(context.calls[0]!.text, /expires_at > NOW\(\)/u);
   assert.deepEqual(context.calls[0]!.values, [conversationId, token, 60]);
 });
 
 test("search conversation repository does not reclaim a recent processing lease", async () => {
   const context = fakeDatabase([[]]);
-  assert.equal(await context.repository.claimPendingLocation(conversationId, randomUUID(), 60), null);
+  assert.equal(await context.repository.claim(conversationId, randomUUID(), 60), null);
   assert.match(context.calls[0]!.text, /processing_token IS NULL/u);
   assert.match(context.calls[0]!.text, /processing_started_at <=/u);
   assert.match(context.calls[0]!.text, /\$3 \* INTERVAL '1 second'/u);
@@ -89,24 +117,56 @@ test("search conversation repository does not reclaim a recent processing lease"
 test("search conversation repository can replace an abandoned processing lease", async () => {
   const replacementToken = randomUUID();
   const context = fakeDatabase([[row()]]);
-  assert.equal((await context.repository.claimPendingLocation(conversationId, replacementToken, 60))?.id, conversationId);
+  assert.equal((await context.repository.claim(conversationId, replacementToken, 60))?.id, conversationId);
   assert.match(context.calls[0]!.text, /processing_token IS NULL\s+OR processing_started_at <=/u);
   assert.deepEqual(context.calls[0]!.values, [conversationId, replacementToken, 60]);
 });
 
-test("search conversation repository renews, completes and releases with the same processing token", async () => {
+test("search conversation repository transitions, completes and releases with the same processing token", async () => {
   const token = randomUUID();
   const searchRequestId = randomUUID();
   const context = fakeDatabase([[{ id: conversationId }], [{ id: conversationId }], []]);
 
-  assert.equal(await context.repository.touchPendingLocation(conversationId, token, "Sinop", 30), true);
-  assert.equal(await context.repository.complete(conversationId, token, "Sinop", searchRequestId), true);
+  assert.equal(await context.repository.updatePending({
+    id: conversationId,
+    processingToken: token,
+    pendingSlot: "service",
+    serviceText: "preciso de alguém",
+    locationText: "Sinop",
+    lastMessageText: "Sinop",
+    ttlMinutes: 30,
+  }), true);
+  assert.equal(await context.repository.complete({
+    id: conversationId,
+    processingToken: token,
+    serviceText: "eletricista",
+    locationText: "Sinop",
+    lastMessageText: "eletricista",
+    searchRequestId,
+  }), true);
   await context.repository.releaseClaim(conversationId, token);
 
   assert.match(context.calls[0]!.text, /expires_at = NOW\(\)/u);
-  assert.deepEqual(context.calls[0]!.values, [conversationId, token, "Sinop", 30]);
+  assert.match(context.calls[0]!.text, /pending_slot = \$3/u);
+  assert.match(context.calls[0]!.text, /location_text = \$5/u);
+  assert.deepEqual(context.calls[0]!.values, [
+    conversationId,
+    token,
+    "service",
+    "preciso de alguém",
+    "Sinop",
+    "Sinop",
+    30,
+  ]);
   assert.match(context.calls[1]!.text, /status = 'completed'/u);
   assert.match(context.calls[1]!.text, /processing_token = \$2/u);
-  assert.deepEqual(context.calls[1]!.values, [conversationId, token, "Sinop", searchRequestId]);
+  assert.deepEqual(context.calls[1]!.values, [
+    conversationId,
+    token,
+    "eletricista",
+    "Sinop",
+    "eletricista",
+    searchRequestId,
+  ]);
   assert.match(context.calls[2]!.text, /processing_token = NULL/u);
 });
