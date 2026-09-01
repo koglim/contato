@@ -47,6 +47,10 @@ export {
   startSearchConversationRequestSchema,
   startSearchConversationResponseSchema,
 } from "./schemas/search-conversation.js";
+export {
+  customerSearchMessageRequestSchema,
+  customerSearchMessageResponseSchema,
+} from "./schemas/customer-search.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -94,3 +98,7 @@ export type {
   StartSearchConversationInput,
   StartSearchConversationResponse,
 } from "./types/search-conversation.js";
+export type {
+  CustomerSearchMessageInput,
+  CustomerSearchMessageResponse,
+} from "./types/customer-search.js";

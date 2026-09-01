@@ -115,10 +115,12 @@ class FakeMessageInterpretationService implements MessageInterpretationService {
 class FakeSearchOrchestrationService implements SearchOrchestrationService {
   calls = 0;
   received: SearchOrchestrationInput | undefined;
+  receivedContext: { customerId?: string } | undefined;
   constructor(public outcome: SearchOrchestrationOutcome) {}
-  async orchestrate(input: SearchOrchestrationInput) {
+  async orchestrate(input: SearchOrchestrationInput, context?: { customerId?: string }) {
     this.calls += 1;
     this.received = input;
+    this.receivedContext = context;
     return this.outcome;
   }
 }
@@ -193,6 +195,13 @@ test("message search passes the interpreter slots unchanged to orchestration exa
     country_code: interpreted.country_code,
     limit: 7,
   });
+});
+
+test("message search forwards an internal customer context without exposing it in slots", async () => {
+  const context = createService(interpreted, { kind: "response", response: matched }, true);
+  await context.service.search(input, { customerId: "88888888-8888-4888-8888-888888888888" });
+  assert.deepEqual(context.orchestrator.receivedContext, { customerId: "88888888-8888-4888-8888-888888888888" });
+  assert.equal("customer_id" in (context.orchestrator.received ?? {}), false);
 });
 
 test("message search uses a resolved fallback once and preserves original orchestration inputs", async () => {

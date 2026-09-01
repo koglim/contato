@@ -67,11 +67,12 @@ export class PostgresSearchConversationRepository implements SearchConversationR
   async createPending(input: CreatePendingConversation) {
     const result = await this.execute<SearchConversationRow>(
       `INSERT INTO search_conversations (
-         status, pending_slot, original_raw_text, service_text, location_text, country_code,
+         customer_id, status, pending_slot, original_raw_text, service_text, location_text, country_code,
          limit_value, last_message_text, expires_at
-       ) VALUES ('active', $1, $2, $3, $4, $5, $6, $2, NOW() + ($7 * INTERVAL '1 minute'))
+       ) VALUES ($1, 'active', $2, $3, $4, $5, $6, $7, $3, NOW() + ($8 * INTERVAL '1 minute'))
        RETURNING ${conversationColumns}`,
       [
+        input.customerId ?? null,
         input.pendingSlot,
         input.originalRawText,
         input.serviceText,
@@ -88,6 +89,25 @@ export class PostgresSearchConversationRepository implements SearchConversationR
     const result = await this.execute<SearchConversationRow>(
       `SELECT ${conversationColumns} FROM search_conversations WHERE id = $1`,
       [id],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  async expireStaleForCustomer(customerId: string) {
+    await this.execute(
+      `UPDATE search_conversations
+       SET status = 'expired', pending_slot = NULL, processing_token = NULL, processing_started_at = NULL
+       WHERE customer_id = $1 AND status = 'active' AND expires_at <= NOW()`,
+      [customerId],
+    );
+  }
+
+  async findActiveByCustomerId(customerId: string) {
+    const result = await this.execute<SearchConversationRow>(
+      `SELECT ${conversationColumns} FROM search_conversations
+       WHERE customer_id = $1 AND status = 'active' AND expires_at > NOW()
+       ORDER BY created_at DESC LIMIT 1`,
+      [customerId],
     );
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }

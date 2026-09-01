@@ -1,6 +1,6 @@
 import type { MatchingSearchInput, MatchingSearchResponse } from "@contatocerto/shared";
 import { withTransaction } from "../../database/connection.js";
-import { MATCHING_AVAILABILITY_FRESHNESS_MINUTES, type MatchingRepository, type MatchingSearchOutcome } from "./matching.types.js";
+import { MATCHING_AVAILABILITY_FRESHNESS_MINUTES, type MatchingRepository, type MatchingSearchOutcome, type SearchExecutionContext } from "./matching.types.js";
 
 type ServiceRow = { id: string; name: string; slug: string; is_active: boolean };
 type SearchRequestRow = { id: string };
@@ -27,7 +27,7 @@ function responseFor(input: MatchingSearchInput, service: ServiceRow, searchRequ
 }
 
 export class PostgresMatchingRepository implements MatchingRepository {
-  async search(input: MatchingSearchInput): Promise<MatchingSearchOutcome> {
+  async search(input: MatchingSearchInput, context: SearchExecutionContext = {}): Promise<MatchingSearchOutcome> {
     return withTransaction(async (client) => {
       const serviceResult = await client.query<ServiceRow>("SELECT id, name, slug, is_active FROM services WHERE id = $1", [input.service_id]);
       const service = serviceResult.rows[0];
@@ -35,9 +35,9 @@ export class PostgresMatchingRepository implements MatchingRepository {
       if (!service.is_active) return { kind: "service_inactive" };
 
       const requestResult = await client.query<SearchRequestRow>(
-        `INSERT INTO search_requests (raw_text, service_id, location, city, state, neighborhood, status)
-         VALUES ($1, $2, ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography, $5, $6, $7, 'ready') RETURNING id`,
-        [input.raw_text, input.service_id, input.latitude, input.longitude, input.city ?? null, input.state ?? null, input.neighborhood ?? null],
+        `INSERT INTO search_requests (customer_id, raw_text, service_id, location, city, state, neighborhood, status)
+         VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($5, $4), 4326)::geography, $6, $7, $8, 'ready') RETURNING id`,
+        [context.customerId ?? null, input.raw_text, input.service_id, input.latitude, input.longitude, input.city ?? null, input.state ?? null, input.neighborhood ?? null],
       );
       const searchRequestId = requestResult.rows[0].id;
       const candidatesResult = await client.query<CandidateRow>(

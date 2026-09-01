@@ -139,3 +139,27 @@ O início reutiliza a mesma instância de `MessageSearchService`. `needs_locatio
 O TTL padrão é de 30 minutos e pode ser ajustado por `SEARCH_CONVERSATION_TTL_MINUTES`. A validade é calculada pelo relógio do PostgreSQL. Não há cron de limpeza: registros vencidos são tratados logicamente como expirados e não podem ser retomados. `needs_location` e `needs_service` mantêm a conversa ativa, atualizam o slot correspondente e renovam o TTL; `matched` e `no_matches` completam a conversa e vinculam o `search_request_id`.
 
 Concorrência usa um claim atômico com `processing_token` e `processing_started_at`. Uma conversa ativa e não expirada pode ser reservada quando não possui token ou quando a lease anterior já venceu; a lease padrão de 60 segundos é configurada por `SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS`. Ao reassumir um claim abandonado por crash ou restart, a atualização grava um novo token e reinicia `processing_started_at`. O geocoder roda fora de transação longa; conclusão ou renovação exige o mesmo token e então o remove. Uma segunda mensagem durante uma lease recente recebe `conversation_processing`, enquanto chamadas sequenciais após conclusão recebem `conversation_not_active`. Idempotência de webhooks será responsabilidade da futura camada de canal.
+
+## Customer Conversation Router
+
+O módulo `customer-search` cria a fronteira entre um adaptador de canal futuro e o fluxo de busca. A identidade do cliente é `customers.phone_e164`, recebida já em E.164 canônico. O router não armazena nem devolve o telefone além do momento de resolução do customer e seus logs estruturados registram somente `customer_id`, rota, `conversation_id` e status do resultado.
+
+```text
+Future Channel Adapter
+        ↓
+Customer Conversation Router
+        ↓
+Customer (phone_e164)
+        ↓
+active conversation?
+   ↙             ↘
+start          continue
+   ↓               ↓
+Search Conversation State
+        ↓
+Search Orchestrator → Matching → search_request.customer_id
+```
+
+Antes da consulta, o router expira logicamente conversas vencidas daquele customer. A consulta de conversa exige `customer_id`, `status = active` e `expires_at > NOW()`. Um índice parcial no PostgreSQL permite apenas uma conversa ativa por cliente, mas continua permitindo `customer_id = NULL` para as rotas internas 3.x e seus testes. Em uma corrida rara de start, a violação desse índice é convertida em erro controlado; o router nunca transforma uma mensagem inicial em resposta de contexto desconhecido.
+
+`customer_id` é propagado por contexto de execução interno: Router → Search Conversation → Message Search/Search Orchestrator → Matching. Por isso os contratos HTTP existentes das etapas 3.x permanecem iguais. Continuações usam exclusivamente o `customer_id` persistido na própria conversa, não dados enviados pelo chamador. Idempotência de mensagens, IDs de webhook e integração Evolution/WhatsApp permanecem fora desta fase.

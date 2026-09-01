@@ -55,6 +55,7 @@ test("search conversation repository creates and maps either pending slot with d
   assert.match(context.calls[0]!.text, /INSERT INTO search_conversations/u);
   assert.match(context.calls[0]!.text, /INTERVAL '1 minute'/u);
   assert.deepEqual(context.calls[0]!.values, [
+    null,
     "location",
     "preciso de eletricista perto daqui",
     "preciso de eletricista perto daqui",
@@ -77,6 +78,7 @@ test("search conversation repository creates and maps either pending slot with d
   assert.equal(pendingService.pendingSlot, "service");
   assert.equal(pendingService.locationText, "Sinop");
   assert.deepEqual(serviceContext.calls[0]!.values, [
+    null,
     "service",
     "preciso de alguém em Sinop",
     "preciso de alguém em Sinop",
@@ -94,6 +96,18 @@ test("search conversation repository finds records and exposes database expirati
   assert.equal(expired?.isExpired, true);
   assert.equal(missing, null);
   assert.match(context.calls[0]!.text, /expires_at <= NOW\(\)/u);
+});
+
+test("search conversation repository expires and finds active conversations by customer", async () => {
+  const customerId = randomUUID();
+  const context = fakeDatabase([[], [row({ customer_id: customerId })]]);
+  await context.repository.expireStaleForCustomer(customerId);
+  const active = await context.repository.findActiveByCustomerId(customerId);
+  assert.equal(active?.customerId, customerId);
+  assert.match(context.calls[0]!.text, /SET status = 'expired'/u);
+  assert.match(context.calls[0]!.text, /expires_at <= NOW\(\)/u);
+  assert.match(context.calls[1]!.text, /status = 'active' AND expires_at > NOW\(\)/u);
+  assert.deepEqual(context.calls[1]!.values, [customerId]);
 });
 
 test("search conversation repository claims a conversation without a processing token", async () => {

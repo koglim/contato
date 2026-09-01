@@ -43,6 +43,10 @@ import type {
   SearchConversationRepository,
   SearchConversationService,
 } from "./modules/search-conversations/search-conversation.types.js";
+import { PostgresCustomerRepository, type CustomerRepository } from "./modules/customers/customer.repository.js";
+import { customerSearchRoutes } from "./modules/customer-search/customer-search.routes.js";
+import { DefaultCustomerSearchRouter } from "./modules/customer-search/customer-search.service.js";
+import type { CustomerSearchRouter } from "./modules/customer-search/customer-search.types.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -62,6 +66,8 @@ type AppDependencies = {
   searchConversationRepository?: SearchConversationRepository;
   searchConversationService?: SearchConversationService;
   searchConversationConfig?: SearchConversationConfig;
+  customerRepository?: CustomerRepository;
+  customerSearchRouter?: CustomerSearchRouter;
   internalApiKey?: string;
 };
 
@@ -110,6 +116,8 @@ export function buildApp({
   searchConversationRepository,
   searchConversationService,
   searchConversationConfig,
+  customerRepository,
+  customerSearchRouter,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
   const resolvedMessageInterpretationFallbackConfig =
@@ -139,13 +147,19 @@ export function buildApp({
           duration_ms: durationMs,
         }, "Message location fallback failed"),
       },
-    );
+  );
   const resolvedSearchConversationConfig = searchConversationConfig ?? readSearchConversationConfig();
+  const resolvedSearchConversationRepository = searchConversationRepository ?? new PostgresSearchConversationRepository();
   const resolvedSearchConversationService = searchConversationService ?? new DefaultSearchConversationService(
-    searchConversationRepository ?? new PostgresSearchConversationRepository(),
+    resolvedSearchConversationRepository,
     resolvedMessageSearchService,
     resolvedSearchOrchestrationService,
     resolvedSearchConversationConfig,
+  );
+  const resolvedCustomerSearchRouter = customerSearchRouter ?? new DefaultCustomerSearchRouter(
+    customerRepository ?? new PostgresCustomerRepository(),
+    resolvedSearchConversationRepository,
+    resolvedSearchConversationService,
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
@@ -191,6 +205,7 @@ export function buildApp({
   app.register(messageInterpretationRoutes, { prefix: "/internal/message-interpretation", service: resolvedMessageInterpretationService, internalApiKey });
   app.register(messageSearchRoutes, { prefix: "/internal/search", service: resolvedMessageSearchService, internalApiKey });
   app.register(searchConversationRoutes, { prefix: "/internal/search/conversations", service: resolvedSearchConversationService, internalApiKey });
+  app.register(customerSearchRoutes, { prefix: "/internal/customer-search", router: resolvedCustomerSearchRouter, internalApiKey });
 
   return app;
 }

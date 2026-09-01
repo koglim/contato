@@ -1,6 +1,6 @@
 import type { MatchingSearchInput, SearchOrchestrationInput } from "@contatocerto/shared";
 import type { LocationResolutionService } from "../location-resolution/location-resolution.types.js";
-import type { MatchingRepository } from "../matching/matching.types.js";
+import type { MatchingRepository, SearchExecutionContext } from "../matching/matching.types.js";
 import type { ServiceResolutionRepository } from "../service-resolution/service-resolution.types.js";
 import type { SearchOrchestrationOutcome, SearchOrchestrationService } from "./search-orchestration.types.js";
 
@@ -11,7 +11,7 @@ export class DeterministicSearchOrchestrator implements SearchOrchestrationServi
     private readonly matchingRepository: MatchingRepository,
   ) {}
 
-  async orchestrate(input: SearchOrchestrationInput): Promise<SearchOrchestrationOutcome> {
+  async orchestrate(input: SearchOrchestrationInput, context: SearchExecutionContext = {}): Promise<SearchOrchestrationOutcome> {
     const serviceResolution = await this.serviceResolutionRepository.resolve({ text: input.service_text });
     if (serviceResolution.status !== "resolved" || !serviceResolution.match) {
       return {
@@ -54,7 +54,7 @@ export class DeterministicSearchOrchestrator implements SearchOrchestrationServi
       neighborhood: locationResolution.match.neighborhood,
       limit: input.limit,
     };
-    const matching = await this.matchingRepository.search(matchingInput);
+    const matching = await this.matchingRepository.search(matchingInput, context);
     if (matching.kind !== "success") return { kind: "service_unavailable" };
 
     return {

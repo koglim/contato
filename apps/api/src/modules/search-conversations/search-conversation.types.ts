@@ -28,6 +28,7 @@ export type SearchConversationRecord = {
 };
 
 export type CreatePendingConversation = {
+  customerId?: string;
   pendingSlot: SearchConversationPendingSlot;
   originalRawText: string;
   serviceText: string;
@@ -59,6 +60,8 @@ export type CompleteSearchConversation = {
 export interface SearchConversationRepository {
   createPending(input: CreatePendingConversation): Promise<SearchConversationRecord>;
   findById(id: string): Promise<SearchConversationRecord | null>;
+  expireStaleForCustomer(customerId: string): Promise<void>;
+  findActiveByCustomerId(customerId: string): Promise<SearchConversationRecord | null>;
   claim(
     id: string,
     processingToken: string,
@@ -82,6 +85,6 @@ export type ContinueSearchConversationOutcome =
   | { kind: "conversation_processing" };
 
 export interface SearchConversationService {
-  start(input: StartSearchConversationInput): Promise<StartSearchConversationOutcome>;
+  start(input: StartSearchConversationInput, context?: { customerId?: string }): Promise<StartSearchConversationOutcome>;
   continueConversation(conversationId: string, input: ContinueSearchConversationInput): Promise<ContinueSearchConversationOutcome>;
 }

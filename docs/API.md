@@ -462,6 +462,35 @@ Cada continuação usa um `processing_token` obtido por atualização condiciona
 
 ## Erros
 
+## Customer Conversation Router
+
+`POST /internal/customer-search/messages` é a entrada interna independente de canal para uma mensagem identificada por telefone. Exige `X-Internal-Key`; a futura Evolution API apenas adaptará o webhook para este contrato e não conhecerá slots, matching ou `conversation_id`.
+
+```json
+{
+  "phone_e164": "+5566999999999",
+  "raw_text": "preciso de eletricista perto daqui",
+  "country_code": "BR",
+  "limit": 3
+}
+```
+
+`phone_e164` deve chegar em E.164 canônico: `+`, código de país e até 15 dígitos. Esta camada não infere DDD, país ou formatação nacional. A resposta não devolve o telefone:
+
+```json
+{
+  "customer_id": "UUID",
+  "route": "started",
+  "conversation": { "conversation_id": "UUID", "conversation_status": "active" }
+}
+```
+
+O router cria ou reutiliza o `customer` pelo telefone. Antes de consultar uma conversa, marca as conversas ativas vencidas desse cliente como `expired`. Se existir uma conversa ativa, encaminha a mensagem como continuação; caso contrário, inicia uma busca nova com o `customer_id` apenas no contexto interno. Uma conversa concluída, cancelada ou expirada nunca é reutilizada.
+
+O banco garante no máximo uma conversa `active` por cliente por meio de índice parcial. Uma corrida rara ao criar duas conversas retorna `409 customer_conversation_conflict`; a serialização e idempotência do webhook pertencem à futura camada de canal. `409 conversation_processing` e os erros técnicos já existentes permanecem inalterados.
+
+Quando o Matching cria um `search_request` originado por este endpoint, persiste o mesmo `customer_id`, tanto em resultados de um turno quanto em continuações. As rotas 3.x não recebem `customer_id` em seus bodies e continuam criando `search_request.customer_id = NULL`.
+
 - `400`: `validation_error`, com detalhes de validação.
 - `401`: `unauthorized`.
 - `404`: `professional_not_found`.
@@ -470,4 +499,5 @@ Cada continuação usa um `processing_token` obtido por atualização condiciona
 - `409`: `professional_slug_conflict` se não for possível reservar um slug único.
 - `409`: `professional_service_already_exists` ou `service_inactive`.
 - `409`: `professional_not_active` ao tentar ativar disponibilidade para um profissional não ativo.
+- `409`: `customer_conversation_conflict` para corrida na criação de conversa ativa do mesmo cliente.
 - `500`: `internal_error`, sem expor SQL, stack trace ou segredos.

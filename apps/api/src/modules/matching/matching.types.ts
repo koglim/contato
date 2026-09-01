@@ -2,11 +2,15 @@ import type { MatchingSearchInput, MatchingSearchResponse } from "@contatocerto/
 
 export const MATCHING_AVAILABILITY_FRESHNESS_MINUTES = 240;
 
+export type SearchExecutionContext = {
+  customerId?: string;
+};
+
 export type MatchingSearchOutcome =
   | { kind: "service_not_found" }
   | { kind: "service_inactive" }
   | { kind: "success"; response: MatchingSearchResponse };
 
 export type MatchingRepository = {
-  search(input: MatchingSearchInput): Promise<MatchingSearchOutcome>;
+  search(input: MatchingSearchInput, context?: SearchExecutionContext): Promise<MatchingSearchOutcome>;
 };

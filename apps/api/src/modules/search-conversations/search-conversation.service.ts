@@ -23,12 +23,16 @@ export class DefaultSearchConversationService implements SearchConversationServi
     private readonly config: SearchConversationConfig,
   ) {}
 
-  async start(input: StartSearchConversationInput): Promise<StartSearchConversationOutcome> {
-    const search = await this.messageSearchService.search(input);
+  async start(
+    input: StartSearchConversationInput,
+    context: { customerId?: string } = {},
+  ): Promise<StartSearchConversationOutcome> {
+    const search = await this.messageSearchService.search(input, context);
     if (search.kind === "service_unavailable") return search;
 
     if (search.response.status === "needs_location" && search.response.stage === "interpretation") {
       const conversation = await this.repository.createPending({
+        ...(context.customerId ? { customerId: context.customerId } : {}),
         pendingSlot: "location",
         originalRawText: input.raw_text,
         serviceText: search.response.interpretation.service_text,
@@ -54,6 +58,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
       && hasUsableLocation(search.response.interpretation.location_text)
     ) {
       const conversation = await this.repository.createPending({
+        ...(context.customerId ? { customerId: context.customerId } : {}),
         pendingSlot: "service",
         originalRawText: input.raw_text,
         serviceText: search.response.interpretation.service_text,
@@ -119,7 +124,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
         location_text: locationText,
         country_code: conversation.countryCode,
         limit: conversation.limitValue,
-      });
+      }, conversation.customerId ? { customerId: conversation.customerId } : {});
     } catch (error) {
       await this.repository.releaseClaim(conversationId, processingToken);
       throw error;

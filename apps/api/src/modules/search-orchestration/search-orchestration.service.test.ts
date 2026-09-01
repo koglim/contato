@@ -44,8 +44,9 @@ class FakeLocationResolutionService implements LocationResolutionService {
 class FakeMatchingRepository implements MatchingRepository {
   calls = 0;
   received: MatchingSearchInput | undefined;
+  receivedContext: { customerId?: string } | undefined;
   constructor(private readonly outcome: MatchingSearchOutcome, private readonly order: string[]) {}
-  async search(input: MatchingSearchInput) { this.calls += 1; this.received = input; this.order.push("matching"); return this.outcome; }
+  async search(input: MatchingSearchInput, context?: { customerId?: string }) { this.calls += 1; this.received = input; this.receivedContext = context; this.order.push("matching"); return this.outcome; }
 }
 
 function createOrchestrator(service: ServiceResolutionResponse, location: LocationResolutionResponse, outcome: MatchingSearchOutcome) {
@@ -104,6 +105,9 @@ test("search orchestration passes the original text and resolved location to mat
     raw_text: input.raw_text, service_id: serviceId, latitude: -11.862643, longitude: -55.486386,
     city: "Sinop", state: "MT", neighborhood: null, limit: 7,
   });
+  const customerContext = { customerId: "77777777-7777-4777-8777-777777777777" };
+  await matched.service.orchestrate(input, customerContext);
+  assert.deepEqual(matched.matchingRepository.receivedContext, customerContext);
   const noMatches = createOrchestrator(serviceResolved, locationResolved, { kind: "success", response: matchingResponse([]) });
   const noMatchesResult = await noMatches.service.orchestrate(input);
   assert.equal(noMatchesResult.kind, "response");

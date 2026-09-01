@@ -213,11 +213,13 @@ function conversation(overrides: Partial<SearchConversationRecord> = {}): Search
 class FakeMessageSearchService implements MessageSearchService {
   calls = 0;
   received: StartSearchConversationInput | undefined;
+  receivedContext: { customerId?: string } | undefined;
   outcome: MessageSearchOutcome = { kind: "response", response: needsLocationAtInterpretation };
 
-  async search(input: StartSearchConversationInput) {
+  async search(input: StartSearchConversationInput, context?: { customerId?: string }) {
     this.calls += 1;
     this.received = input;
+    this.receivedContext = context;
     return this.outcome;
   }
 }
@@ -225,12 +227,14 @@ class FakeMessageSearchService implements MessageSearchService {
 class FakeSearchOrchestrator implements SearchOrchestrationService {
   calls = 0;
   received: SearchOrchestrationInput | undefined;
+  receivedContext: { customerId?: string } | undefined;
   outcome: SearchOrchestrationOutcome = { kind: "response", response: matched };
   error: Error | undefined;
 
-  async orchestrate(input: SearchOrchestrationInput) {
+  async orchestrate(input: SearchOrchestrationInput, context?: { customerId?: string }) {
     this.calls += 1;
     this.received = input;
+    this.receivedContext = context;
     if (this.error) throw this.error;
     return this.outcome;
   }
@@ -252,6 +256,12 @@ class FakeSearchConversationRepository implements SearchConversationRepository {
 
   async findById() {
     return this.record;
+  }
+
+  async expireStaleForCustomer() {}
+
+  async findActiveByCustomerId() {
+    return null;
   }
 
   async claim(id: string, processingToken: string, processingLeaseSeconds: number) {
@@ -301,6 +311,20 @@ test("start creates pending location and preserves the 3.6A state", async () => 
   });
   assert.equal(outcome.kind, "response");
   if (outcome.kind === "response") assert.equal("pending_slot" in outcome.response && outcome.response.pending_slot, "location");
+});
+
+test("customer context is persisted for pending starts and propagated on continuation", async () => {
+  const current = context();
+  const customerId = "88888888-8888-4888-8888-888888888888";
+  await current.service.start(startInput, { customerId });
+  assert.deepEqual(current.messageSearch.receivedContext, { customerId });
+  assert.equal(current.repository.created?.customerId, customerId);
+
+  const customerConversation = conversation({ customerId });
+  current.repository.record = customerConversation;
+  current.repository.claimResult = customerConversation;
+  await current.service.continueConversation(conversationId, { raw_text: "Sinop" });
+  assert.deepEqual(current.orchestrator.receivedContext, { customerId });
 });
 
 test("start creates pending service only when a reusable location is present", async () => {

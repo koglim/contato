@@ -6,6 +6,7 @@ import {
 } from "../message-interpretation-fallback/message-location-fallback.types.js";
 import type { MessageInterpretationService } from "../message-interpretation/message-interpretation.types.js";
 import type { SearchOrchestrationService } from "../search-orchestration/search-orchestration.types.js";
+import type { SearchExecutionContext } from "../matching/matching.types.js";
 import type { MessageSearchOutcome, MessageSearchService } from "./message-search.types.js";
 
 type MessageSearchFallbackOptions = {
@@ -27,7 +28,7 @@ export class HybridMessageSearchService implements MessageSearchService {
     private readonly fallbackOptions: MessageSearchFallbackOptions,
   ) {}
 
-  async search(input: MessageSearchInput): Promise<MessageSearchOutcome> {
+  async search(input: MessageSearchInput, context: SearchExecutionContext = {}): Promise<MessageSearchOutcome> {
     const interpretation = this.messageInterpretationService.interpret({
       raw_text: input.raw_text,
       country_code: input.country_code,
@@ -74,7 +75,7 @@ export class HybridMessageSearchService implements MessageSearchService {
       location_text: resolvedInterpretation.location_text,
       country_code: resolvedInterpretation.country_code,
       limit: input.limit,
-    });
+    }, context);
 
     if (orchestration.kind === "service_unavailable") return orchestration;
 
