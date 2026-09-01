@@ -47,6 +47,11 @@ import { PostgresCustomerRepository, type CustomerRepository } from "./modules/c
 import { customerSearchRoutes } from "./modules/customer-search/customer-search.routes.js";
 import { DefaultCustomerSearchRouter } from "./modules/customer-search/customer-search.service.js";
 import type { CustomerSearchRouter } from "./modules/customer-search/customer-search.types.js";
+import { channelInboxRoutes } from "./modules/channel-inbox/channel-inbox.routes.js";
+import { DefaultChannelInboxService } from "./modules/channel-inbox/channel-inbox.service.js";
+import { PostgresChannelInboundMessageRepository } from "./modules/channel-inbox/channel-inbox.repository.js";
+import type { ChannelInboxService, ChannelInboundMessageRepository } from "./modules/channel-inbox/channel-inbox.types.js";
+import { readChannelInboxConfig, type ChannelInboxConfig } from "./config/channel-inbox.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -68,6 +73,9 @@ type AppDependencies = {
   searchConversationConfig?: SearchConversationConfig;
   customerRepository?: CustomerRepository;
   customerSearchRouter?: CustomerSearchRouter;
+  channelInboundMessageRepository?: ChannelInboundMessageRepository;
+  channelInboxService?: ChannelInboxService;
+  channelInboxConfig?: ChannelInboxConfig;
   internalApiKey?: string;
 };
 
@@ -118,6 +126,9 @@ export function buildApp({
   searchConversationConfig,
   customerRepository,
   customerSearchRouter,
+  channelInboundMessageRepository,
+  channelInboxService,
+  channelInboxConfig,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
   const resolvedMessageInterpretationFallbackConfig =
@@ -160,6 +171,11 @@ export function buildApp({
     customerRepository ?? new PostgresCustomerRepository(),
     resolvedSearchConversationRepository,
     resolvedSearchConversationService,
+  );
+  const resolvedChannelInboxService = channelInboxService ?? new DefaultChannelInboxService(
+    channelInboundMessageRepository ?? new PostgresChannelInboundMessageRepository(),
+    resolvedCustomerSearchRouter,
+    channelInboxConfig ?? readChannelInboxConfig(),
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
@@ -206,6 +222,7 @@ export function buildApp({
   app.register(messageSearchRoutes, { prefix: "/internal/search", service: resolvedMessageSearchService, internalApiKey });
   app.register(searchConversationRoutes, { prefix: "/internal/search/conversations", service: resolvedSearchConversationService, internalApiKey });
   app.register(customerSearchRoutes, { prefix: "/internal/customer-search", router: resolvedCustomerSearchRouter, internalApiKey });
+  app.register(channelInboxRoutes, { prefix: "/internal/channel/inbound", service: resolvedChannelInboxService, internalApiKey });
 
   return app;
 }

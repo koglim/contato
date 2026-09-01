@@ -163,3 +163,27 @@ Search Orchestrator → Matching → search_request.customer_id
 Antes da consulta, o router expira logicamente conversas vencidas daquele customer. A consulta de conversa exige `customer_id`, `status = active` e `expires_at > NOW()`. Um índice parcial no PostgreSQL permite apenas uma conversa ativa por cliente, mas continua permitindo `customer_id = NULL` para as rotas internas 3.x e seus testes. Em uma corrida rara de start, a violação desse índice é convertida em erro controlado; o router nunca transforma uma mensagem inicial em resposta de contexto desconhecido.
 
 `customer_id` é propagado por contexto de execução interno: Router → Search Conversation → Message Search/Search Orchestrator → Matching. Por isso os contratos HTTP existentes das etapas 3.x permanecem iguais. Continuações usam exclusivamente o `customer_id` persistido na própria conversa, não dados enviados pelo chamador. Idempotência de mensagens, IDs de webhook e integração Evolution/WhatsApp permanecem fora desta fase.
+
+## Channel Inbox
+
+`channel-inbox` é a camada provider-agnostic acima do Customer Conversation Router. O adapter futuro fornece somente um `provider`, `provider_message_id`, telefone E.164 e texto; ele não carrega `conversation_id` nem conhece slots ou Matching.
+
+```text
+Future Channel Adapter
+       ↓
+Channel Inbox
+       ↓
+Idempotency / Claim
+       ↓
+Customer Conversation Router
+       ↓
+Search Conversation
+       ↓
+Matching
+```
+
+PostgreSQL é a fonte de verdade: `channel_inbound_messages` possui a unicidade `(provider, provider_message_id)`. A criação usa conflito atômico, e o claim condicional reserva uma mensagem `received`, `failed` ou um processamento cuja lease venceu. Não há Redis, lock em memória ou transação longa enquanto o Customer Router pode acionar OpenAI, geocoder ou Matching.
+
+O resultado do Customer Router é salvo como JSONB ao completar e é validado novamente antes de replay de duplicata. A resposta externa é uma projeção que remove texto bruto e texto de serviço, enquanto o registro conserva os campos mínimos necessários para reprocessamento. Logs incluem apenas IDs internos, provider, status e flag de duplicata — nunca telefone, texto ou payload de webhook.
+
+Essa camada reduz duplicatas usuais de uma entrega at-least-once e garante um único processamento ativo em condições normais. Não promete exactly-once matemático: se o processo cair após o efeito do router mas antes do `markProcessed`, um reclaim posterior pode reexecutar o domínio. Idempotência de eventos e adaptação concreta da Evolution permanecem deliberadamente para a próxima fase.

@@ -51,6 +51,11 @@ export {
   customerSearchMessageRequestSchema,
   customerSearchMessageResponseSchema,
 } from "./schemas/customer-search.js";
+export { phoneE164Schema } from "./schemas/phone.js";
+export {
+  channelInboundMessageRequestSchema,
+  channelInboundMessageResponseSchema,
+} from "./schemas/channel-inbox.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -102,3 +107,7 @@ export type {
   CustomerSearchMessageInput,
   CustomerSearchMessageResponse,
 } from "./types/customer-search.js";
+export type {
+  ChannelInboundMessageInput,
+  ChannelInboundMessageResponse,
+} from "./types/channel-inbox.js";

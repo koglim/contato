@@ -1,0 +1,126 @@
+import type { QueryResultRow } from "pg";
+import { query, type SqlValue } from "../../database/connection.js";
+import type {
+  ChannelInboundMessageRecord,
+  ChannelInboundMessageRepository,
+  ChannelInboundMessageStatus,
+  MarkProcessedInboundMessage,
+} from "./channel-inbox.types.js";
+import type { ChannelInboundMessageInput } from "@contatocerto/shared";
+
+type ChannelInboundMessageRow = {
+  id: string;
+  provider: string;
+  provider_message_id: string;
+  status: ChannelInboundMessageStatus;
+  customer_id: string | null;
+  conversation_id: string | null;
+  search_request_id: string | null;
+  result: unknown;
+  error_code: string | null;
+  processing_token: string | null;
+  processing_started_at: Date | null;
+};
+
+export type ChannelInboxQuery = <T extends QueryResultRow>(text: string, values?: unknown[]) => Promise<{ rows: T[] }>;
+
+const columns = `
+  id, provider, provider_message_id, status, customer_id, conversation_id, search_request_id,
+  result, error_code, processing_token, processing_started_at
+`;
+
+function toRecord(row: ChannelInboundMessageRow): ChannelInboundMessageRecord {
+  return {
+    id: row.id,
+    provider: row.provider,
+    providerMessageId: row.provider_message_id,
+    status: row.status,
+    customerId: row.customer_id,
+    conversationId: row.conversation_id,
+    searchRequestId: row.search_request_id,
+    result: row.result,
+    errorCode: row.error_code,
+    processingToken: row.processing_token,
+    processingStartedAt: row.processing_started_at,
+  };
+}
+
+const defaultQuery: ChannelInboxQuery = (text, values = []) => query(text, values as SqlValue[]);
+
+export class PostgresChannelInboundMessageRepository implements ChannelInboundMessageRepository {
+  constructor(private readonly execute: ChannelInboxQuery = defaultQuery) {}
+
+  async createOrFind(input: ChannelInboundMessageInput) {
+    const inserted = await this.execute<ChannelInboundMessageRow>(
+      `INSERT INTO channel_inbound_messages (
+         provider, provider_message_id, phone_e164, raw_text, country_code, limit_value
+       ) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (provider, provider_message_id) DO NOTHING
+       RETURNING ${columns}`,
+      [input.provider, input.provider_message_id, input.phone_e164, input.raw_text, input.country_code, input.limit],
+    );
+    if (inserted.rows[0]) return { record: toRecord(inserted.rows[0]), created: true };
+
+    const existing = await this.execute<ChannelInboundMessageRow>(
+      `SELECT ${columns} FROM channel_inbound_messages
+       WHERE provider = $1 AND provider_message_id = $2`,
+      [input.provider, input.provider_message_id],
+    );
+    if (!existing.rows[0]) throw new Error("Channel inbound message was not found after conflict");
+    return { record: toRecord(existing.rows[0]), created: false };
+  }
+
+  async findById(id: string) {
+    const result = await this.execute<ChannelInboundMessageRow>(
+      `SELECT ${columns} FROM channel_inbound_messages WHERE id = $1`,
+      [id],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  async claim(id: string, processingToken: string, processingLeaseSeconds: number) {
+    const result = await this.execute<ChannelInboundMessageRow>(
+      `UPDATE channel_inbound_messages
+       SET status = 'processing', processing_token = $2, processing_started_at = NOW(), error_code = NULL
+       WHERE id = $1
+         AND (
+           status IN ('received', 'failed')
+           OR (status = 'processing' AND processing_started_at <= NOW() - ($3 * INTERVAL '1 second'))
+         )
+       RETURNING ${columns}`,
+      [id, processingToken, processingLeaseSeconds],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  async markProcessed(input: MarkProcessedInboundMessage) {
+    const result = await this.execute<{ id: string }>(
+      `UPDATE channel_inbound_messages
+       SET status = 'processed', customer_id = $3, conversation_id = $4, search_request_id = $5,
+           result = $6::jsonb, error_code = NULL, processing_token = NULL, processing_started_at = NULL,
+           processed_at = NOW()
+       WHERE id = $1 AND status = 'processing' AND processing_token = $2
+       RETURNING id`,
+      [
+        input.id,
+        input.processingToken,
+        input.customerId,
+        input.conversationId,
+        input.searchRequestId,
+        JSON.stringify(input.result),
+      ],
+    );
+    return result.rows.length === 1;
+  }
+
+  async markFailed(id: string, processingToken: string, errorCode: string) {
+    const result = await this.execute<{ id: string }>(
+      `UPDATE channel_inbound_messages
+       SET status = 'failed', error_code = $3, processing_token = NULL, processing_started_at = NULL
+       WHERE id = $1 AND status = 'processing' AND processing_token = $2
+       RETURNING id`,
+      [id, processingToken, errorCode],
+    );
+    return result.rows.length === 1;
+  }
+}
