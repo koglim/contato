@@ -506,7 +506,7 @@ Quando o Matching cria um `search_request` originado por este endpoint, persiste
 }
 ```
 
-O par `(provider, provider_message_id)` é a chave de idempotência persistida. O provider é normalizado para minúsculas e usa identificador simples; providers distintos podem reutilizar o mesmo ID externo. Na primeira entrega, a inbox cria e faz claim do registro antes de chamar diretamente o Customer Router. Quando já está `processed`, devolve o mesmo resultado validado com `duplicate: true`, sem chamar o router. Quando está em processamento dentro da lease, retorna `409 channel_message_processing`.
+O par `(provider, provider_message_id)` é a chave de idempotência persistida. O provider é normalizado para minúsculas e usa identificador simples; providers distintos podem reutilizar o mesmo ID externo. A primeira entrega torna imutáveis telefone, texto, país e limite daquela chave. Uma entrega posterior com qualquer um desses valores diferente retorna `409 channel_message_payload_conflict`, sem replay, claim ou chamada ao router. Quando os valores são iguais e o registro já está `processed`, a inbox devolve o mesmo resultado validado com `duplicate: true`, sem chamar o router. Quando está em processamento dentro da lease, retorna `409 channel_message_processing`.
 
 A resposta nunca inclui `phone_e164`, `raw_text` ou `service_text`. O resultado persistido é validado pelo contrato completo do Customer Router antes do replay e é projetado para uma resposta segura. A inbox também salva `customer_id`, `conversation_id` e, quando houver matching, `search_request_id`.
 
@@ -524,4 +524,5 @@ Há uma limitação conhecida: uma queda depois do Customer Router concluir e an
 - `409`: `professional_not_active` ao tentar ativar disponibilidade para um profissional não ativo.
 - `409`: `customer_conversation_conflict` para corrida na criação de conversa ativa do mesmo cliente.
 - `409`: `channel_message_processing` quando a mesma mensagem de canal ainda possui claim ativo.
+- `409`: `channel_message_payload_conflict` quando a mesma idempotency key é recebida com payload diferente.
 - `500`: `internal_error`, sem expor SQL, stack trace ou segredos.

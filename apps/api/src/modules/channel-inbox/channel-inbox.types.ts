@@ -10,6 +10,10 @@ export type ChannelInboundMessageRecord = {
   id: string;
   provider: string;
   providerMessageId: string;
+  phoneE164: string;
+  rawText: string;
+  countryCode: string;
+  limitValue: number;
   status: ChannelInboundMessageStatus;
   customerId: string | null;
   conversationId: string | null;
@@ -40,6 +44,7 @@ export interface ChannelInboundMessageRepository {
 export type ChannelInboxOutcome =
   | { kind: "response"; response: ChannelInboundMessageResponse }
   | { kind: "channel_message_processing" }
+  | { kind: "channel_message_payload_conflict" }
   | { kind: "channel_message_result_invalid" }
   | { kind: "customer_conversation_conflict" }
   | { kind: "conversation_processing" }

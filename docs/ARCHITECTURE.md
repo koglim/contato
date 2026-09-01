@@ -182,7 +182,7 @@ Search Conversation
 Matching
 ```
 
-PostgreSQL é a fonte de verdade: `channel_inbound_messages` possui a unicidade `(provider, provider_message_id)`. A criação usa conflito atômico, e o claim condicional reserva uma mensagem `received`, `failed` ou um processamento cuja lease venceu. Não há Redis, lock em memória ou transação longa enquanto o Customer Router pode acionar OpenAI, geocoder ou Matching.
+PostgreSQL é a fonte de verdade: `channel_inbound_messages` possui a unicidade `(provider, provider_message_id)`. A primeira inserção fixa telefone, texto, país e limite para a chave; toda nova entrega compara seu payload normalizado com os valores persistidos antes de replay ou claim. Uma divergência retorna conflito controlado e não chama o domínio. O claim condicional reserva uma mensagem `received`, `failed` ou um processamento cuja lease venceu. Não há Redis, lock em memória ou transação longa enquanto o Customer Router pode acionar OpenAI, geocoder ou Matching.
 
 O resultado do Customer Router é salvo como JSONB ao completar e é validado novamente antes de replay de duplicata. A resposta externa é uma projeção que remove texto bruto e texto de serviço, enquanto o registro conserva os campos mínimos necessários para reprocessamento. Logs incluem apenas IDs internos, provider, status e flag de duplicata — nunca telefone, texto ou payload de webhook.
 

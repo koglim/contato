@@ -48,7 +48,7 @@ function pendingRouterResponse(): CustomerSearchMessageResponse {
 }
 
 function record(overrides: Partial<ChannelInboundMessageRecord> = {}): ChannelInboundMessageRecord {
-  return { id: messageId, provider: "test", providerMessageId: "msg-001", status: "received", customerId: null, conversationId: null, searchRequestId: null, result: null, errorCode: null, processingToken: null, processingStartedAt: null, ...overrides };
+  return { id: messageId, provider: "test", providerMessageId: "msg-001", phoneE164: input.phone_e164, rawText: input.raw_text, countryCode: input.country_code, limitValue: input.limit, status: "received", customerId: null, conversationId: null, searchRequestId: null, result: null, errorCode: null, processingToken: null, processingStartedAt: null, ...overrides };
 }
 
 class FakeRepository implements ChannelInboundMessageRepository {
@@ -62,7 +62,7 @@ class FakeRepository implements ChannelInboundMessageRepository {
   async claim(_id: string, token: string) {
     if (!this.claimed) return null;
     this.claimed = false;
-    this.current = record({ status: "processing", processingToken: token, processingStartedAt: new Date() });
+    this.current = { ...this.current, status: "processing", processingToken: token, processingStartedAt: new Date() };
     return this.current;
   }
   async markProcessed(value: MarkProcessedInboundMessage) { this.markedProcessed = value; this.current = record({ status: "processed", result: value.result, customerId: value.customerId, conversationId: value.conversationId, searchRequestId: value.searchRequestId }); return true; }
@@ -71,10 +71,11 @@ class FakeRepository implements ChannelInboundMessageRepository {
 
 class FakeRouter implements CustomerSearchRouter {
   calls = 0;
+  received: Parameters<CustomerSearchRouter["route"]>[0] | undefined;
   outcome: Awaited<ReturnType<CustomerSearchRouter["route"]>> = { kind: "response", response: routerResponse() };
   started: (() => void) | undefined;
   pending: Promise<void> | undefined;
-  async route() { this.calls += 1; this.started?.(); await this.pending; return this.outcome; }
+  async route(inputValue: Parameters<CustomerSearchRouter["route"]>[0]) { this.calls += 1; this.received = inputValue; this.started?.(); await this.pending; return this.outcome; }
 }
 
 function context() {
@@ -108,6 +109,46 @@ test("processed duplicate replays only a schema-validated stored result", async 
 
   current.repository.current = record({ status: "processed", result: { corrupt: true } });
   assert.deepEqual(await current.service.receive(input), { kind: "channel_message_result_invalid" });
+});
+
+test("a provider message key is bound to its first normalized payload", async () => {
+  const variants = [
+    { ...input, raw_text: "eletricista" },
+    { ...input, phone_e164: "+5566888888888" },
+    { ...input, country_code: "US" },
+    { ...input, limit: 4 },
+  ];
+  for (const variant of variants) {
+    const current = context();
+    current.repository.created = false;
+    current.repository.current = record({ status: "processed", result: routerResponse() });
+    assert.deepEqual(await current.service.receive(variant), { kind: "channel_message_payload_conflict" });
+    assert.equal(current.router.calls, 0);
+  }
+});
+
+test("failed and stale processing only reclaim matching payloads and use the claimed record", async () => {
+  const current = context();
+  current.repository.created = false;
+  current.repository.current = record({ status: "failed", rawText: "Sinop", countryCode: "BR", limitValue: 2 });
+  const requestWithSamePayload = { ...input, raw_text: "Sinop", limit: 2 };
+  assert.equal((await current.service.receive(requestWithSamePayload)).kind, "response");
+  assert.deepEqual(current.router.received, { phone_e164: input.phone_e164, raw_text: "Sinop", country_code: "BR", limit: 2 });
+
+  const conflict = context();
+  conflict.repository.created = false;
+  conflict.repository.current = record({ status: "failed" });
+  assert.deepEqual(await conflict.service.receive({ ...input, raw_text: "outro texto" }), { kind: "channel_message_payload_conflict" });
+  assert.equal(conflict.router.calls, 0);
+
+  const stale = context();
+  stale.repository.created = false;
+  stale.repository.current = record({ status: "processing", processingToken: "abandoned", processingStartedAt: new Date(0) });
+  assert.equal((await stale.service.receive(input)).kind, "response");
+  const staleConflict = context();
+  staleConflict.repository.created = false;
+  staleConflict.repository.current = record({ status: "processing", processingToken: "abandoned", processingStartedAt: new Date(0) });
+  assert.deepEqual(await staleConflict.service.receive({ ...input, raw_text: "outro texto" }), { kind: "channel_message_payload_conflict" });
 });
 
 test("channel inbox does not expose raw or service text from pending router results", async () => {

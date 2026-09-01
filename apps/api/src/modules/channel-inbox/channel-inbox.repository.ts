@@ -12,6 +12,10 @@ type ChannelInboundMessageRow = {
   id: string;
   provider: string;
   provider_message_id: string;
+  phone_e164: string;
+  raw_text: string;
+  country_code: string;
+  limit_value: number;
   status: ChannelInboundMessageStatus;
   customer_id: string | null;
   conversation_id: string | null;
@@ -25,7 +29,8 @@ type ChannelInboundMessageRow = {
 export type ChannelInboxQuery = <T extends QueryResultRow>(text: string, values?: unknown[]) => Promise<{ rows: T[] }>;
 
 const columns = `
-  id, provider, provider_message_id, status, customer_id, conversation_id, search_request_id,
+  id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value,
+  status, customer_id, conversation_id, search_request_id,
   result, error_code, processing_token, processing_started_at
 `;
 
@@ -34,6 +39,10 @@ function toRecord(row: ChannelInboundMessageRow): ChannelInboundMessageRecord {
     id: row.id,
     provider: row.provider,
     providerMessageId: row.provider_message_id,
+    phoneE164: row.phone_e164,
+    rawText: row.raw_text,
+    countryCode: row.country_code,
+    limitValue: row.limit_value,
     status: row.status,
     customerId: row.customer_id,
     conversationId: row.conversation_id,

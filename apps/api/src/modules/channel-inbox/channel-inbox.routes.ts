@@ -26,6 +26,7 @@ export const channelInboxRoutes: FastifyPluginAsync<ChannelInboxRoutesOptions> =
     try {
       const outcome = await options.service.receive(body.data);
       if (outcome.kind === "channel_message_processing") return reply.code(409).send({ error: outcome.kind });
+      if (outcome.kind === "channel_message_payload_conflict") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "channel_message_result_invalid") return reply.code(500).send({ error: outcome.kind });
       if (outcome.kind === "customer_conversation_conflict") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "conversation_processing") return reply.code(409).send({ error: outcome.kind });

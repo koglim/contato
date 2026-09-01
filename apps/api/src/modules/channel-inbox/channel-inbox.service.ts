@@ -35,6 +35,13 @@ function publicResult(result: ReturnType<typeof customerSearchMessageResponseSch
   return sanitized;
 }
 
+function sameInboundPayload(record: ChannelInboundMessageRecord, input: ChannelInboundMessageInput) {
+  return record.phoneE164 === input.phone_e164
+    && record.rawText === input.raw_text
+    && record.countryCode === input.country_code
+    && record.limitValue === input.limit;
+}
+
 export class DefaultChannelInboxService implements ChannelInboxService {
   constructor(
     private readonly repository: ChannelInboundMessageRepository,
@@ -44,6 +51,9 @@ export class DefaultChannelInboxService implements ChannelInboxService {
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
     const registered = await this.repository.createOrFind(input);
+    if (!sameInboundPayload(registered.record, input)) {
+      return { kind: "channel_message_payload_conflict" };
+    }
     if (registered.record.status === "processed") return this.replay(registered.record);
 
     const processingToken = randomUUID();
@@ -60,10 +70,10 @@ export class DefaultChannelInboxService implements ChannelInboxService {
 
     try {
       const routed = await this.customerSearchRouter.route({
-        phone_e164: input.phone_e164,
-        raw_text: input.raw_text,
-        country_code: input.country_code,
-        limit: input.limit,
+        phone_e164: claimed.phoneE164,
+        raw_text: claimed.rawText,
+        country_code: claimed.countryCode,
+        limit: claimed.limitValue,
       });
       if (routed.kind !== "response") {
         await this.repository.markFailed(claimed.id, processingToken, routed.kind);
