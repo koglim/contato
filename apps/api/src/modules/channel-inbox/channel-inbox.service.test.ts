@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ChannelInboundMessageInput, CustomerSearchMessageResponse } from "@contatocerto/shared";
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import { DefaultChannelInboxService } from "./channel-inbox.service.js";
+import { DefaultMessagePresenter } from "../message-presentation/message-presentation.service.js";
 import type {
   ChannelInboundMessageRecord,
   ChannelInboundMessageRepository,
@@ -80,7 +81,7 @@ class FakeRouter implements CustomerSearchRouter {
 
 function context() {
   const repository = new FakeRepository(); const router = new FakeRouter();
-  return { repository, router, service: new DefaultChannelInboxService(repository, router, { processingLeaseSeconds: 60 }) };
+  return { repository, router, service: new DefaultChannelInboxService(repository, router, { processingLeaseSeconds: 60 }, new DefaultMessagePresenter()) };
 }
 
 test("channel inbox processes a new message once and persists its routing references", async () => {
@@ -90,6 +91,7 @@ test("channel inbox processes a new message once and persists its routing refere
   if (outcome.kind === "response") {
     assert.equal(outcome.response.message_id, messageId);
     assert.equal(outcome.response.duplicate, false);
+    assert.equal(outcome.response.reply_text.startsWith("Não encontrei profissionais"), true);
     assert.equal(outcome.response.result.customer_id, customerId);
   }
   assert.equal(current.router.calls, 1);
@@ -104,7 +106,10 @@ test("processed duplicate replays only a schema-validated stored result", async 
   current.repository.current = record({ status: "processed", result: routerResponse() });
   const outcome = await current.service.receive(input);
   assert.equal(outcome.kind, "response");
-  if (outcome.kind === "response") assert.equal(outcome.response.duplicate, true);
+  if (outcome.kind === "response") {
+    assert.equal(outcome.response.duplicate, true);
+    assert.equal(outcome.response.reply_text.startsWith("Não encontrei profissionais"), true);
+  }
   assert.equal(current.router.calls, 0);
 
   current.repository.current = record({ status: "processed", result: { corrupt: true } });

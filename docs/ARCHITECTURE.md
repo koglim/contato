@@ -180,10 +180,16 @@ Customer Conversation Router
 Search Conversation
        ↓
 Matching
+       ↓
+Message Presenter
+       ↓
+reply_text → n8n → Future Evolution Outbound
 ```
 
 PostgreSQL é a fonte de verdade: `channel_inbound_messages` possui a unicidade `(provider, provider_message_id)`. A primeira inserção fixa telefone, texto, país e limite para a chave; toda nova entrega compara seu payload normalizado com os valores persistidos antes de replay ou claim. Uma divergência retorna conflito controlado e não chama o domínio. O claim condicional reserva uma mensagem `received`, `failed` ou um processamento cuja lease venceu. Não há Redis, lock em memória ou transação longa enquanto o Customer Router pode acionar OpenAI, geocoder ou Matching.
 
-O resultado do Customer Router é salvo como JSONB ao completar e é validado novamente antes de replay de duplicata. A resposta externa é uma projeção que remove texto bruto e texto de serviço, enquanto o registro conserva os campos mínimos necessários para reprocessamento. Logs incluem apenas IDs internos, provider, status e flag de duplicata — nunca telefone, texto ou payload de webhook.
+O resultado do Customer Router é salvo como JSONB ao completar e é validado novamente antes de replay de duplicata. O módulo `message-presentation` é puro e determinístico: recebe esse resultado, produz `reply_text` em pt-BR e não consulta banco, chama OpenAI, geocoder, Matching ou canais externos. Ele cobre os estados de pedir localização, pedir serviço, profissionais encontrados e nenhuma opção encontrada; para matches usa somente nome público, serviço, distância e preço já retornados, na mesma ordem do Matching.
+
+A resposta externa inclui `reply_text` e uma projeção que remove texto bruto e texto de serviço, enquanto o registro conserva os campos mínimos necessários para reprocessamento. Um replay usa o resultado persistido e não chama o router; portanto recalcula o mesmo texto com a mesma versão do presenter. O n8n permanece um transporte sem regras ou geração de linguagem, recebendo `reply_text` para a futura Evolution outbound. Não existe outbox, envio, retry outbound ou OpenAI nessa camada. Logs incluem apenas IDs internos, provider, status e flag de duplicata — nunca telefone, texto ou payload de webhook.
 
 Essa camada reduz duplicatas usuais de uma entrega at-least-once e garante um único processamento ativo em condições normais. Não promete exactly-once matemático: se o processo cair após o efeito do router mas antes do `markProcessed`, um reclaim posterior pode reexecutar o domínio. Idempotência de eventos e adaptação concreta da Evolution permanecem deliberadamente para a próxima fase.

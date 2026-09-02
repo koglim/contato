@@ -52,6 +52,8 @@ import { DefaultChannelInboxService } from "./modules/channel-inbox/channel-inbo
 import { PostgresChannelInboundMessageRepository } from "./modules/channel-inbox/channel-inbox.repository.js";
 import type { ChannelInboxService, ChannelInboundMessageRepository } from "./modules/channel-inbox/channel-inbox.types.js";
 import { readChannelInboxConfig, type ChannelInboxConfig } from "./config/channel-inbox.js";
+import { DefaultMessagePresenter } from "./modules/message-presentation/message-presentation.service.js";
+import type { MessagePresenter } from "./modules/message-presentation/message-presentation.types.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -76,6 +78,7 @@ type AppDependencies = {
   channelInboundMessageRepository?: ChannelInboundMessageRepository;
   channelInboxService?: ChannelInboxService;
   channelInboxConfig?: ChannelInboxConfig;
+  messagePresenter?: MessagePresenter;
   internalApiKey?: string;
 };
 
@@ -129,6 +132,7 @@ export function buildApp({
   channelInboundMessageRepository,
   channelInboxService,
   channelInboxConfig,
+  messagePresenter,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
   const resolvedMessageInterpretationFallbackConfig =
@@ -176,6 +180,7 @@ export function buildApp({
     channelInboundMessageRepository ?? new PostgresChannelInboundMessageRepository(),
     resolvedCustomerSearchRouter,
     channelInboxConfig ?? readChannelInboxConfig(),
+    messagePresenter ?? new DefaultMessagePresenter(),
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));

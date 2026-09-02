@@ -3,6 +3,7 @@ import { customerSearchMessageResponseSchema, type ChannelInboundMessageInput } 
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import type { ChannelInboxConfig } from "../../config/channel-inbox.js";
+import type { MessagePresenter } from "../message-presentation/message-presentation.types.js";
 import type {
   ChannelInboxOutcome,
   ChannelInboxService,
@@ -47,6 +48,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     private readonly repository: ChannelInboundMessageRepository,
     private readonly customerSearchRouter: CustomerSearchRouter,
     private readonly config: ChannelInboxConfig,
+    private readonly messagePresenter: MessagePresenter,
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
@@ -90,7 +92,15 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         searchRequestId: searchRequestIdFrom(result),
       });
       if (!saved) return { kind: "channel_message_processing" };
-      return { kind: "response", response: { message_id: claimed.id, duplicate: false, result: publicResult(result) } };
+      return {
+        kind: "response",
+        response: {
+          message_id: claimed.id,
+          duplicate: false,
+          reply_text: this.messagePresenter.present(result),
+          result: publicResult(result),
+        },
+      };
     } catch (error) {
       await this.repository.markFailed(claimed.id, processingToken, errorCodeFor(error));
       throw error;
@@ -100,6 +110,14 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   private replay(record: ChannelInboundMessageRecord): ChannelInboxOutcome {
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
     if (!parsed.success) return { kind: "channel_message_result_invalid" };
-    return { kind: "response", response: { message_id: record.id, duplicate: true, result: publicResult(parsed.data) } };
+    return {
+      kind: "response",
+      response: {
+        message_id: record.id,
+        duplicate: true,
+        reply_text: this.messagePresenter.present(parsed.data),
+        result: publicResult(parsed.data),
+      },
+    };
   }
 }

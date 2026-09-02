@@ -21,6 +21,7 @@ export const channelInboundMessageRequestSchema = z.object({
 export const channelInboundMessageResponseSchema = z.object({
   message_id: z.string().uuid(),
   duplicate: z.boolean(),
+  reply_text: z.string().trim().min(1).max(2_000),
   result: z.object({
     customer_id: z.string().uuid(),
     route: z.enum(["started", "continued"]),
