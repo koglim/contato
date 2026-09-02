@@ -3,6 +3,7 @@ import { query, type SqlValue } from "../../database/connection.js";
 import type {
   ChannelOutboundMessageRecord,
   ChannelOutboundMessageRepository,
+  CreateChannelOutboundMessage,
 } from "./channel-outbox.types.js";
 import type { ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 
@@ -66,6 +67,19 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
       [channelInboundMessageId],
     );
     return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;
+  }
+
+  async createOrFindForProcessedInbound(input: CreateChannelOutboundMessage) {
+    const result = await this.execute<ChannelOutboundMessageRow>(
+      `INSERT INTO channel_outbound_messages (
+         channel_inbound_message_id, provider, recipient_phone_e164, text_content
+       ) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (channel_inbound_message_id) DO UPDATE
+         SET channel_inbound_message_id = EXCLUDED.channel_inbound_message_id
+       RETURNING ${channelOutboundMessageColumns}`,
+      [input.channelInboundMessageId, input.provider, input.recipientPhoneE164, input.textContent],
+    );
+    return toChannelOutboundMessageRecord(result.rows[0]);
   }
 
   async claim(id: string, processingToken: string, processingLeaseSeconds: number) {

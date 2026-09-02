@@ -31,6 +31,7 @@ export type CreateChannelOutboundMessage = {
 export interface ChannelOutboundMessageRepository {
   findById(id: string): Promise<ChannelOutboundMessageRecord | null>;
   findByInboundMessageId(channelInboundMessageId: string): Promise<ChannelOutboundMessageRecord | null>;
+  createOrFindForProcessedInbound(input: CreateChannelOutboundMessage): Promise<ChannelOutboundMessageRecord>;
   claim(id: string, processingToken: string, processingLeaseSeconds: number): Promise<ChannelOutboundMessageRecord | null>;
   markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<boolean>;
   markFailed(id: string, input: MarkChannelOutboundMessageFailedInput): Promise<boolean>;

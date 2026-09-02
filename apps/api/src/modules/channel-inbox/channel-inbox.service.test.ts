@@ -83,9 +83,20 @@ class FakeRepository implements ChannelInboundMessageRepository {
 
 class FakeOutboundRepository implements ChannelOutboundMessageRepository {
   current: ChannelOutboundMessageRecord | null;
+  legacyCreates = 0;
   constructor(recordValue: ChannelOutboundMessageRecord) { this.current = recordValue; }
   async findById() { return this.current; }
   async findByInboundMessageId() { return this.current; }
+  async createOrFindForProcessedInbound(inputValue: { channelInboundMessageId: string; provider: string; recipientPhoneE164: string; textContent: string }) {
+    this.legacyCreates += 1;
+    this.current ??= {
+      id: "66666666-6666-4666-8666-666666666666", channelInboundMessageId: inputValue.channelInboundMessageId,
+      provider: inputValue.provider, recipientPhoneE164: inputValue.recipientPhoneE164, messageType: "text",
+      textContent: inputValue.textContent, status: "pending", processingToken: null, processingStartedAt: null,
+      providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null,
+    };
+    return this.current;
+  }
   async claim() { return null; }
   async markSent() { return false; }
   async markFailed() { return false; }
@@ -152,6 +163,30 @@ test("processed replay keeps the same sent outbound without calling the router",
     assert.equal(outcome.response.duplicate, true);
     assert.equal(outcome.response.outbound.status, "sent");
   }
+  assert.equal(current.router.calls, 0);
+});
+
+test("legacy processed replay lazily creates one outbound from persisted inbound data", async () => {
+  const current = context();
+  current.repository.created = false;
+  current.repository.current = record({ status: "processed", result: routerResponse() });
+  current.outbox.current = null;
+
+  const first = await current.service.receive(input);
+  assert.equal(first.kind, "response");
+  if (first.kind === "response") {
+    assert.equal(first.response.duplicate, true);
+    assert.equal(first.response.outbound.id, "66666666-6666-4666-8666-666666666666");
+    assert.equal(current.outbox.current?.provider, "test");
+    assert.equal(current.outbox.current?.recipientPhoneE164, input.phone_e164);
+    assert.equal(current.outbox.current?.textContent, first.response.reply_text);
+    assert.equal(JSON.stringify(first.response).includes(input.phone_e164), false);
+    assert.equal(JSON.stringify(first.response).includes(input.raw_text), false);
+  }
+  const second = await current.service.receive(input);
+  assert.equal(second.kind, "response");
+  if (second.kind === "response") assert.equal(second.response.outbound.id, "66666666-6666-4666-8666-666666666666");
+  assert.equal(current.outbox.legacyCreates, 1);
   assert.equal(current.router.calls, 0);
 });
 

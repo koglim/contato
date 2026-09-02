@@ -120,14 +120,20 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
     if (!parsed.success) return { kind: "channel_message_result_invalid" };
-    const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id);
-    if (!outbound) return { kind: "channel_message_outbound_missing" };
+    const replyText = this.messagePresenter.present(parsed.data);
+    const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id)
+      ?? await this.channelOutboundMessageRepository.createOrFindForProcessedInbound({
+        channelInboundMessageId: record.id,
+        provider: record.provider,
+        recipientPhoneE164: record.phoneE164,
+        textContent: replyText,
+      });
     return {
       kind: "response",
       response: {
         message_id: record.id,
         duplicate: true,
-        reply_text: this.messagePresenter.present(parsed.data),
+        reply_text: replyText,
         outbound: { id: outbound.id, status: outbound.status },
         result: publicResult(parsed.data),
       },

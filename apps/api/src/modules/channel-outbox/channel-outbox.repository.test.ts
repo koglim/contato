@@ -26,15 +26,20 @@ function fake(results: QueryResultRow[][]) {
   return { calls, repository: new PostgresChannelOutboundMessageRepository(execute) };
 }
 
-test("outbox repository finds outbound by inbound and claims retryable statuses with a lease", async () => {
-  const current = fake([[row()], [row({ status: "processing", processing_token: token, processing_started_at: new Date(), attempt_count: 2 })], [{ id }], [{ id }]]);
+test("outbox repository recovers one legacy outbound and claims retryable statuses with a lease", async () => {
+  const current = fake([[row()], [row()], [row({ status: "processing", processing_token: token, processing_started_at: new Date(), attempt_count: 2 })], [{ id }], [{ id }]]);
   assert.equal((await current.repository.findByInboundMessageId(inboundId))?.id, id);
+  const recovered = await current.repository.createOrFindForProcessedInbound({ channelInboundMessageId: inboundId, provider: "test", recipientPhoneE164: "+5566999999999", textContent: "Olá" });
+  assert.equal(recovered.id, id);
+  assert.match(current.calls[1]!.text, /INSERT INTO channel_outbound_messages/u);
+  assert.match(current.calls[1]!.text, /ON CONFLICT \(channel_inbound_message_id\)/u);
+  assert.deepEqual(current.calls[1]!.values, [inboundId, "test", "+5566999999999", "Olá"]);
   assert.equal((await current.repository.claim(id, token, 60))?.attemptCount, 2);
-  assert.match(current.calls[1]!.text, /status IN \('pending', 'failed'\)/u);
-  assert.match(current.calls[1]!.text, /processing_started_at <=/u);
-  assert.match(current.calls[1]!.text, /attempt_count = attempt_count \+ 1/u);
+  assert.match(current.calls[2]!.text, /status IN \('pending', 'failed'\)/u);
+  assert.match(current.calls[2]!.text, /processing_started_at <=/u);
+  assert.match(current.calls[2]!.text, /attempt_count = attempt_count \+ 1/u);
   assert.equal(await current.repository.markSent(id, { processing_token: token, provider_message_id: "evolution-001" }), true);
-  assert.match(current.calls[2]!.text, /status = 'sent'/u);
+  assert.match(current.calls[3]!.text, /status = 'sent'/u);
   assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "evolution_timeout" }), true);
-  assert.match(current.calls[3]!.text, /status = 'failed'/u);
+  assert.match(current.calls[4]!.text, /status = 'failed'/u);
 });

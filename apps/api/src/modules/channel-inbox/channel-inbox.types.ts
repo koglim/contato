@@ -51,7 +51,6 @@ export type ChannelInboxOutcome =
   | { kind: "channel_message_processing" }
   | { kind: "channel_message_payload_conflict" }
   | { kind: "channel_message_result_invalid" }
-  | { kind: "channel_message_outbound_missing" }
   | { kind: "customer_conversation_conflict" }
   | { kind: "conversation_processing" }
   | { kind: "service_unavailable" };

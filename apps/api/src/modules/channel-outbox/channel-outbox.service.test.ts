@@ -19,6 +19,7 @@ class FakeRepository implements ChannelOutboundMessageRepository {
   current: ChannelOutboundMessageRecord | null = record();
   async findById() { return this.current; }
   async findByInboundMessageId() { return this.current; }
+  async createOrFindForProcessedInbound() { return this.current ?? record(); }
   async claim(_id: string, token: string) {
     if (!this.current || this.current.status === "sent" || this.current.status === "processing") return null;
     this.current = { ...this.current, status: "processing", processingToken: token, processingStartedAt: new Date(), attemptCount: this.current.attemptCount + 1 };
