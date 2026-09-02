@@ -16,6 +16,7 @@ class FakeInbox implements ChannelInboxService {
       message_id: messageId,
       duplicate: false,
       reply_text: "Em qual cidade você precisa do atendimento?",
+      outbound: { id: "33333333-3333-4333-8333-333333333333", status: "pending" },
       result: { customer_id: customerId, route: "started", conversation: { conversation_id: messageId, conversation_status: "active", pending_slot: "location", result: { status: "needs_location", stage: "interpretation", reason: "location_not_understood", interpretation: { status: "needs_location", location_text: null, country_code: "BR", interpretation: { service_strategy: "full_message", location_strategy: "none" } }, orchestration: null } } },
     } } as never;
   }

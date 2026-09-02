@@ -183,13 +183,21 @@ Matching
        ↓
 Message Presenter
        ↓
-reply_text → n8n → Future Evolution Outbound
+Transactional Outbox (PostgreSQL)
+       ↓
+reply_text + outbound.id → n8n claim → Future Evolution Outbound
+       ↓
+n8n sent / failed confirmation
 ```
 
 PostgreSQL é a fonte de verdade: `channel_inbound_messages` possui a unicidade `(provider, provider_message_id)`. A primeira inserção fixa telefone, texto, país e limite para a chave; toda nova entrega compara seu payload normalizado com os valores persistidos antes de replay ou claim. Uma divergência retorna conflito controlado e não chama o domínio. O claim condicional reserva uma mensagem `received`, `failed` ou um processamento cuja lease venceu. Não há Redis, lock em memória ou transação longa enquanto o Customer Router pode acionar OpenAI, geocoder ou Matching.
 
 O resultado do Customer Router é salvo como JSONB ao completar e é validado novamente antes de replay de duplicata. O módulo `message-presentation` é puro e determinístico: recebe esse resultado, produz `reply_text` em pt-BR e não consulta banco, chama OpenAI, geocoder, Matching ou canais externos. Ele cobre os estados de pedir localização, pedir serviço, profissionais encontrados e nenhuma opção encontrada; para matches usa somente nome público, serviço, distância e preço já retornados, na mesma ordem do Matching.
 
-A resposta externa inclui `reply_text` e uma projeção que remove texto bruto e texto de serviço, enquanto o registro conserva os campos mínimos necessários para reprocessamento. Um replay usa o resultado persistido e não chama o router; portanto recalcula o mesmo texto com a mesma versão do presenter. O n8n permanece um transporte sem regras ou geração de linguagem, recebendo `reply_text` para a futura Evolution outbound. Não existe outbox, envio, retry outbound ou OpenAI nessa camada. Logs incluem apenas IDs internos, provider, status e flag de duplicata — nunca telefone, texto ou payload de webhook.
+A confirmação da Inbox e a criação da Outbox ocorrem na mesma transação PostgreSQL. `channel_outbound_messages` tem uma unicidade por `channel_inbound_message_id`; assim, cada inbound lógico produz no máximo uma intenção textual outbound. A tabela mantém `pending`, `processing`, `sent` e `failed`, contador de tentativas, token/horário de lease, código de erro controlado e o ID devolvido pelo provider. O telefone do destinatário é persistido apenas como `recipient_phone_e164`, pois é indispensável ao transporte, é validado como E.164 e é PII: não aparece em logs nem na resposta da Inbox.
+
+Um replay usa o resultado persistido e a mesma Outbox, sem chamar o router; portanto preserva o mesmo `outbound.id` e informa se ele já está `sent`. O n8n permanece um transporte sem regras ou geração de linguagem: ele faz claim interno, envia o `text_content` à Evolution e confirma `sent` ou `failed` com o token obtido. A API não chama a Evolution, não possui Redis, worker, retry outbound ou OpenAI nessa camada. Claims `pending`, `failed` ou vencidos tornam-se `processing`, incrementam as tentativas e não mantêm transação aberta durante a chamada externa.
+
+Não há garantia exactly-once matemática: se a Evolution aceitar o texto e o n8n cair antes da confirmação, uma lease vencida poderá ser reivindicada e reenviada. A Outbox evita a perda da intenção e múltiplas mensagens lógicas por inbound, além de tornar tentativas e estados observáveis. Logs incluem apenas IDs internos, provider, status, tentativas, flag de duplicata e código de erro controlado — nunca telefone, texto ou payload de webhook.
 
 Essa camada reduz duplicatas usuais de uma entrega at-least-once e garante um único processamento ativo em condições normais. Não promete exactly-once matemático: se o processo cair após o efeito do router mas antes do `markProcessed`, um reclaim posterior pode reexecutar o domínio. Idempotência de eventos e adaptação concreta da Evolution permanecem deliberadamente para a próxima fase.

@@ -1,12 +1,17 @@
 import type { QueryResultRow } from "pg";
-import { query, type SqlValue } from "../../database/connection.js";
+import { query, withTransaction, type DatabaseClient, type SqlValue } from "../../database/connection.js";
 import type {
   ChannelInboundMessageRecord,
   ChannelInboundMessageRepository,
   ChannelInboundMessageStatus,
-  MarkProcessedInboundMessage,
+  MarkProcessedInboundMessageWithOutbound,
 } from "./channel-inbox.types.js";
 import type { ChannelInboundMessageInput } from "@contatocerto/shared";
+import {
+  channelOutboundMessageColumns,
+  toChannelOutboundMessageRecord,
+  type ChannelOutboundMessageRow,
+} from "../channel-outbox/channel-outbox.repository.js";
 
 type ChannelInboundMessageRow = {
   id: string;
@@ -27,6 +32,7 @@ type ChannelInboundMessageRow = {
 };
 
 export type ChannelInboxQuery = <T extends QueryResultRow>(text: string, values?: unknown[]) => Promise<{ rows: T[] }>;
+export type ChannelInboxTransaction = <T>(callback: (client: DatabaseClient) => Promise<T>) => Promise<T>;
 
 const columns = `
   id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value,
@@ -57,7 +63,10 @@ function toRecord(row: ChannelInboundMessageRow): ChannelInboundMessageRecord {
 const defaultQuery: ChannelInboxQuery = (text, values = []) => query(text, values as SqlValue[]);
 
 export class PostgresChannelInboundMessageRepository implements ChannelInboundMessageRepository {
-  constructor(private readonly execute: ChannelInboxQuery = defaultQuery) {}
+  constructor(
+    private readonly execute: ChannelInboxQuery = defaultQuery,
+    private readonly transaction: ChannelInboxTransaction = withTransaction,
+  ) {}
 
   async createOrFind(input: ChannelInboundMessageInput) {
     const inserted = await this.execute<ChannelInboundMessageRow>(
@@ -102,24 +111,42 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
-  async markProcessed(input: MarkProcessedInboundMessage) {
-    const result = await this.execute<{ id: string }>(
-      `UPDATE channel_inbound_messages
-       SET status = 'processed', customer_id = $3, conversation_id = $4, search_request_id = $5,
-           result = $6::jsonb, error_code = NULL, processing_token = NULL, processing_started_at = NULL,
-           processed_at = NOW()
-       WHERE id = $1 AND status = 'processing' AND processing_token = $2
-       RETURNING id`,
-      [
-        input.id,
-        input.processingToken,
-        input.customerId,
-        input.conversationId,
-        input.searchRequestId,
-        JSON.stringify(input.result),
-      ],
-    );
-    return result.rows.length === 1;
+  async markProcessedAndCreateOutbound(input: MarkProcessedInboundMessageWithOutbound) {
+    return this.transaction(async (client) => {
+      const processed = await client.query<{ id: string }>(
+        `UPDATE channel_inbound_messages
+         SET status = 'processed', customer_id = $3, conversation_id = $4, search_request_id = $5,
+             result = $6::jsonb, error_code = NULL, processing_token = NULL, processing_started_at = NULL,
+             processed_at = NOW()
+         WHERE id = $1 AND status = 'processing' AND processing_token = $2
+         RETURNING id`,
+        [
+          input.id,
+          input.processingToken,
+          input.customerId,
+          input.conversationId,
+          input.searchRequestId,
+          JSON.stringify(input.result),
+        ],
+      );
+      if (!processed.rows[0]) return null;
+
+      const outbound = await client.query<ChannelOutboundMessageRow>(
+        `INSERT INTO channel_outbound_messages (
+           channel_inbound_message_id, provider, recipient_phone_e164, text_content
+         ) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (channel_inbound_message_id) DO UPDATE
+           SET channel_inbound_message_id = EXCLUDED.channel_inbound_message_id
+         RETURNING ${channelOutboundMessageColumns}`,
+        [
+          input.outbound.channelInboundMessageId,
+          input.outbound.provider,
+          input.outbound.recipientPhoneE164,
+          input.outbound.textContent,
+        ],
+      );
+      return toChannelOutboundMessageRecord(outbound.rows[0]);
+    });
   }
 
   async markFailed(id: string, processingToken: string, errorCode: string) {

@@ -3,6 +3,7 @@ import type {
   ChannelInboundMessageResponse,
   CustomerSearchMessageResponse,
 } from "@contatocerto/shared";
+import type { ChannelOutboundMessageRecord, CreateChannelOutboundMessage } from "../channel-outbox/channel-outbox.types.js";
 
 export type ChannelInboundMessageStatus = "received" | "processing" | "processed" | "failed";
 
@@ -33,11 +34,15 @@ export type MarkProcessedInboundMessage = {
   searchRequestId: string | null;
 };
 
+export type MarkProcessedInboundMessageWithOutbound = MarkProcessedInboundMessage & {
+  outbound: CreateChannelOutboundMessage;
+};
+
 export interface ChannelInboundMessageRepository {
   createOrFind(input: ChannelInboundMessageInput): Promise<{ record: ChannelInboundMessageRecord; created: boolean }>;
   findById(id: string): Promise<ChannelInboundMessageRecord | null>;
   claim(id: string, processingToken: string, processingLeaseSeconds: number): Promise<ChannelInboundMessageRecord | null>;
-  markProcessed(input: MarkProcessedInboundMessage): Promise<boolean>;
+  markProcessedAndCreateOutbound(input: MarkProcessedInboundMessageWithOutbound): Promise<ChannelOutboundMessageRecord | null>;
   markFailed(id: string, processingToken: string, errorCode: string): Promise<boolean>;
 }
 
@@ -46,6 +51,7 @@ export type ChannelInboxOutcome =
   | { kind: "channel_message_processing" }
   | { kind: "channel_message_payload_conflict" }
   | { kind: "channel_message_result_invalid" }
+  | { kind: "channel_message_outbound_missing" }
   | { kind: "customer_conversation_conflict" }
   | { kind: "conversation_processing" }
   | { kind: "service_unavailable" };

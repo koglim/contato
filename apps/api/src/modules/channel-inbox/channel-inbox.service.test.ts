@@ -4,6 +4,7 @@ import type { ChannelInboundMessageInput, CustomerSearchMessageResponse } from "
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import { DefaultChannelInboxService } from "./channel-inbox.service.js";
 import { DefaultMessagePresenter } from "../message-presentation/message-presentation.service.js";
+import type { ChannelOutboundMessageRecord, ChannelOutboundMessageRepository } from "../channel-outbox/channel-outbox.types.js";
 import type {
   ChannelInboundMessageRecord,
   ChannelInboundMessageRepository,
@@ -57,6 +58,11 @@ class FakeRepository implements ChannelInboundMessageRepository {
   created = true;
   claimed = true;
   markedProcessed: MarkProcessedInboundMessage | undefined;
+  outbound: ChannelOutboundMessageRecord = {
+    id: "55555555-5555-4555-8555-555555555555", channelInboundMessageId: messageId, provider: input.provider,
+    recipientPhoneE164: input.phone_e164, messageType: "text", textContent: "", status: "pending",
+    processingToken: null, processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null,
+  };
   markedFailed: string | undefined;
   async createOrFind() { return { record: this.current, created: this.created }; }
   async findById() { return this.current; }
@@ -66,8 +72,23 @@ class FakeRepository implements ChannelInboundMessageRepository {
     this.current = { ...this.current, status: "processing", processingToken: token, processingStartedAt: new Date() };
     return this.current;
   }
-  async markProcessed(value: MarkProcessedInboundMessage) { this.markedProcessed = value; this.current = record({ status: "processed", result: value.result, customerId: value.customerId, conversationId: value.conversationId, searchRequestId: value.searchRequestId }); return true; }
+  async markProcessedAndCreateOutbound(value: MarkProcessedInboundMessage & { outbound: { textContent: string } }) {
+    this.markedProcessed = value;
+    this.outbound = { ...this.outbound, textContent: value.outbound.textContent };
+    this.current = record({ status: "processed", result: value.result, customerId: value.customerId, conversationId: value.conversationId, searchRequestId: value.searchRequestId });
+    return this.outbound;
+  }
   async markFailed(_id: string, _token: string, code: string) { this.markedFailed = code; this.claimed = true; this.current = record({ status: "failed", errorCode: code }); return true; }
+}
+
+class FakeOutboundRepository implements ChannelOutboundMessageRepository {
+  current: ChannelOutboundMessageRecord | null;
+  constructor(recordValue: ChannelOutboundMessageRecord) { this.current = recordValue; }
+  async findById() { return this.current; }
+  async findByInboundMessageId() { return this.current; }
+  async claim() { return null; }
+  async markSent() { return false; }
+  async markFailed() { return false; }
 }
 
 class FakeRouter implements CustomerSearchRouter {
@@ -81,7 +102,8 @@ class FakeRouter implements CustomerSearchRouter {
 
 function context() {
   const repository = new FakeRepository(); const router = new FakeRouter();
-  return { repository, router, service: new DefaultChannelInboxService(repository, router, { processingLeaseSeconds: 60 }, new DefaultMessagePresenter()) };
+  const outbox = new FakeOutboundRepository(repository.outbound);
+  return { repository, router, outbox, service: new DefaultChannelInboxService(repository, router, { processingLeaseSeconds: 60 }, new DefaultMessagePresenter(), outbox) };
 }
 
 test("channel inbox processes a new message once and persists its routing references", async () => {
@@ -92,6 +114,8 @@ test("channel inbox processes a new message once and persists its routing refere
     assert.equal(outcome.response.message_id, messageId);
     assert.equal(outcome.response.duplicate, false);
     assert.equal(outcome.response.reply_text.startsWith("Não encontrei profissionais"), true);
+    assert.equal(outcome.response.outbound.id, current.repository.outbound.id);
+    assert.equal(current.repository.outbound.textContent, outcome.response.reply_text);
     assert.equal(outcome.response.result.customer_id, customerId);
   }
   assert.equal(current.router.calls, 1);
@@ -109,11 +133,26 @@ test("processed duplicate replays only a schema-validated stored result", async 
   if (outcome.kind === "response") {
     assert.equal(outcome.response.duplicate, true);
     assert.equal(outcome.response.reply_text.startsWith("Não encontrei profissionais"), true);
+    assert.equal(outcome.response.outbound.id, current.repository.outbound.id);
   }
   assert.equal(current.router.calls, 0);
 
   current.repository.current = record({ status: "processed", result: { corrupt: true } });
   assert.deepEqual(await current.service.receive(input), { kind: "channel_message_result_invalid" });
+});
+
+test("processed replay keeps the same sent outbound without calling the router", async () => {
+  const current = context();
+  current.repository.created = false;
+  current.repository.current = record({ status: "processed", result: routerResponse() });
+  current.outbox.current = { ...current.repository.outbound, status: "sent", providerMessageId: "evolution-001", sentAt: new Date() };
+  const outcome = await current.service.receive(input);
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") {
+    assert.equal(outcome.response.duplicate, true);
+    assert.equal(outcome.response.outbound.status, "sent");
+  }
+  assert.equal(current.router.calls, 0);
 });
 
 test("a provider message key is bound to its first normalized payload", async () => {

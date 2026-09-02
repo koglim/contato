@@ -4,6 +4,7 @@ import { GeocodingProviderError } from "../location-resolution/location-resoluti
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import type { ChannelInboxConfig } from "../../config/channel-inbox.js";
 import type { MessagePresenter } from "../message-presentation/message-presentation.types.js";
+import type { ChannelOutboundMessageRepository } from "../channel-outbox/channel-outbox.types.js";
 import type {
   ChannelInboxOutcome,
   ChannelInboxService,
@@ -49,6 +50,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     private readonly customerSearchRouter: CustomerSearchRouter,
     private readonly config: ChannelInboxConfig,
     private readonly messagePresenter: MessagePresenter,
+    private readonly channelOutboundMessageRepository: ChannelOutboundMessageRepository,
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
@@ -83,21 +85,29 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       }
 
       const result = customerSearchMessageResponseSchema.parse(routed.response);
-      const saved = await this.repository.markProcessed({
+      const replyText = this.messagePresenter.present(result);
+      const outbound = await this.repository.markProcessedAndCreateOutbound({
         id: claimed.id,
         processingToken,
         result,
         customerId: result.customer_id,
         conversationId: result.conversation.conversation_id,
         searchRequestId: searchRequestIdFrom(result),
+        outbound: {
+          channelInboundMessageId: claimed.id,
+          provider: claimed.provider,
+          recipientPhoneE164: claimed.phoneE164,
+          textContent: replyText,
+        },
       });
-      if (!saved) return { kind: "channel_message_processing" };
+      if (!outbound) return { kind: "channel_message_processing" };
       return {
         kind: "response",
         response: {
           message_id: claimed.id,
           duplicate: false,
-          reply_text: this.messagePresenter.present(result),
+          reply_text: replyText,
+          outbound: { id: outbound.id, status: outbound.status },
           result: publicResult(result),
         },
       };
@@ -107,15 +117,18 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     }
   }
 
-  private replay(record: ChannelInboundMessageRecord): ChannelInboxOutcome {
+  private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
     if (!parsed.success) return { kind: "channel_message_result_invalid" };
+    const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id);
+    if (!outbound) return { kind: "channel_message_outbound_missing" };
     return {
       kind: "response",
       response: {
         message_id: record.id,
         duplicate: true,
         reply_text: this.messagePresenter.present(parsed.data),
+        outbound: { id: outbound.id, status: outbound.status },
         result: publicResult(parsed.data),
       },
     };

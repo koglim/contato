@@ -508,9 +508,29 @@ Quando o Matching cria um `search_request` originado por este endpoint, persiste
 
 O par `(provider, provider_message_id)` é a chave de idempotência persistida. O provider é normalizado para minúsculas e usa identificador simples; providers distintos podem reutilizar o mesmo ID externo. A primeira entrega torna imutáveis telefone, texto, país e limite daquela chave. Uma entrega posterior com qualquer um desses valores diferente retorna `409 channel_message_payload_conflict`, sem replay, claim ou chamada ao router. Quando os valores são iguais e o registro já está `processed`, a inbox devolve o mesmo resultado validado com `duplicate: true`, sem chamar o router. Quando está em processamento dentro da lease, retorna `409 channel_message_processing`.
 
-A resposta de sucesso inclui `reply_text`, uma mensagem em pt-BR pronta para WhatsApp, junto do `result` estruturado já existente. A API a gera deterministicamente a partir do resultado do Customer Router: pergunta pela cidade ou serviço pendente, apresenta os profissionais já retornados pelo Matching ou informa que não houve resultado. Ela nunca inclui `phone_e164`, `raw_text`, `service_text`, e-mail, IDs internos ou score. O resultado persistido é validado pelo contrato completo do Customer Router antes do replay e é projetado para uma resposta segura; o mesmo resultado gera o mesmo `reply_text` enquanto a versão do presenter for a mesma. A inbox também salva `customer_id`, `conversation_id` e, quando houver matching, `search_request_id`.
+No mesmo commit transacional que marca a Inbox como `processed`, a API cria uma única mensagem textual em `channel_outbound_messages`, vinculada por `channel_inbound_message_id` único. A resposta de sucesso inclui `reply_text` e `outbound: { id, status }`, junto do `result` estruturado já existente. A API gera o texto deterministicamente a partir do resultado do Customer Router: pergunta pela cidade ou serviço pendente, apresenta os profissionais já retornados pelo Matching ou informa que não houve resultado. Ela nunca inclui `phone_e164`, `raw_text`, `service_text`, e-mail, IDs internos ou score. O resultado persistido é validado pelo contrato completo do Customer Router antes do replay e é projetado para uma resposta segura; o mesmo resultado gera o mesmo `reply_text` enquanto a versão do presenter for a mesma. O replay devolve o mesmo `outbound.id`, inclusive quando seu status já é `sent`. A Inbox também salva `customer_id`, `conversation_id` e, quando houver matching, `search_request_id`.
 
-O n8n não interpreta linguagem nem aplica regras de negócio: ele apenas transporta `reply_text` da API para o futuro adapter outbound da Evolution. Nesta etapa não há envio outbound, outbox, retry ou uso de OpenAI pelo presenter.
+O n8n não interpreta linguagem nem aplica regras de negócio: ele transporta a intenção outbound persistida pela API até a futura Evolution. Nesta etapa não há chamada direta à Evolution pela API, worker, retry automático ou uso de OpenAI pelo presenter.
+
+## Channel Outbox
+
+Depois da resposta da Inbox, o n8n deve operar somente a mensagem Outbox indicada por `outbound.id`:
+
+```text
+Inbox → outbound.id → POST /internal/channel/outbound/:id/claim
+      → Evolution send text
+      → POST /internal/channel/outbound/:id/sent
+```
+
+Em erro de transporte, o n8n chama `POST /internal/channel/outbound/:id/failed`. Todas as rotas exigem `X-Internal-Key`.
+
+`POST /internal/channel/outbound/:outboundId/claim` reserva uma mensagem `pending`, `failed` ou uma lease `processing` vencida. A resposta `processing` contém o `processing_token`, `recipient_phone_e164` e `text_content` que o transporte necessita; o telefone é PII e só é retornado nessa rota interna autenticada. Cada claim incrementa `attempt_count`. Se a mensagem já estiver `sent`, a rota responde apenas com seu estado e não fornece conteúdo para novo envio. Uma lease ativa retorna `409 outbound_message_processing`.
+
+Após a Evolution aceitar a mensagem, `POST /internal/channel/outbound/:outboundId/sent` recebe `processing_token` e `provider_message_id`; somente o claim atual pode marcar `sent`. Em falha, `POST /internal/channel/outbound/:outboundId/failed` recebe o token e um `error_code` controlado. Ambos retornam somente `{ id, status }`; token inválido, expirado ou já concluído retorna `409 outbound_message_claim_invalid`.
+
+`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade, há no máximo uma intenção outbound por inbound e não há Redis, chamada à Evolution pela API, outbox worker ou retry automático nesta etapa.
+
+Há uma janela residual inevitável: a Evolution pode aceitar a mensagem e o n8n cair antes de confirmar `/sent`; após a lease expirar, um novo claim poderá reenviá-la. A arquitetura evita perda da intenção e duplicações lógicas usuais, mas não promete exactly-once matemático.
 
 Falhas controladas do router preservam seus códigos HTTP e deixam a mensagem em `failed`; uma nova entrega com a mesma chave pode reclaimá-la. A lease é controlada por `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` (60 segundos por padrão), permitindo recuperar processamento abandonado sem uma transação aberta em chamadas de IA ou geocoding.
 

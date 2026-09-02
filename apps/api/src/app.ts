@@ -54,6 +54,11 @@ import type { ChannelInboxService, ChannelInboundMessageRepository } from "./mod
 import { readChannelInboxConfig, type ChannelInboxConfig } from "./config/channel-inbox.js";
 import { DefaultMessagePresenter } from "./modules/message-presentation/message-presentation.service.js";
 import type { MessagePresenter } from "./modules/message-presentation/message-presentation.types.js";
+import { channelOutboundRoutes } from "./modules/channel-outbox/channel-outbox.routes.js";
+import { DefaultChannelOutboundService } from "./modules/channel-outbox/channel-outbox.service.js";
+import { PostgresChannelOutboundMessageRepository } from "./modules/channel-outbox/channel-outbox.repository.js";
+import type { ChannelOutboundMessageRepository, ChannelOutboundService } from "./modules/channel-outbox/channel-outbox.types.js";
+import { readChannelOutboundConfig, type ChannelOutboundConfig } from "./config/channel-outbound.js";
 
 type AppDependencies = {
   checkDatabase?: () => Promise<void>;
@@ -79,6 +84,9 @@ type AppDependencies = {
   channelInboxService?: ChannelInboxService;
   channelInboxConfig?: ChannelInboxConfig;
   messagePresenter?: MessagePresenter;
+  channelOutboundMessageRepository?: ChannelOutboundMessageRepository;
+  channelOutboundService?: ChannelOutboundService;
+  channelOutboundConfig?: ChannelOutboundConfig;
   internalApiKey?: string;
 };
 
@@ -133,6 +141,9 @@ export function buildApp({
   channelInboxService,
   channelInboxConfig,
   messagePresenter,
+  channelOutboundMessageRepository,
+  channelOutboundService,
+  channelOutboundConfig,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
   const resolvedMessageInterpretationFallbackConfig =
@@ -176,11 +187,17 @@ export function buildApp({
     resolvedSearchConversationRepository,
     resolvedSearchConversationService,
   );
+  const resolvedChannelOutboundMessageRepository = channelOutboundMessageRepository ?? new PostgresChannelOutboundMessageRepository();
+  const resolvedChannelOutboundService = channelOutboundService ?? new DefaultChannelOutboundService(
+    resolvedChannelOutboundMessageRepository,
+    channelOutboundConfig ?? readChannelOutboundConfig(),
+  );
   const resolvedChannelInboxService = channelInboxService ?? new DefaultChannelInboxService(
     channelInboundMessageRepository ?? new PostgresChannelInboundMessageRepository(),
     resolvedCustomerSearchRouter,
     channelInboxConfig ?? readChannelInboxConfig(),
     messagePresenter ?? new DefaultMessagePresenter(),
+    resolvedChannelOutboundMessageRepository,
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
@@ -228,6 +245,7 @@ export function buildApp({
   app.register(searchConversationRoutes, { prefix: "/internal/search/conversations", service: resolvedSearchConversationService, internalApiKey });
   app.register(customerSearchRoutes, { prefix: "/internal/customer-search", router: resolvedCustomerSearchRouter, internalApiKey });
   app.register(channelInboxRoutes, { prefix: "/internal/channel/inbound", service: resolvedChannelInboxService, internalApiKey });
+  app.register(channelOutboundRoutes, { prefix: "/internal/channel/outbound", service: resolvedChannelOutboundService, internalApiKey });
 
   return app;
 }

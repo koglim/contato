@@ -56,6 +56,14 @@ export {
   channelInboundMessageRequestSchema,
   channelInboundMessageResponseSchema,
 } from "./schemas/channel-inbox.js";
+export {
+  channelOutboundMessageClaimResponseSchema,
+  channelOutboundMessageMutationResponseSchema,
+  channelOutboundMessageParamsSchema,
+  channelOutboundMessageStatusSchema,
+  markChannelOutboundMessageFailedSchema,
+  markChannelOutboundMessageSentSchema,
+} from "./schemas/channel-outbound.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -111,3 +119,11 @@ export type {
   ChannelInboundMessageInput,
   ChannelInboundMessageResponse,
 } from "./types/channel-inbox.js";
+export type {
+  ChannelOutboundMessageClaimResponse,
+  ChannelOutboundMessageMutationResponse,
+  ChannelOutboundMessageParams,
+  ChannelOutboundMessageStatus,
+  MarkChannelOutboundMessageFailedInput,
+  MarkChannelOutboundMessageSentInput,
+} from "./types/channel-outbound.js";
