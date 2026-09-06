@@ -12,7 +12,7 @@ Esta primeira versão representa o núcleo persistente do marketplace, sem imple
 - `professional_services`: vínculo entre profissional e serviço, com preço em centavos e o modo de precificação.
 - `professional_service_areas`: pontos centrais e raios, em metros, das áreas em que um profissional atende.
 - `search_requests`: a solicitação original do cliente. `raw_text` é imutável em intenção e preserva o texto informado.
-- `matches`: lista ordenada de candidatos de uma solicitação. `rank_position` preserva a ordem apresentada, `shown_at` indicará quando o profissional foi exibido ao usuário e `selected_at` indicará sua escolha.
+- `matches`: lista ordenada de candidatos de uma solicitação. `rank_position` preserva a ordem apresentada, `shown_at` indicará quando o profissional foi exibido ao usuário e `selected_at` indicará sua escolha. A leitura interna de seleção consulta somente posições com `shown_at` preenchido e lista candidatos pendentes por `rank_position`, sem alterar esses campos.
 - `contacts`: registro do interesse de um cliente por um profissional para uma solicitação.
 - `reviews`: avaliação vinculada a um contato real, com uma avaliação por contato.
 
