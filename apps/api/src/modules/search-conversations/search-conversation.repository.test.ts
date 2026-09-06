@@ -98,6 +98,19 @@ test("search conversation repository finds records and exposes database expirati
   assert.match(context.calls[0]!.text, /expires_at <= NOW\(\)/u);
 });
 
+test("search conversation repository maps an active selection linked to its search request", async () => {
+  const searchRequestId = randomUUID();
+  const context = fakeDatabase([[row({
+    pending_slot: "selection",
+    search_request_id: searchRequestId,
+  })]]);
+
+  const selection = await context.repository.findById(conversationId);
+  assert.equal(selection?.status, "active");
+  assert.equal(selection?.pendingSlot, "selection");
+  assert.equal(selection?.searchRequestId, searchRequestId);
+});
+
 test("search conversation repository expires and finds active conversations by customer", async () => {
   const customerId = randomUUID();
   const context = fakeDatabase([[], [row({ customer_id: customerId })]]);

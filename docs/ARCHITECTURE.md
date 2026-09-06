@@ -136,6 +136,8 @@ ACTIVE/location ↔ ACTIVE/service → Search Orchestrator → Matching → COMP
 
 `search_conversations` é o estado transitório que preserva a primeira mensagem, as tentativas de serviço/localização, país, limite e o slot pendente. `search_requests` não foi reutilizada como sessão: permanece sendo criada pelo Matching somente quando a busca possui dados suficientes. Isso mantém intactos os módulos 3.1–3.5C e separa coleta conversacional de auditoria do marketplace.
 
+O schema também já suporta `pending_slot = selection` para manter ativa uma conversa vinculada ao `search_request` cuja lista ordenada de `matches` foi apresentada. `rank_position` preserva a ordem dessa lista; `shown_at` e `selected_at` representam, respectivamente, apresentação e escolha. Esta etapa é somente persistência: os serviços, rotas, channel-inbox e presenter atuais ainda não criam nem executam o estado de seleção.
+
 O início reutiliza a mesma instância de `MessageSearchService`. `needs_location` no estágio `interpretation` abre `pending_slot = location`; `needs_service` abre `pending_slot = service` somente quando a interpretação já contém `location_text` utilizável. Nas continuações, o slot define semanticamente a resposta: a mensagem atual substitui `location_text` ou `service_text` e segue diretamente ao Search Orchestrator. Portanto nenhum turno de continuação chama Message Search, Message Interpreter ou o provider OpenAI.
 
 `location_text` permanece nullable no banco para representar corretamente conversas que ainda aguardam localização. A exigência de uma localização reutilizável em `pending_slot = service` é uma invariável da aplicação, validada na criação e antes da continuação, sem um CHECK rígido que limite futuras evoluções de slots.

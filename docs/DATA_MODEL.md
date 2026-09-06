@@ -12,7 +12,7 @@ Esta primeira versão representa o núcleo persistente do marketplace, sem imple
 - `professional_services`: vínculo entre profissional e serviço, com preço em centavos e o modo de precificação.
 - `professional_service_areas`: pontos centrais e raios, em metros, das áreas em que um profissional atende.
 - `search_requests`: a solicitação original do cliente. `raw_text` é imutável em intenção e preserva o texto informado.
-- `matches`: profissionais que, no futuro, serão apresentados para uma solicitação, com posição, score e detalhamento opcional.
+- `matches`: lista ordenada de candidatos de uma solicitação. `rank_position` preserva a ordem apresentada, `shown_at` indicará quando o profissional foi exibido ao usuário e `selected_at` indicará sua escolha.
 - `contacts`: registro do interesse de um cliente por um profissional para uma solicitação.
 - `reviews`: avaliação vinculada a um contato real, com uma avaliação por contato.
 
@@ -29,6 +29,10 @@ contacts           1 ── 0..1 reviews
 ```
 
 Os pedidos podem continuar existindo sem cliente ou serviço associado, usando `ON DELETE SET NULL`; isso preserva histórico. Dados de relacionamento ou históricos críticos usam `RESTRICT`, evitando remoções acidentais. A única exclusão em cascata é `service_aliases` ao remover seu serviço, pois aliases não têm significado sem ele.
+
+## Seleção pendente
+
+`search_conversations` pode aguardar `location`, `service` ou `selection`. Uma conversa ativa em `selection` referencia obrigatoriamente o `search_request` que originou sua lista de `matches`; as demais conversas ativas ainda não têm esse vínculo. Esta etapa cria somente a capacidade de persistência: o fluxo executado pela API ainda não cria nem processa conversas em `selection`.
 
 ## Localização e busca futura
 

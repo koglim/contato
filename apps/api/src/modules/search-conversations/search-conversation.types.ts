@@ -6,7 +6,7 @@ import type {
 } from "@contatocerto/shared";
 
 export type SearchConversationStatus = "active" | "completed" | "cancelled" | "expired";
-export type SearchConversationPendingSlot = "location" | "service";
+export type SearchConversationPendingSlot = "location" | "service" | "selection";
 
 export type SearchConversationRecord = {
   id: string;
