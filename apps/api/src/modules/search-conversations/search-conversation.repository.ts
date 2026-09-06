@@ -2,7 +2,9 @@ import type { QueryResultRow } from "pg";
 import { query, type SqlValue } from "../../database/connection.js";
 import type {
   CompleteSearchConversation,
+  CreateAwaitingSelectionConversation,
   CreatePendingConversation,
+  MoveToAwaitingSelectionConversation,
   SearchConversationRecord,
   SearchConversationRepository,
   SearchConversationPendingSlot,
@@ -85,6 +87,29 @@ export class PostgresSearchConversationRepository implements SearchConversationR
     return toRecord(result.rows[0]);
   }
 
+  async createAwaitingSelection(input: CreateAwaitingSelectionConversation) {
+    const result = await this.execute<SearchConversationRow>(
+      `INSERT INTO search_conversations (
+         customer_id, status, pending_slot, original_raw_text, service_text, location_text, country_code,
+         limit_value, last_message_text, search_request_id, processing_token, processing_started_at,
+         completed_at, expires_at
+       ) VALUES ($1, 'active', 'selection', $2, $3, $4, $5, $6, $2, $7, NULL, NULL, NULL,
+         NOW() + ($8 * INTERVAL '1 minute'))
+       RETURNING ${conversationColumns}`,
+      [
+        input.customerId ?? null,
+        input.originalRawText,
+        input.serviceText,
+        input.locationText,
+        input.countryCode,
+        input.limitValue,
+        input.searchRequestId,
+        input.ttlMinutes,
+      ],
+    );
+    return toRecord(result.rows[0]);
+  }
+
   async findById(id: string) {
     const result = await this.execute<SearchConversationRow>(
       `SELECT ${conversationColumns} FROM search_conversations WHERE id = $1`,
@@ -149,6 +174,36 @@ export class PostgresSearchConversationRepository implements SearchConversationR
         input.serviceText,
         input.locationText,
         input.lastMessageText,
+        input.ttlMinutes,
+      ],
+    );
+    return result.rows.length === 1;
+  }
+
+  async moveToAwaitingSelection(input: MoveToAwaitingSelectionConversation) {
+    const result = await this.execute<{ id: string }>(
+      `UPDATE search_conversations
+       SET pending_slot = 'selection',
+           service_text = $3,
+           location_text = $4,
+           last_message_text = $5,
+           search_request_id = $6,
+           expires_at = NOW() + ($7 * INTERVAL '1 minute'),
+           processing_token = NULL,
+           processing_started_at = NULL,
+           completed_at = NULL
+       WHERE id = $1
+         AND status = 'active'
+         AND processing_token = $2
+         AND pending_slot IN ('location', 'service')
+       RETURNING id`,
+      [
+        input.id,
+        input.processingToken,
+        input.serviceText,
+        input.locationText,
+        input.lastMessageText,
+        input.searchRequestId,
         input.ttlMinutes,
       ],
     );

@@ -14,7 +14,9 @@ import type { SearchOrchestrationOutcome, SearchOrchestrationService } from "../
 import { DefaultSearchConversationService } from "./search-conversation.service.js";
 import type {
   CompleteSearchConversation,
+  CreateAwaitingSelectionConversation,
   CreatePendingConversation,
+  MoveToAwaitingSelectionConversation,
   SearchConversationRecord,
   SearchConversationRepository,
   UpdatePendingConversation,
@@ -242,9 +244,11 @@ class FakeSearchOrchestrator implements SearchOrchestrationService {
 
 class FakeSearchConversationRepository implements SearchConversationRepository {
   created: CreatePendingConversation | undefined;
+  awaitingSelectionCreated: CreateAwaitingSelectionConversation | undefined;
   record: SearchConversationRecord | null = conversation();
   claimResult: SearchConversationRecord | null = conversation();
   updated: UpdatePendingConversation | undefined;
+  movedToAwaitingSelection: MoveToAwaitingSelectionConversation | undefined;
   completed: CompleteSearchConversation | undefined;
   claimArguments: unknown[] | undefined;
   releases = 0;
@@ -252,6 +256,16 @@ class FakeSearchConversationRepository implements SearchConversationRepository {
   async createPending(input: CreatePendingConversation) {
     this.created = input;
     return conversation({ pendingSlot: input.pendingSlot, serviceText: input.serviceText, locationText: input.locationText });
+  }
+
+  async createAwaitingSelection(input: CreateAwaitingSelectionConversation) {
+    this.awaitingSelectionCreated = input;
+    return conversation({
+      pendingSlot: "selection",
+      serviceText: input.serviceText,
+      locationText: input.locationText,
+      searchRequestId: input.searchRequestId,
+    });
   }
 
   async findById() {
@@ -271,6 +285,11 @@ class FakeSearchConversationRepository implements SearchConversationRepository {
 
   async updatePending(input: UpdatePendingConversation) {
     this.updated = input;
+    return true;
+  }
+
+  async moveToAwaitingSelection(input: MoveToAwaitingSelectionConversation) {
+    this.movedToAwaitingSelection = input;
     return true;
   }
 

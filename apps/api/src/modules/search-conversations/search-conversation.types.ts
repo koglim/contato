@@ -38,6 +38,17 @@ export type CreatePendingConversation = {
   ttlMinutes: number;
 };
 
+export type CreateAwaitingSelectionConversation = {
+  customerId?: string;
+  originalRawText: string;
+  serviceText: string;
+  locationText: string;
+  countryCode: string;
+  limitValue: number;
+  searchRequestId: string;
+  ttlMinutes: number;
+};
+
 export type UpdatePendingConversation = {
   id: string;
   processingToken: string;
@@ -45,6 +56,16 @@ export type UpdatePendingConversation = {
   serviceText: string;
   locationText: string | null;
   lastMessageText: string;
+  ttlMinutes: number;
+};
+
+export type MoveToAwaitingSelectionConversation = {
+  id: string;
+  processingToken: string;
+  serviceText: string;
+  locationText: string;
+  lastMessageText: string;
+  searchRequestId: string;
   ttlMinutes: number;
 };
 
@@ -59,6 +80,7 @@ export type CompleteSearchConversation = {
 
 export interface SearchConversationRepository {
   createPending(input: CreatePendingConversation): Promise<SearchConversationRecord>;
+  createAwaitingSelection(input: CreateAwaitingSelectionConversation): Promise<SearchConversationRecord>;
   findById(id: string): Promise<SearchConversationRecord | null>;
   expireStaleForCustomer(customerId: string): Promise<void>;
   findActiveByCustomerId(customerId: string): Promise<SearchConversationRecord | null>;
@@ -68,6 +90,7 @@ export interface SearchConversationRepository {
     processingLeaseSeconds: number,
   ): Promise<SearchConversationRecord | null>;
   updatePending(input: UpdatePendingConversation): Promise<boolean>;
+  moveToAwaitingSelection(input: MoveToAwaitingSelectionConversation): Promise<boolean>;
   complete(input: CompleteSearchConversation): Promise<boolean>;
   releaseClaim(id: string, processingToken: string): Promise<void>;
 }
