@@ -28,7 +28,16 @@ test("parses only unequivocal global conversation commands", () => {
 });
 
 test("parses show-more commands only in their complete conservative forms", () => {
-  for (const rawText of ["mais", "VER MAIS", " mostrar   mais! ", "outras opções", "OUTRAS OPCOES."]) {
+  for (const rawText of [
+    "mais",
+    "mais opções",
+    "MAIS OPCOES.",
+    "VER MAIS",
+    "quero ver mais",
+    " mostrar   mais! ",
+    "outras opções",
+    "OUTRAS OPCOES.",
+  ]) {
     assert.deepEqual(parseSelectionConversationCommand(rawText), { kind: "show_more" }, rawText);
   }
 });
@@ -43,22 +52,39 @@ test("parses isolated positions from 1 to 10", () => {
   }
 });
 
-test("parses explicit option phrases and supported ordinals", () => {
+test("parses explicit numeric and written option phrases from 1 to 10", () => {
+  const cardinals = ["um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove", "dez"] as const;
+
+  for (let index = 0; index < cardinals.length; index += 1) {
+    const position = index + 1;
+    assert.deepEqual(parseSelectionConversationCommand(`opção ${position}`), { kind: "select_match", position });
+    assert.deepEqual(parseSelectionConversationCommand(`quero a opção ${position}`), { kind: "select_match", position });
+    assert.deepEqual(parseSelectionConversationCommand(`opção ${cardinals[index]}`), { kind: "select_match", position });
+    assert.deepEqual(parseSelectionConversationCommand(`quero a opção ${cardinals[index]}`), { kind: "select_match", position });
+  }
+
+  assert.deepEqual(parseSelectionConversationCommand("OPCAO   10!"), { kind: "select_match", position: 10 });
+  assert.deepEqual(parseSelectionConversationCommand("Quero a OPCAO 7."), { kind: "select_match", position: 7 });
+});
+
+test("parses masculine and feminine ordinals from 1 to 10", () => {
   const cases = [
-    ["opção 2", 2],
-    ["OPCAO   10!", 10],
-    ["quero a opção 2", 2],
-    ["Quero a OPCAO 7.", 7],
-    ["primeiro", 1],
-    ["PRIMEIRA!", 1],
-    ["segundo", 2],
-    ["segunda.", 2],
-    ["terceiro", 3],
-    ["terceira?", 3],
+    ["primeiro", "primeira", 1],
+    ["segundo", "segunda", 2],
+    ["terceiro", "terceira", 3],
+    ["quarto", "quarta", 4],
+    ["quinto", "quinta", 5],
+    ["sexto", "sexta", 6],
+    ["sétimo", "sétima", 7],
+    ["oitavo", "oitava", 8],
+    ["nono", "nona", 9],
+    ["décimo", "décima", 10],
   ] as const;
 
-  for (const [rawText, position] of cases) {
-    assert.deepEqual(parseSelectionConversationCommand(rawText), { kind: "select_match", position }, rawText);
+  for (const [masculine, feminine, position] of cases) {
+    for (const rawText of [masculine, feminine, `quero o ${masculine}`, `quero a ${feminine}`]) {
+      assert.deepEqual(parseSelectionConversationCommand(rawText), { kind: "select_match", position }, rawText);
+    }
   }
 });
 
@@ -77,8 +103,6 @@ test("rejects invalid positions and ambiguous free text", () => {
     "mais perto",
     "não quero o segundo",
     "pode mostrar eletricistas?",
-    "quero o primeiro",
-    "opção dois",
     "2 eletricistas",
   ]) {
     assert.equal(parseSelectionConversationCommand(rawText), null, rawText);
