@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: contatocerto
+          POSTGRES_PASSWORD: contatocerto-test
+          POSTGRES_DB: contatocerto
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U contatocerto -d contatocerto"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build shared package for typecheck
+        run: pnpm --filter @contatocerto/shared build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Apply all migrations
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+
+      - name: Create rollback regression fixture
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          INSERT INTO search_requests (id, raw_text)
+          VALUES ('00000000-0000-0000-0000-000000000001', 'eletricista');
+
+          INSERT INTO search_conversations (
+            id,
+            status,
+            pending_slot,
+            original_raw_text,
+            service_text,
+            country_code,
+            limit_value,
+            search_request_id,
+            expires_at,
+            completed_at
+          ) VALUES
+            (
+              '00000000-0000-0000-0000-000000000002',
+              'active',
+              'selection',
+              'preciso de eletricista',
+              'eletricista',
+              'BR',
+              3,
+              '00000000-0000-0000-0000-000000000001',
+              NOW() + INTERVAL '1 hour',
+              NULL
+            ),
+            (
+              '00000000-0000-0000-0000-000000000003',
+              'completed',
+              NULL,
+              'preciso de eletricista',
+              'eletricista',
+              'BR',
+              3,
+              '00000000-0000-0000-0000-000000000001',
+              NOW() + INTERVAL '1 hour',
+              NOW()
+            );
+
+          UPDATE search_conversations
+             SET status = 'cancelled',
+                 pending_slot = NULL
+           WHERE id = '00000000-0000-0000-0000-000000000002';
+          SQL
+
+      - name: Roll back migration 008
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
+      - name: Verify rollback compatibility
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1
+                FROM search_conversations
+               WHERE id = '00000000-0000-0000-0000-000000000002'
+                 AND search_request_id IS NOT NULL
+            ) THEN
+              RAISE EXCEPTION 'cancelled conversation retained search_request_id after rollback';
+            END IF;
+
+            IF NOT EXISTS (
+              SELECT 1
+                FROM search_conversations
+               WHERE id = '00000000-0000-0000-0000-000000000003'
+                 AND search_request_id = '00000000-0000-0000-0000-000000000001'
+            ) THEN
+              RAISE EXCEPTION 'completed conversation did not preserve search_request_id after rollback';
+            END IF;
+          END
+          $$;
+          SQL
+
+      - name: Reapply migration 008
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up

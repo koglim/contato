@@ -82,6 +82,14 @@ exports.down = (pgm) => {
       USING pending_slot::TEXT::search_conversation_pending_slot;
     DROP TYPE search_conversation_pending_slot_old;
 
+    -- Before migration 008, only completed conversations could retain a search
+    -- request. Clear links from every other status so the previous constraint can
+    -- be restored safely, including selections that were later cancelled or expired.
+    UPDATE search_conversations
+       SET search_request_id = NULL
+     WHERE status <> 'completed'
+       AND search_request_id IS NOT NULL;
+
     ${addPreviousChecks}
 
     DROP INDEX IF EXISTS search_conversations_search_request_id_idx;
