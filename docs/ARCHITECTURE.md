@@ -13,7 +13,7 @@ O frontend e a API são executados separadamente. O pacote compartilhado é comp
 
 ## Conversation Engine — comandos determinísticos
 
-Comandos conversacionais inequívocos usam um fast path determinístico, puro e sem dependências externas. Comandos globais são interpretados separadamente dos comandos de escolha; o parser de seleção somente poderá ser chamado quando a conversa estiver no estado `awaiting_selection`. Ele reconhece posições sintaticamente válidas de 1 a 10; futuramente, o handler desse estado deverá verificar se a posição escolhida realmente existe na lista apresentada ao usuário. Textos que não correspondam integralmente às formas conservadoras aceitas permanecem como frases livres e, futuramente, poderão seguir para um fallback estruturado que produza a mesma estrutura controlada de comandos.
+Comandos conversacionais inequívocos usam um fast path determinístico, puro e sem dependências externas. O parser interpreta somente o texto e o router aplica as regras do estado atual: comandos globais são permitidos em qualquer estado, enquanto comandos de escolha só são considerados em `awaiting_selection`. Ele reconhece posições sintaticamente válidas de 1 a 10; futuramente, os handlers de estado executarão os efeitos e verificarão se a posição escolhida realmente existe na lista apresentada ao usuário. Textos que não correspondam integralmente às formas conservadoras aceitas permanecem como frases livres e, futuramente, poderão seguir para um fallback estruturado que produza a mesma estrutura controlada de comandos.
 
 ## Persistência
 
