@@ -11,6 +11,10 @@ O repositório é um monorepo com `pnpm workspaces`.
 
 O frontend e a API são executados separadamente. O pacote compartilhado é compilado antes dos comandos de desenvolvimento da raiz e é consumido pela API.
 
+## Conversation Engine — comandos determinísticos
+
+Comandos conversacionais inequívocos usam um fast path determinístico, puro e sem dependências externas. Comandos globais são interpretados separadamente dos comandos de escolha; o parser de seleção somente poderá ser chamado quando a conversa estiver no estado `awaiting_selection`. Ele reconhece posições sintaticamente válidas de 1 a 10; futuramente, o handler desse estado deverá verificar se a posição escolhida realmente existe na lista apresentada ao usuário. Textos que não correspondam integralmente às formas conservadoras aceitas permanecem como frases livres e, futuramente, poderão seguir para um fallback estruturado que produza a mesma estrutura controlada de comandos.
+
 ## Persistência
 
 A API usa `pg` (node-postgres) e cria a conexão sob demanda a partir de `DATABASE_URL`. `GET /health` permanece independente do banco; `GET /health/db` executa uma consulta simples e responde apenas com o estado público da conexão.
