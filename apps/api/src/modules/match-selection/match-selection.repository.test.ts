@@ -53,8 +53,8 @@ test("selection match repository returns an empty state when the search has no m
     shownMatchCount: 0,
     hasMore: false,
   });
-  assert.match(context.calls[0]!.text, /COUNT\(\*\).*total_match_count/us);
-  assert.match(context.calls[0]!.text, /FILTER \(WHERE shown_at IS NOT NULL\)/u);
+  assert.match(context.calls[0]!.text, /FILTER \(WHERE rank_position IS NOT NULL\).*total_match_count/us);
+  assert.match(context.calls[0]!.text, /rank_position IS NOT NULL AND shown_at IS NOT NULL/u);
   assert.deepEqual(context.calls[0]!.values, [searchRequestId]);
   assert.doesNotMatch(context.calls[0]!.text, /UPDATE|INSERT|DELETE|shown_at\s*=|selected_at\s*=/u);
 });
@@ -74,6 +74,40 @@ test("selection match repository counts shown matches and reports whether unshow
     shownMatchCount: 5,
     hasMore: false,
   });
+});
+
+test("selection match repository excludes unranked matches from total and shown counts", async () => {
+  const context = fakeDatabase([
+    [{ total_match_count: 0, shown_match_count: 0 }],
+    [{ total_match_count: 0, shown_match_count: 0 }],
+  ]);
+
+  assert.deepEqual(await context.repository.getState(searchRequestId), {
+    totalMatchCount: 0,
+    shownMatchCount: 0,
+    hasMore: false,
+  }, "an unranked match does not contribute to the total");
+  assert.deepEqual(await context.repository.getState(searchRequestId), {
+    totalMatchCount: 0,
+    shownMatchCount: 0,
+    hasMore: false,
+  }, "a shown but unranked match does not contribute to the shown count");
+  assert.match(context.calls[0]!.text, /FILTER \(WHERE rank_position IS NOT NULL\)/u);
+  assert.match(context.calls[1]!.text, /rank_position IS NOT NULL AND shown_at IS NOT NULL/u);
+});
+
+test("selection match repository reports more only for ranked unshown matches", async () => {
+  const context = fakeDatabase([
+    [{ total_match_count: 2, shown_match_count: 1 }],
+    [{ total_match_count: 1, shown_match_count: 1 }],
+  ]);
+
+  assert.equal((await context.repository.getState(searchRequestId)).hasMore, true);
+  assert.equal(
+    (await context.repository.getState(searchRequestId)).hasMore,
+    false,
+    "only an unranked match remains",
+  );
 });
 
 test("selection match repository returns only a shown match at the requested position", async () => {

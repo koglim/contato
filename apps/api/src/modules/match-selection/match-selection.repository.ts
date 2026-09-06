@@ -86,8 +86,10 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
 
   async getState(searchRequestId: string): Promise<SelectionMatchState> {
     const result = await this.execute<SelectionMatchStateRow>(
-      `SELECT COUNT(*)::integer AS total_match_count,
-              COUNT(*) FILTER (WHERE shown_at IS NOT NULL)::integer AS shown_match_count
+      `SELECT COUNT(*) FILTER (WHERE rank_position IS NOT NULL)::integer AS total_match_count,
+              COUNT(*) FILTER (
+                WHERE rank_position IS NOT NULL AND shown_at IS NOT NULL
+              )::integer AS shown_match_count
          FROM matches
         WHERE search_request_id = $1`,
       [searchRequestId],
