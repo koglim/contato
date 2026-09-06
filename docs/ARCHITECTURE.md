@@ -140,6 +140,8 @@ O schema também já suporta `pending_slot = selection` para manter ativa uma co
 
 O repositório oferece operações atômicas para criar uma conversa já em `selection` e para mover uma conversa com lease de `location` ou `service` para esse estado. Elas ainda não são chamadas pelo fluxo público. `matches.shown_at` permanece responsabilidade do limite de apresentação/outbox, no momento em que a mensagem com os profissionais for efetivamente criada ou enviada.
 
+`match-selection` é uma camada interna somente de leitura para esse estado futuro. Ela conta matches totais e já apresentados, busca uma posição somente quando `shown_at` existe e lista os próximos candidates ainda não apresentados por `rank_position`. O repositório não altera `shown_at`, `selected_at`, `search_requests` ou contatos; a validação futura continuará consultando o match específico no banco.
+
 O início reutiliza a mesma instância de `MessageSearchService`. `needs_location` no estágio `interpretation` abre `pending_slot = location`; `needs_service` abre `pending_slot = service` somente quando a interpretação já contém `location_text` utilizável. Nas continuações, o slot define semanticamente a resposta: a mensagem atual substitui `location_text` ou `service_text` e segue diretamente ao Search Orchestrator. Portanto nenhum turno de continuação chama Message Search, Message Interpreter ou o provider OpenAI.
 
 `location_text` permanece nullable no banco para representar corretamente conversas que ainda aguardam localização. A exigência de uma localização reutilizável em `pending_slot = service` é uma invariável da aplicação, validada na criação e antes da continuação, sem um CHECK rígido que limite futuras evoluções de slots.
