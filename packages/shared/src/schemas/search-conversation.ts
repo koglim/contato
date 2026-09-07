@@ -33,8 +33,12 @@ const completedStartResultSchema = messageSearchResponseSchema.refine(
     const waitsForService = result.status === "needs_service"
       && result.stage === "service_resolution"
       && result.interpretation.location_text.trim().length > 0;
-    return !waitsForLocation && !waitsForService;
+    return !waitsForLocation && !waitsForService && result.status !== "matched";
   },
+);
+
+const pendingSelectionStartResultSchema = messageSearchResponseSchema.refine(
+  (result) => result.status === "matched",
 );
 
 const activeStartSearchConversationResponseSchema = z.discriminatedUnion("pending_slot", [
@@ -43,6 +47,12 @@ const activeStartSearchConversationResponseSchema = z.discriminatedUnion("pendin
     conversation_status: z.literal("active"),
     pending_slot: z.literal("service"),
     result: pendingServiceResultSchema,
+  }).strict(),
+  z.object({
+    conversation_id: z.string().uuid(),
+    conversation_status: z.literal("active"),
+    pending_slot: z.literal("selection"),
+    result: pendingSelectionStartResultSchema,
   }).strict(),
   z.object({
     conversation_id: z.string().uuid(),
@@ -61,17 +71,18 @@ export const startSearchConversationResponseSchema = z.union([
   }).strict(),
 ]);
 
-const completedContinuationResultSchema = z.union([
-  searchOrchestrationMatchedResponseSchema,
-  searchOrchestrationNoMatchesResponseSchema,
-]);
-
 const activeContinueSearchConversationResponseSchema = z.discriminatedUnion("pending_slot", [
   z.object({
     conversation_id: z.string().uuid(),
     conversation_status: z.literal("active"),
     pending_slot: z.literal("service"),
     result: searchOrchestrationNeedsServiceResponseSchema,
+  }).strict(),
+  z.object({
+    conversation_id: z.string().uuid(),
+    conversation_status: z.literal("active"),
+    pending_slot: z.literal("selection"),
+    result: searchOrchestrationMatchedResponseSchema,
   }).strict(),
   z.object({
     conversation_id: z.string().uuid(),
@@ -87,6 +98,6 @@ export const continueSearchConversationResponseSchema = z.union([
     conversation_id: z.string().uuid(),
     conversation_status: z.literal("completed"),
     pending_slot: z.null(),
-    result: completedContinuationResultSchema,
+    result: searchOrchestrationNoMatchesResponseSchema,
   }).strict(),
 ]);

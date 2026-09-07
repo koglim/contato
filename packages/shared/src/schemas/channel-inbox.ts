@@ -30,7 +30,7 @@ export const channelInboundMessageResponseSchema = z.object({
     conversation: z.object({
       conversation_id: z.string().uuid().nullable(),
       conversation_status: z.enum(["active", "completed"]),
-      pending_slot: z.enum(["location", "service"]).nullable().optional(),
+      pending_slot: z.enum(["location", "service", "selection"]).nullable().optional(),
       result: z.unknown().refine((value) => !hasRawMessageText(value), {
         message: "channel inbox results must not expose raw message text",
       }),

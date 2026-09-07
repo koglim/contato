@@ -249,6 +249,8 @@ class FakeSearchConversationRepository implements SearchConversationRepository {
   claimResult: SearchConversationRecord | null = conversation();
   updated: UpdatePendingConversation | undefined;
   movedToAwaitingSelection: MoveToAwaitingSelectionConversation | undefined;
+  createAwaitingSelectionError: Error | undefined;
+  moveToAwaitingSelectionResult = true;
   completed: CompleteSearchConversation | undefined;
   claimArguments: unknown[] | undefined;
   releases = 0;
@@ -259,6 +261,7 @@ class FakeSearchConversationRepository implements SearchConversationRepository {
   }
 
   async createAwaitingSelection(input: CreateAwaitingSelectionConversation) {
+    if (this.createAwaitingSelectionError) throw this.createAwaitingSelectionError;
     this.awaitingSelectionCreated = input;
     return conversation({
       pendingSlot: "selection",
@@ -290,7 +293,7 @@ class FakeSearchConversationRepository implements SearchConversationRepository {
 
   async moveToAwaitingSelection(input: MoveToAwaitingSelectionConversation) {
     this.movedToAwaitingSelection = input;
-    return true;
+    return this.moveToAwaitingSelectionResult;
   }
 
   async complete(input: CompleteSearchConversation) {
@@ -370,9 +373,8 @@ test("start creates pending service only when a reusable location is present", a
   if (safeOutcome.kind === "response") assert.equal(safeOutcome.response.conversation_id, null);
 });
 
-test("start does not persist matched, no_matches or location-resolution states", async () => {
+test("start does not persist no_matches or location-resolution states", async () => {
   const responses: MessageSearchResponse[] = [
-    completedMessageSearch(matched),
     completedMessageSearch(noMatches),
     {
       ...completedMessageSearch(noMatches),
@@ -390,6 +392,46 @@ test("start does not persist matched, no_matches or location-resolution states",
     assert.equal(outcome.kind, "response");
     if (outcome.kind === "response") assert.equal(outcome.response.conversation_id, null);
   }
+});
+
+test("start with matched creates an awaiting-selection conversation with customer and TTL", async () => {
+  const current = context();
+  const customerId = "88888888-8888-4888-8888-888888888888";
+  current.messageSearch.outcome = { kind: "response", response: completedMessageSearch(matched) };
+  const outcome = await current.service.start(startInput, { customerId });
+  assert.deepEqual(current.repository.awaitingSelectionCreated, {
+    customerId,
+    originalRawText,
+    serviceText: originalRawText,
+    locationText: "Sinop",
+    countryCode: "BR",
+    limitValue: 3,
+    searchRequestId,
+    ttlMinutes: 30,
+  });
+  assert.equal(current.repository.created, undefined);
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") {
+    assert.equal(outcome.response.conversation_id, conversationId);
+    assert.equal(outcome.response.conversation_status, "active");
+    assert.equal(outcome.response.pending_slot, "selection");
+  }
+});
+
+test("selection persistence failures do not return an active selection response", async () => {
+  const failedStart = context();
+  failedStart.messageSearch.outcome = { kind: "response", response: completedMessageSearch(matched) };
+  failedStart.repository.createAwaitingSelectionError = new Error("selection persistence failed");
+  await assert.rejects(failedStart.service.start(startInput), /selection persistence failed/u);
+
+  const failedContinuation = context();
+  failedContinuation.orchestrator.outcome = { kind: "response", response: matched };
+  failedContinuation.repository.moveToAwaitingSelectionResult = false;
+  assert.deepEqual(
+    await failedContinuation.service.continueConversation(conversationId, { raw_text: "Sinop" }),
+    { kind: "conversation_not_active" },
+  );
+  assert.ok(failedContinuation.repository.movedToAwaitingSelection);
 });
 
 test("continuation returns controlled missing, expired and inactive states", async () => {
@@ -423,7 +465,7 @@ test("recent claims are rejected while reclaimed stale claims keep the lease", a
   assert.equal(outcome.kind, "response");
 });
 
-test("pending location sends the reply as location and completes matched or no_matches", async () => {
+test("pending location moves matched to selection and completes no_matches", async () => {
   for (const response of [matched, noMatches] as const) {
     const current = context();
     current.orchestrator.outcome = { kind: "response", response };
@@ -436,11 +478,24 @@ test("pending location sends the reply as location and completes matched or no_m
       country_code: "BR",
       limit: 3,
     });
-    assert.equal(current.repository.completed?.serviceText, originalRawText);
-    assert.equal(current.repository.completed?.locationText, "Sinop");
-    assert.equal(current.repository.completed?.searchRequestId, searchRequestId);
+    if (response.status === "matched") {
+      assert.deepEqual(current.repository.movedToAwaitingSelection, {
+        id: conversationId,
+        processingToken: current.repository.claimArguments?.[1],
+        serviceText: originalRawText,
+        locationText: "Sinop",
+        lastMessageText: "Sinop",
+        searchRequestId,
+        ttlMinutes: 30,
+      });
+      assert.equal(current.repository.completed, undefined);
+    } else {
+      assert.equal(current.repository.completed?.serviceText, originalRawText);
+      assert.equal(current.repository.completed?.locationText, "Sinop");
+      assert.equal(current.repository.completed?.searchRequestId, searchRequestId);
+    }
     assert.equal(outcome.kind, "response");
-    if (outcome.kind === "response") assert.equal(outcome.response.conversation_status, "completed");
+    if (outcome.kind === "response") assert.equal(outcome.response.conversation_status, response.status === "matched" ? "active" : "completed");
   }
 });
 
@@ -459,7 +514,7 @@ test("pending location keeps location or transitions to service and renews TTL",
   }
 });
 
-test("pending service sends the reply as service and reuses the stored location", async () => {
+test("pending service moves matched to selection and completes no_matches", async () => {
   for (const response of [matched, noMatches] as const) {
     const current = context();
     const serviceConversation = conversation({ pendingSlot: "service", locationText: "Sinop" });
@@ -475,11 +530,19 @@ test("pending service sends the reply as service and reuses the stored location"
       country_code: "BR",
       limit: 3,
     });
-    assert.equal(current.repository.completed?.serviceText, "eletricista");
-    assert.equal(current.repository.completed?.locationText, "Sinop");
-    assert.equal(current.repository.completed?.searchRequestId, searchRequestId);
+    if (response.status === "matched") {
+      assert.equal(current.repository.movedToAwaitingSelection?.serviceText, "eletricista");
+      assert.equal(current.repository.movedToAwaitingSelection?.locationText, "Sinop");
+      assert.equal(current.repository.movedToAwaitingSelection?.searchRequestId, searchRequestId);
+      assert.equal(current.repository.movedToAwaitingSelection?.ttlMinutes, 30);
+      assert.equal(current.repository.completed, undefined);
+    } else {
+      assert.equal(current.repository.completed?.serviceText, "eletricista");
+      assert.equal(current.repository.completed?.locationText, "Sinop");
+      assert.equal(current.repository.completed?.searchRequestId, searchRequestId);
+    }
     assert.equal(outcome.kind, "response");
-    if (outcome.kind === "response") assert.equal(outcome.response.conversation_status, "completed");
+    if (outcome.kind === "response") assert.equal(outcome.response.conversation_status, response.status === "matched" ? "active" : "completed");
   }
 });
 

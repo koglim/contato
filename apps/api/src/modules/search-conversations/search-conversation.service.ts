@@ -78,6 +78,28 @@ export class DefaultSearchConversationService implements SearchConversationServi
       };
     }
 
+    if (search.response.status === "matched" && hasUsableLocation(search.response.interpretation.location_text)) {
+      const conversation = await this.repository.createAwaitingSelection({
+        ...(context.customerId ? { customerId: context.customerId } : {}),
+        originalRawText: input.raw_text,
+        serviceText: search.response.interpretation.service_text,
+        locationText: search.response.interpretation.location_text,
+        countryCode: input.country_code,
+        limitValue: input.limit,
+        searchRequestId: search.response.orchestration.matching.search_request_id,
+        ttlMinutes: this.config.ttlMinutes,
+      });
+      return {
+        kind: "response",
+        response: {
+          conversation_id: conversation.id,
+          conversation_status: "active",
+          pending_slot: "selection",
+          result: search.response,
+        },
+      };
+    }
+
     return {
       kind: "response",
       response: {
@@ -174,6 +196,28 @@ export class DefaultSearchConversationService implements SearchConversationServi
           conversation_id: conversationId,
           conversation_status: "active",
           pending_slot: "service",
+          result: orchestration.response,
+        },
+      };
+    }
+
+    if (orchestration.response.status === "matched") {
+      const moved = await this.repository.moveToAwaitingSelection({
+        id: conversationId,
+        processingToken,
+        serviceText,
+        locationText,
+        lastMessageText: input.raw_text,
+        searchRequestId: orchestration.response.matching.search_request_id,
+        ttlMinutes: this.config.ttlMinutes,
+      });
+      if (!moved) return { kind: "conversation_not_active" };
+      return {
+        kind: "response",
+        response: {
+          conversation_id: conversationId,
+          conversation_status: "active",
+          pending_slot: "selection",
           result: orchestration.response,
         },
       };
