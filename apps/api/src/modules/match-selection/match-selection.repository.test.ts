@@ -338,6 +338,48 @@ test("selection match repository rejects a reused key with incompatible context"
   assert.equal(context.calls.some((call) => /UPDATE|INSERT/u.test(call.text)), false);
 });
 
+test("selection match repository recovers a selected contact by customer and selection key without writes", async () => {
+  const context = fakeDatabase([[{
+    contact_id: contactId,
+    customer_id: customerId,
+    search_request_id: searchRequestId,
+    match_id: matchId,
+    professional_id: professionalId,
+    display_name: "Ana Eletricista",
+    phone_e164: "+5566999999999",
+    service_name: "Eletricista",
+    selected_at: selectedAtForTest,
+  }], [{
+    contact_id: contactId,
+    customer_id: customerId,
+    search_request_id: searchRequestId,
+    match_id: matchId,
+    professional_id: professionalId,
+    display_name: "Ana Eletricista",
+    phone_e164: "+5566999999999",
+    service_name: "Eletricista",
+    selected_at: selectedAtForTest,
+  }], [], []]);
+  const expected = {
+    kind: "selected" as const,
+    contactId,
+    matchId,
+    professionalId,
+    professionalDisplayName: "Ana Eletricista",
+    professionalPhoneE164: "+5566999999999",
+    serviceName: "Eletricista",
+    selectedAt: selectedAtForTest,
+    replayed: true,
+  };
+  assert.deepEqual(await context.repository.findSelectedByCustomerAndSelectionKey(customerId, selectInput.selectionKey), expected);
+  assert.deepEqual(await context.repository.findSelectedByCustomerAndSelectionKey(customerId, selectInput.selectionKey), expected);
+  assert.equal(await context.repository.findSelectedByCustomerAndSelectionKey(customerId, randomUUID()), null);
+  assert.equal(await context.repository.findSelectedByCustomerAndSelectionKey(randomUUID(), selectInput.selectionKey), null);
+  assert.match(context.calls[0]!.text, /contacts.customer_id = \$1/u);
+  assert.match(context.calls[0]!.text, /contacts.selection_key = \$2/u);
+  assert.equal(context.calls.some((call) => /UPDATE|INSERT|DELETE/u.test(call.text)), false);
+});
+
 test("selection match repository serializes competing selections through row locks", async () => {
   const first = fakeDatabase([
     [], [activeConversation()], [], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [{ id: contactId }], [],

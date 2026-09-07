@@ -214,6 +214,8 @@ Um replay usa o resultado persistido e a mesma Outbox, sem chamar o router; port
 
 A seleção aceita uma `selectionKey` genérica para idempotência. A mesma chave no mesmo cliente, busca e conversa recupera o contato e match já selecionados sem nova escrita; uma chave reutilizada em contexto diferente retorna conflito controlado. O futuro adaptador de canal poderá usar o UUID de inbound como essa chave, sem acoplamento com n8n ou Evolution.
 
+Após uma queda entre a seleção transacional e a persistência da Inbox, a camada de seleção pode recuperar somente por `customerId` e `selectionKey` o resultado já escolhido, mesmo com a conversa concluída. Essa leitura não interpreta texto, não depende de conversa ativa e não executa Matching, IA ou escrita.
+
 `selection-command` é a camada de aplicação interna entre o parser/router determinístico e `match-selection`. No contexto `selection`, ela consulta o estado de matches para rotear com a quantidade realmente exibida, delega somente escolhas válidas à transação de seleção e devolve pedidos de mostrar mais, comandos globais e texto livre sem efeitos. Ela não lista novos profissionais, não marca `shown_at`, não cria outbound e não chama IA, HTTP, Inbox ou Customer Search.
 
 `selection-message` separa o contrato público da apresentação: converte exaustivamente o resultado da execução de seleção em dados sem IDs internos e produz texto pt-BR somente para respostas finais. Comandos globais e `show_more` quando há opções seguem como ações tipadas, sem alegar execução. A futura integração com ChannelInbox decidirá como entregar essas ações e mensagens.

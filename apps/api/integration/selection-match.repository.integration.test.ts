@@ -192,17 +192,28 @@ test("selectShownMatch replays a completed selection key without changing persis
     assert.equal(replay.contactId, original.contactId);
     assert.equal(replay.matchId, original.matchId);
     assert.equal(replay.selectedAt.getTime(), original.selectedAt.getTime());
+    const recovered = await repository.findSelectedByCustomerAndSelectionKey(fixture.customerId, selectionKey);
+    assert.equal(recovered?.contactId, original.contactId);
+    assert.equal(recovered?.matchId, original.matchId);
+    assert.equal(recovered?.replayed, true);
 
-    const state = await query<{ contact_count: number | string; selected_count: number | string; selected_at: Date }>(
+    const state = await query<{
+      contact_count: number | string;
+      selected_count: number | string;
+      selected_at: Date;
+      conversation_status: string;
+    }>(
       `SELECT
          (SELECT COUNT(*) FROM contacts WHERE search_request_id = $1) AS contact_count,
          (SELECT COUNT(*) FROM matches WHERE search_request_id = $1 AND selected_at IS NOT NULL) AS selected_count,
-         (SELECT selected_at FROM matches WHERE id = $2) AS selected_at`,
-      [fixture.searchRequestId, original.matchId],
+         (SELECT selected_at FROM matches WHERE id = $2) AS selected_at,
+         (SELECT status FROM search_conversations WHERE id = $3) AS conversation_status`,
+      [fixture.searchRequestId, original.matchId, fixture.conversationId],
     );
     assert.equal(Number(state.rows[0]!.contact_count), 1);
     assert.equal(Number(state.rows[0]!.selected_count), 1);
     assert.equal(state.rows[0]!.selected_at.getTime(), original.selectedAt.getTime());
+    assert.equal(state.rows[0]!.conversation_status, "completed");
 
     assert.deepEqual(
       await repository.selectShownMatch({ ...fixture, customerId: randomUUID(), position: 1, lastMessageText: "quero o primeiro", selectionKey }),

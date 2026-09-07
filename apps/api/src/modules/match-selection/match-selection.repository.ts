@@ -6,6 +6,7 @@ import type {
   SelectionMatchState,
   SelectShownMatchInput,
   SelectShownMatchOutcome,
+  SelectedMatchOutcome,
 } from "./match-selection.types.js";
 
 type SelectionMatchRow = {
@@ -139,6 +140,21 @@ function existingSelectionOutcome(row: ExistingSelectionRow, input: SelectShownM
   };
 }
 
+function replayedSelectionOutcome(row: ExistingSelectionRow): SelectedMatchOutcome | null {
+  if (!row.match_id || !row.display_name || !row.phone_e164 || !row.service_name || !row.selected_at) return null;
+  return {
+    kind: "selected",
+    contactId: row.contact_id,
+    matchId: row.match_id,
+    professionalId: row.professional_id,
+    professionalDisplayName: row.display_name,
+    professionalPhoneE164: row.phone_e164,
+    serviceName: row.service_name,
+    selectedAt: row.selected_at,
+    replayed: true,
+  };
+}
+
 async function findSelectionByKey(client: DatabaseClient, selectionKey: string) {
   const result = await client.query<ExistingSelectionRow>(
     `SELECT contacts.id AS contact_id,
@@ -235,6 +251,32 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
       [searchRequestId, limit],
     );
     return result.rows.map(toSelectionMatchRecord);
+  }
+
+  async findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string) {
+    const result = await this.execute<ExistingSelectionRow>(
+      `SELECT contacts.id AS contact_id,
+              contacts.customer_id,
+              contacts.search_request_id,
+              matches.id AS match_id,
+              contacts.professional_id,
+              professionals.display_name,
+              professionals.phone_e164,
+              services.name AS service_name,
+              matches.selected_at
+         FROM contacts
+         JOIN matches
+           ON matches.search_request_id = contacts.search_request_id
+          AND matches.professional_id = contacts.professional_id
+          AND matches.selected_at IS NOT NULL
+         JOIN professionals ON professionals.id = contacts.professional_id
+         JOIN search_requests ON search_requests.id = contacts.search_request_id
+         JOIN services ON services.id = search_requests.service_id
+        WHERE contacts.customer_id = $1
+          AND contacts.selection_key = $2`,
+      [customerId, selectionKey],
+    );
+    return result.rows[0] ? replayedSelectionOutcome(result.rows[0]) : null;
   }
 
   async selectShownMatch(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome> {

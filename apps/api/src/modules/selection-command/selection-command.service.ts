@@ -52,4 +52,8 @@ export class DefaultSelectionCommandService implements SelectionCommandService {
         });
     }
   }
+
+  async recoverSelection(customerId: string, selectionKey: string) {
+    return this.dependencies.selectionMatchRepository.findSelectedByCustomerAndSelectionKey(customerId, selectionKey);
+  }
 }

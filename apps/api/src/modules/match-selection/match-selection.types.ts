@@ -56,9 +56,12 @@ export type SelectShownMatchOutcome =
   | { kind: "match_not_available" }
   | { kind: "idempotency_conflict" };
 
+export type SelectedMatchOutcome = Extract<SelectShownMatchOutcome, { kind: "selected" }>;
+
 export interface SelectionMatchRepository {
   getState(searchRequestId: string): Promise<SelectionMatchState>;
   findShownByPosition(searchRequestId: string, position: number): Promise<SelectionMatchRecord | null>;
   listNextUnshown(searchRequestId: string, limit: number): Promise<SelectionMatchRecord[]>;
+  findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string): Promise<SelectedMatchOutcome | null>;
   selectShownMatch(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome>;
 }

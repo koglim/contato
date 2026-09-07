@@ -29,9 +29,14 @@ class FakeSelectionMatchRepository implements SelectionMatchRepository {
   };
   getStateCalls = 0;
   selectCalls: Array<Record<string, unknown>> = [];
+  recoveryCalls: Array<[string, string]> = [];
   async getState() { this.getStateCalls += 1; return this.state; }
   async findShownByPosition() { return null; }
   async listNextUnshown() { return []; }
+  async findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string) {
+    this.recoveryCalls.push([customerId, selectionKey]);
+    return { ...this.selected, replayed: true };
+  }
   async selectShownMatch(value: Parameters<SelectionMatchRepository["selectShownMatch"]>[0]) {
     this.selectCalls.push(value);
     return this.selected;
@@ -110,4 +115,15 @@ test("selection command service rejects invalid contexts without querying or wri
     assert.equal(current.selectionMatchRepository.getStateCalls, 0);
     assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
   }
+});
+
+test("selection command service recovers a selection without parsing or selecting again", async () => {
+  const current = context();
+  assert.deepEqual(
+    await current.service.recoverSelection(input.customerId!, input.selectionKey),
+    { ...current.selectionMatchRepository.selected, replayed: true },
+  );
+  assert.deepEqual(current.selectionMatchRepository.recoveryCalls, [[input.customerId, input.selectionKey]]);
+  assert.equal(current.selectionMatchRepository.getStateCalls, 0);
+  assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
 });
