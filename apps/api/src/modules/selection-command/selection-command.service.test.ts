@@ -1,0 +1,110 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { DefaultSelectionCommandService } from "./selection-command.service.js";
+import type { SelectionCommandInput } from "./selection-command.types.js";
+import type { SelectionMatchRepository } from "../match-selection/match-selection.types.js";
+
+const input: SelectionCommandInput = {
+  conversationId: "11111111-1111-4111-8111-111111111111",
+  customerId: "22222222-2222-4222-8222-222222222222",
+  searchRequestId: "33333333-3333-4333-8333-333333333333",
+  pendingSlot: "selection",
+  rawText: "2",
+  lastMessageText: "quero o segundo",
+};
+
+class FakeSelectionMatchRepository implements SelectionMatchRepository {
+  state = { totalMatchCount: 3, shownMatchCount: 2, hasMore: true };
+  selected = {
+    kind: "selected" as const,
+    contactId: "44444444-4444-4444-8444-444444444444",
+    matchId: "55555555-5555-4555-8555-555555555555",
+    professionalId: "66666666-6666-4666-8666-666666666666",
+    professionalDisplayName: "Ana Eletricista",
+    professionalPhoneE164: "+5566999999999",
+    serviceName: "Eletricista",
+    selectedAt: new Date("2026-09-06T12:00:00.000Z"),
+  };
+  getStateCalls = 0;
+  selectCalls: Array<Record<string, unknown>> = [];
+  async getState() { this.getStateCalls += 1; return this.state; }
+  async findShownByPosition() { return null; }
+  async listNextUnshown() { return []; }
+  async selectShownMatch(value: Parameters<SelectionMatchRepository["selectShownMatch"]>[0]) {
+    this.selectCalls.push(value);
+    return this.selected;
+  }
+}
+
+function context() {
+  const selectionMatchRepository = new FakeSelectionMatchRepository();
+  return { selectionMatchRepository, service: new DefaultSelectionCommandService({ selectionMatchRepository }) };
+}
+
+test("selection command service selects numbered and ordinal shown matches", async () => {
+  for (const rawText of ["2", "quero o segundo"]) {
+    const current = context();
+    assert.deepEqual(await current.service.process({ ...input, rawText }), current.selectionMatchRepository.selected);
+    assert.equal(current.selectionMatchRepository.getStateCalls, 1);
+    assert.deepEqual(current.selectionMatchRepository.selectCalls, [{
+      conversationId: input.conversationId,
+      customerId: input.customerId,
+      searchRequestId: input.searchRequestId,
+      position: 2,
+      lastMessageText: input.lastMessageText,
+    }]);
+  }
+});
+
+test("selection command service rejects positions that were not presented without writes", async () => {
+  const current = context();
+  assert.deepEqual(await current.service.process({ ...input, rawText: "3" }), {
+    kind: "invalid_selection", requestedPosition: 3, visibleMatchCount: 2,
+  });
+  assert.equal(current.selectionMatchRepository.getStateCalls, 1);
+  assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
+});
+
+test("selection command service returns show-more state without changing matches", async () => {
+  for (const state of [
+    { totalMatchCount: 3, shownMatchCount: 2, hasMore: true },
+    { totalMatchCount: 2, shownMatchCount: 2, hasMore: false },
+  ]) {
+    const current = context();
+    current.selectionMatchRepository.state = state;
+    assert.deepEqual(await current.service.process({ ...input, rawText: "mostrar mais" }), {
+      kind: "show_more_requested", hasMore: state.hasMore, shownMatchCount: state.shownMatchCount,
+    });
+    assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
+  }
+});
+
+test("selection command service leaves free text and global commands without writes", async () => {
+  const cases = [
+    ["preciso de dois eletricistas", { kind: "not_command" }],
+    ["cancelar", { kind: "global_command", command: { kind: "cancel" } }],
+    ["recomeçar", { kind: "global_command", command: { kind: "restart" } }],
+    ["ajuda", { kind: "global_command", command: { kind: "help" } }],
+  ] as const;
+  for (const [rawText, expected] of cases) {
+    const current = context();
+    assert.deepEqual(await current.service.process({ ...input, rawText }), expected);
+    assert.equal(current.selectionMatchRepository.getStateCalls, 1);
+    assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
+  }
+});
+
+test("selection command service rejects invalid contexts without querying or writing", async () => {
+  const cases: Array<[Partial<SelectionCommandInput>, string]> = [
+    [{ conversationId: "" }, "missing_conversation_id"],
+    [{ customerId: null }, "missing_customer_id"],
+    [{ searchRequestId: null }, "missing_search_request_id"],
+    [{ pendingSlot: "location" }, "not_awaiting_selection"],
+  ];
+  for (const [override, reason] of cases) {
+    const current = context();
+    assert.deepEqual(await current.service.process({ ...input, ...override }), { kind: "invalid_context", reason });
+    assert.equal(current.selectionMatchRepository.getStateCalls, 0);
+    assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
+  }
+});
