@@ -33,7 +33,7 @@ Os pedidos podem continuar existindo sem cliente ou serviço associado, usando `
 
 ## Seleção pendente
 
-`search_conversations` pode aguardar `location`, `service` ou `selection`. Uma conversa ativa em `selection` referencia obrigatoriamente o `search_request` que originou sua lista de `matches`; as demais conversas ativas ainda não têm esse vínculo. Esta etapa cria somente a capacidade de persistência: o fluxo executado pela API ainda não cria nem processa conversas em `selection`.
+`search_conversations` pode aguardar `location`, `service` ou `selection`. Uma conversa ativa em `selection` referencia obrigatoriamente o `search_request` que originou sua lista de `matches`; as demais conversas ativas ainda não têm esse vínculo. A operação interna de seleção aceita somente um match exibido, com posição válida e ainda não selecionado, e conclui atomicamente a conversa, o match, a busca e o `contact` solicitado. O fluxo público da API ainda não chama essa operação.
 
 ## Localização e busca futura
 

@@ -57,6 +57,9 @@ jobs:
       - name: Apply all migrations
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
+      - name: Test selection transaction integration
+        run: pnpm --filter @contatocerto/api test:integration
+
       - name: Verify migration 009
         run: |
           psql "$DATABASE_URL" <<'SQL'
