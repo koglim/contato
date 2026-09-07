@@ -13,7 +13,6 @@ export function mapSelectionCommandOutcome(outcome: SelectionCommandOutcome): Se
         professional_name: outcome.professionalDisplayName,
         service_name: outcome.serviceName,
         professional_phone_e164: outcome.professionalPhoneE164,
-        replayed: outcome.replayed,
       };
     case "invalid_selection":
       return {

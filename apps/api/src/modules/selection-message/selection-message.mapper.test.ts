@@ -17,20 +17,24 @@ const selected: SelectionCommandOutcome = {
   replayed: false,
 };
 
-test("selection message mapper exposes only public selection data and supports replay", () => {
-  for (const replayed of [false, true]) {
-    const contract = mapSelectionCommandOutcome({ ...selected, replayed });
-    assert.deepEqual(contract, {
-      kind: "selected",
-      professional_name: "Ana Eletricista",
-      service_name: "Eletricista",
-      professional_phone_e164: "+5566999999999",
-      replayed,
-    });
-    assert.equal(selectionMessageContractSchema.safeParse(contract).success, true);
-    const message = presentSelectionMessage(contract);
-    assert.match(message ?? "", /Escolha confirmada/u);
-    assert.doesNotMatch(message ?? "", /11111111|22222222|33333333/u);
+test("selection message mapper hides operational replay data and formats selected messages exactly", () => {
+  const original = mapSelectionCommandOutcome({ ...selected, replayed: false });
+  const replay = mapSelectionCommandOutcome({ ...selected, replayed: true });
+  assert.deepEqual(replay, original);
+  assert.deepEqual(original, {
+    kind: "selected",
+    professional_name: "Ana Eletricista",
+    service_name: "Eletricista",
+    professional_phone_e164: "+5566999999999",
+  });
+  assert.equal(selectionMessageContractSchema.safeParse(original).success, true);
+  assert.equal(presentSelectionMessage(original), [
+    "Escolha confirmada ✅",
+    "*Ana Eletricista*\nEletricista\n📞 +5566999999999",
+    "Agora você pode entrar em contato diretamente.",
+  ].join("\n\n"));
+  for (const privateField of ["replayed", "contact_id", "match_id", "professional_id"]) {
+    assert.equal(selectionMessageContractSchema.safeParse({ ...original, [privateField]: true }).success, false);
   }
 });
 

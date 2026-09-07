@@ -5,9 +5,11 @@ export function presentSelectionMessage(contract: SelectionMessageContract): str
     case "selected":
       return [
         "Escolha confirmada ✅",
-        `*${contract.professional_name}*`,
-        contract.service_name,
-        `📞 ${contract.professional_phone_e164}`,
+        [
+          `*${contract.professional_name}*`,
+          contract.service_name,
+          `📞 ${contract.professional_phone_e164}`,
+        ].join("\n"),
         "Agora você pode entrar em contato diretamente.",
       ].join("\n\n");
     case "invalid_selection":

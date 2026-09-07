@@ -6,7 +6,6 @@ const selectedSelectionMessageSchema = z.object({
   professional_name: z.string().trim().min(1).max(255),
   service_name: z.string().trim().min(1).max(120),
   professional_phone_e164: phoneE164Schema,
-  replayed: z.boolean(),
 }).strict();
 
 export const selectionMessageContractSchema = z.discriminatedUnion("kind", [
