@@ -48,6 +48,7 @@ export class DefaultSelectionCommandService implements SelectionCommandService {
           searchRequestId: input.searchRequestId!,
           position: routed.command.position,
           lastMessageText: input.lastMessageText,
+          selectionKey: input.selectionKey,
         });
     }
   }

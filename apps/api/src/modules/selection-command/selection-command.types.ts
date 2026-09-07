@@ -8,6 +8,7 @@ export type SelectionCommandInput = {
   pendingSlot: "location" | "service" | "selection" | null;
   rawText: string;
   lastMessageText: string;
+  selectionKey: string;
 };
 
 export type SelectionCommandOutcome =

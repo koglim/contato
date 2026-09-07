@@ -60,6 +60,17 @@ type SelectableMatchRow = {
 
 type SelectedMatchRow = { selected_at: Date };
 type ContactRow = { id: string };
+type ExistingSelectionRow = {
+  contact_id: string;
+  customer_id: string | null;
+  search_request_id: string;
+  match_id: string | null;
+  professional_id: string;
+  display_name: string | null;
+  phone_e164: string | null;
+  service_name: string | null;
+  selected_at: Date | null;
+};
 
 const selectionMatchColumns = `
   matches.id AS match_id,
@@ -103,6 +114,63 @@ function toSelectionMatchRecord(row: SelectionMatchRow): SelectionMatchRecord {
     distanceMeters: row.distance_meters,
     effectiveAvailableNow: row.effective_available_now,
   };
+}
+
+function existingSelectionOutcome(row: ExistingSelectionRow, input: SelectShownMatchInput): SelectShownMatchOutcome {
+  if (
+    row.customer_id !== input.customerId
+    || row.search_request_id !== input.searchRequestId
+    || !row.match_id
+    || !row.display_name
+    || !row.phone_e164
+    || !row.service_name
+    || !row.selected_at
+  ) return { kind: "idempotency_conflict" };
+  return {
+    kind: "selected",
+    contactId: row.contact_id,
+    matchId: row.match_id,
+    professionalId: row.professional_id,
+    professionalDisplayName: row.display_name,
+    professionalPhoneE164: row.phone_e164,
+    serviceName: row.service_name,
+    selectedAt: row.selected_at,
+    replayed: true,
+  };
+}
+
+async function findSelectionByKey(client: DatabaseClient, selectionKey: string) {
+  const result = await client.query<ExistingSelectionRow>(
+    `SELECT contacts.id AS contact_id,
+            contacts.customer_id,
+            contacts.search_request_id,
+            matches.id AS match_id,
+            contacts.professional_id,
+            professionals.display_name,
+            professionals.phone_e164,
+            services.name AS service_name,
+            matches.selected_at
+       FROM contacts
+       LEFT JOIN matches
+         ON matches.search_request_id = contacts.search_request_id
+        AND matches.professional_id = contacts.professional_id
+        AND matches.selected_at IS NOT NULL
+       LEFT JOIN professionals ON professionals.id = contacts.professional_id
+       LEFT JOIN search_requests ON search_requests.id = contacts.search_request_id
+       LEFT JOIN services ON services.id = search_requests.service_id
+      WHERE contacts.selection_key = $1
+      FOR UPDATE OF contacts`,
+    [selectionKey],
+  );
+  return result.rows[0] ?? null;
+}
+
+function isSelectionKeyUniqueViolation(error: unknown) {
+  return typeof error === "object" && error !== null
+    && "code" in error
+    && (error as { code?: unknown }).code === "23505"
+    && "constraint" in error
+    && (error as { constraint?: unknown }).constraint === "contacts_selection_key_unique_idx";
 }
 
 export class PostgresSelectionMatchRepository implements SelectionMatchRepository {
@@ -170,7 +238,20 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
   }
 
   async selectShownMatch(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome> {
-    return this.transaction(async (client) => {
+    try {
+      return await this.transaction(async (client) => {
+      const existing = await findSelectionByKey(client, input.selectionKey);
+      if (existing) {
+        const context = await client.query<{ id: string }>(
+          `SELECT id FROM search_conversations
+            WHERE id = $1 AND customer_id = $2 AND search_request_id = $3
+            FOR UPDATE`,
+          [input.conversationId, input.customerId, input.searchRequestId],
+        );
+        if (!context.rows[0]) return { kind: "idempotency_conflict" };
+        return existingSelectionOutcome(existing, input);
+      }
+
       const conversation = await client.query<SelectionConversationRow>(
         `SELECT customer_id, status, pending_slot, search_request_id, expires_at > NOW() AS is_current
            FROM search_conversations
@@ -180,6 +261,9 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
       );
       const conversationRow = conversation.rows[0];
       if (!conversationRow) return { kind: "conversation_not_found" };
+
+      const replayAfterLock = await findSelectionByKey(client, input.selectionKey);
+      if (replayAfterLock) return existingSelectionOutcome(replayAfterLock, input);
       if (conversationRow.customer_id !== input.customerId) return { kind: "conversation_customer_mismatch" };
       if (
         conversationRow.status !== "active"
@@ -237,10 +321,10 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         [input.searchRequestId],
       );
       const contact = await client.query<ContactRow>(
-        `INSERT INTO contacts (search_request_id, customer_id, professional_id, status)
-         VALUES ($1, $2, $3, 'requested')
+        `INSERT INTO contacts (search_request_id, customer_id, professional_id, status, selection_key)
+         VALUES ($1, $2, $3, 'requested', $4)
          RETURNING id`,
-        [input.searchRequestId, input.customerId, matchRow.professional_id],
+        [input.searchRequestId, input.customerId, matchRow.professional_id, input.selectionKey],
       );
       await client.query(
         `UPDATE search_conversations
@@ -263,7 +347,23 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         professionalPhoneE164: matchRow.phone_e164,
         serviceName: matchRow.service_name,
         selectedAt: selected.rows[0].selected_at,
+        replayed: false,
       };
-    });
+      });
+    } catch (error) {
+      if (!isSelectionKeyUniqueViolation(error)) throw error;
+      return this.transaction(async (client) => {
+        const existing = await findSelectionByKey(client, input.selectionKey);
+        if (!existing) throw error;
+        const context = await client.query<{ id: string }>(
+          `SELECT id FROM search_conversations
+            WHERE id = $1 AND customer_id = $2 AND search_request_id = $3
+            FOR UPDATE`,
+          [input.conversationId, input.customerId, input.searchRequestId],
+        );
+        if (!context.rows[0]) return { kind: "idempotency_conflict" };
+        return existingSelectionOutcome(existing, input);
+      });
+    }
   }
 }

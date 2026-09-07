@@ -73,6 +73,7 @@ const selectInput = {
   searchRequestId,
   position: 2,
   lastMessageText: "quero a segunda",
+  selectionKey: randomUUID(),
 };
 
 function activeConversation(overrides: Record<string, unknown> = {}) {
@@ -222,7 +223,9 @@ test("selection match repository lists ordered unshown matches within the reques
 
 test("selection match repository selects a shown match atomically and completes its conversation", async () => {
   const context = fakeDatabase([
+    [],
     [activeConversation()],
+    [],
     [selectableSearchRequest()],
     [selectableMatch()],
     [{ selected_at: selectedAtForTest }],
@@ -239,35 +242,36 @@ test("selection match repository selects a shown match atomically and completes 
     professionalPhoneE164: "+5566999999999",
     serviceName: "Eletricista",
     selectedAt: selectedAtForTest,
+    replayed: false,
   });
   assert.equal(context.transactionState().committed, 1);
-  assert.match(context.calls[0]!.text, /search_conversations[\s\S]*FOR UPDATE/u);
-  assert.match(context.calls[0]!.text, /expires_at > NOW\(\) AS is_current/u);
-  assert.match(context.calls[1]!.text, /search_requests[\s\S]*FOR UPDATE/u);
-  assert.match(context.calls[2]!.text, /shown_at IS NOT NULL/u);
-  assert.match(context.calls[2]!.text, /selected_at IS NULL/u);
-  assert.match(context.calls[2]!.text, /FOR UPDATE OF matches/u);
-  assert.match(context.calls[3]!.text, /SET selected_at = NOW\(\)/u);
-  assert.match(context.calls[4]!.text, /status = 'selected'/u);
-  assert.match(context.calls[5]!.text, /INSERT INTO contacts/u);
-  assert.match(context.calls[6]!.text, /status = 'completed'/u);
-  assert.match(context.calls[6]!.text, /processing_token = NULL/u);
-  assert.match(context.calls[6]!.text, /processing_started_at = NULL/u);
+  assert.match(context.calls[1]!.text, /search_conversations[\s\S]*FOR UPDATE/u);
+  assert.match(context.calls[1]!.text, /expires_at > NOW\(\) AS is_current/u);
+  assert.match(context.calls[3]!.text, /search_requests[\s\S]*FOR UPDATE/u);
+  assert.match(context.calls[4]!.text, /shown_at IS NOT NULL/u);
+  assert.match(context.calls[4]!.text, /selected_at IS NULL/u);
+  assert.match(context.calls[4]!.text, /FOR UPDATE OF matches/u);
+  assert.match(context.calls[5]!.text, /SET selected_at = NOW\(\)/u);
+  assert.match(context.calls[6]!.text, /status = 'selected'/u);
+  assert.match(context.calls[7]!.text, /INSERT INTO contacts/u);
+  assert.match(context.calls[8]!.text, /status = 'completed'/u);
+  assert.match(context.calls[8]!.text, /processing_token = NULL/u);
+  assert.match(context.calls[8]!.text, /processing_started_at = NULL/u);
   assert.doesNotMatch(context.calls.map((call) => call.text).join("\n"), /shown_at\s*=/u);
 });
 
 test("selection match repository returns controlled outcomes before writing", async () => {
   const cases: Array<{ name: string; rows: QueryResultRow[][]; input?: Partial<typeof selectInput>; expected: string }> = [
-    { name: "missing conversation", rows: [[]], expected: "conversation_not_found" },
-    { name: "wrong customer", rows: [[activeConversation({ customer_id: randomUUID() })]], expected: "conversation_customer_mismatch" },
-    { name: "completed conversation", rows: [[activeConversation({ status: "completed", pending_slot: null })]], expected: "conversation_not_active" },
-    { name: "wrong pending slot", rows: [[activeConversation({ pending_slot: "location" })]], expected: "conversation_not_active" },
-    { name: "wrong search request", rows: [[activeConversation({ search_request_id: randomUUID() })]], expected: "conversation_not_active" },
-    { name: "expired conversation", rows: [[activeConversation({ is_current: false })]], expected: "conversation_expired" },
-    { name: "missing search request", rows: [[activeConversation()], []], expected: "search_request_not_selectable" },
-    { name: "foreign search request", rows: [[activeConversation()], [selectableSearchRequest({ customer_id: randomUUID() })]], expected: "search_request_not_selectable" },
-    { name: "unmatched search request", rows: [[activeConversation()], [selectableSearchRequest({ status: "ready" })]], expected: "search_request_not_selectable" },
-    { name: "missing, hidden, unranked, or selected match", rows: [[activeConversation()], [selectableSearchRequest()], []], expected: "match_not_available" },
+    { name: "missing conversation", rows: [[], []], expected: "conversation_not_found" },
+    { name: "wrong customer", rows: [[], [activeConversation({ customer_id: randomUUID() })], []], expected: "conversation_customer_mismatch" },
+    { name: "completed conversation", rows: [[], [activeConversation({ status: "completed", pending_slot: null })], []], expected: "conversation_not_active" },
+    { name: "wrong pending slot", rows: [[], [activeConversation({ pending_slot: "location" })], []], expected: "conversation_not_active" },
+    { name: "wrong search request", rows: [[], [activeConversation({ search_request_id: randomUUID() })], []], expected: "conversation_not_active" },
+    { name: "expired conversation", rows: [[], [activeConversation({ is_current: false })], []], expected: "conversation_expired" },
+    { name: "missing search request", rows: [[], [activeConversation()], [], []], expected: "search_request_not_selectable" },
+    { name: "foreign search request", rows: [[], [activeConversation()], [], [selectableSearchRequest({ customer_id: randomUUID() })]], expected: "search_request_not_selectable" },
+    { name: "unmatched search request", rows: [[], [activeConversation()], [], [selectableSearchRequest({ status: "ready" })]], expected: "search_request_not_selectable" },
+    { name: "missing, hidden, unranked, or selected match", rows: [[], [activeConversation()], [], [selectableSearchRequest()], []], expected: "match_not_available" },
   ];
 
   for (const currentCase of cases) {
@@ -282,20 +286,66 @@ test("selection match repository rolls back if an atomic write fails", async () 
   // The contact insertion receives no row, which simulates a database write that
   // cannot produce the required contact. The transaction must not commit it.
   const failing = fakeDatabase([
-    [activeConversation()], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [],
+    [], [activeConversation()], [], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [],
   ]);
   await assert.rejects(failing.repository.selectShownMatch(selectInput));
   assert.deepEqual(failing.transactionState(), { committed: 0, rolledBack: 1 });
 });
 
+test("selection match repository replays an existing selection without writes", async () => {
+  const existing = {
+    contact_id: contactId,
+    customer_id: customerId,
+    search_request_id: searchRequestId,
+    match_id: matchId,
+    professional_id: professionalId,
+    display_name: "Ana Eletricista",
+    phone_e164: "+5566999999999",
+    service_name: "Eletricista",
+    selected_at: selectedAtForTest,
+  };
+  const context = fakeDatabase([[existing], [{ id: conversationId }]]);
+  assert.deepEqual(await context.repository.selectShownMatch(selectInput), {
+    kind: "selected",
+    contactId,
+    matchId,
+    professionalId,
+    professionalDisplayName: "Ana Eletricista",
+    professionalPhoneE164: "+5566999999999",
+    serviceName: "Eletricista",
+    selectedAt: selectedAtForTest,
+    replayed: true,
+  });
+  assert.equal(context.calls.some((call) => /UPDATE|INSERT/u.test(call.text)), false);
+});
+
+test("selection match repository rejects a reused key with incompatible context", async () => {
+  const context = fakeDatabase([[{
+    contact_id: contactId,
+    customer_id: customerId,
+    search_request_id: searchRequestId,
+    match_id: matchId,
+    professional_id: professionalId,
+    display_name: "Ana Eletricista",
+    phone_e164: "+5566999999999",
+    service_name: "Eletricista",
+    selected_at: selectedAtForTest,
+  }], []]);
+  assert.deepEqual(
+    await context.repository.selectShownMatch({ ...selectInput, conversationId: randomUUID() }),
+    { kind: "idempotency_conflict" },
+  );
+  assert.equal(context.calls.some((call) => /UPDATE|INSERT/u.test(call.text)), false);
+});
+
 test("selection match repository serializes competing selections through row locks", async () => {
   const first = fakeDatabase([
-    [activeConversation()], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [{ id: contactId }], [],
+    [], [activeConversation()], [], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [{ id: contactId }], [],
   ]);
   assert.equal((await first.repository.selectShownMatch(selectInput)).kind, "selected");
-  const second = fakeDatabase([[activeConversation({ status: "completed", pending_slot: null })]]);
+  const second = fakeDatabase([[], [activeConversation({ status: "completed", pending_slot: null })], []]);
   assert.equal((await second.repository.selectShownMatch({ ...selectInput, position: 1 })).kind, "conversation_not_active");
-  assert.match(first.calls[0]!.text, /FOR UPDATE/u);
-  assert.match(first.calls[1]!.text, /FOR UPDATE/u);
-  assert.match(first.calls[2]!.text, /FOR UPDATE OF matches/u);
+  assert.match(first.calls[1]!.text, /search_conversations[\s\S]*FOR UPDATE/u);
+  assert.match(first.calls[3]!.text, /search_requests[\s\S]*FOR UPDATE/u);
+  assert.match(first.calls[4]!.text, /FOR UPDATE OF matches/u);
 });

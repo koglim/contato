@@ -11,6 +11,7 @@ const input: SelectionCommandInput = {
   pendingSlot: "selection",
   rawText: "2",
   lastMessageText: "quero o segundo",
+  selectionKey: "77777777-7777-4777-8777-777777777777",
 };
 
 class FakeSelectionMatchRepository implements SelectionMatchRepository {
@@ -24,6 +25,7 @@ class FakeSelectionMatchRepository implements SelectionMatchRepository {
     professionalPhoneE164: "+5566999999999",
     serviceName: "Eletricista",
     selectedAt: new Date("2026-09-06T12:00:00.000Z"),
+    replayed: false,
   };
   getStateCalls = 0;
   selectCalls: Array<Record<string, unknown>> = [];
@@ -52,6 +54,7 @@ test("selection command service selects numbered and ordinal shown matches", asy
       searchRequestId: input.searchRequestId,
       position: 2,
       lastMessageText: input.lastMessageText,
+      selectionKey: input.selectionKey,
     }]);
   }
 });

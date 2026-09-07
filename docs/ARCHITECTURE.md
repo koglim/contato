@@ -212,6 +212,8 @@ Um replay usa o resultado persistido e a mesma Outbox, sem chamar o router; port
 
 `match-selection` também oferece uma operação interna transacional para selecionar um match já apresentado. Ela bloqueia a conversa, a busca e o match, valida o cliente, estado `selection`, expiração e posição exibida, então marca o match como selecionado, cria o contato e conclui a conversa. A operação ainda não é chamada pelo Customer Search, Inbox, rotas, presenter ou n8n.
 
+A seleção aceita uma `selectionKey` genérica para idempotência. A mesma chave no mesmo cliente, busca e conversa recupera o contato e match já selecionados sem nova escrita; uma chave reutilizada em contexto diferente retorna conflito controlado. O futuro adaptador de canal poderá usar o UUID de inbound como essa chave, sem acoplamento com n8n ou Evolution.
+
 `selection-command` é a camada de aplicação interna entre o parser/router determinístico e `match-selection`. No contexto `selection`, ela consulta o estado de matches para rotear com a quantidade realmente exibida, delega somente escolhas válidas à transação de seleção e devolve pedidos de mostrar mais, comandos globais e texto livre sem efeitos. Ela não lista novos profissionais, não marca `shown_at`, não cria outbound e não chama IA, HTTP, Inbox ou Customer Search.
 
 Resultados `matched` agora deixam `search_conversations` ativa em `pending_slot = selection`: buscas novas criam esse estado e continuações com lease fazem a transição atômica, preservando o `search_request_id` e liberando a lease. `no_matches` continua encerrando a conversa. A apresentação outbound continua sendo a única responsável por `shown_at`; os comandos de escolha ainda não estão conectados ao Customer Search ou ao canal.

@@ -78,8 +78,8 @@ test("selectShownMatch serializes concurrent selections in PostgreSQL", { concur
   const repository = new PostgresSelectionMatchRepository();
   try {
     const outcomes = await Promise.all([
-      repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "quero o primeiro" }),
-      repository.selectShownMatch({ ...fixture, position: 2, lastMessageText: "quero o segundo" }),
+      repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "quero o primeiro", selectionKey: randomUUID() }),
+      repository.selectShownMatch({ ...fixture, position: 2, lastMessageText: "quero o segundo", selectionKey: randomUUID() }),
     ]);
     assert.equal(outcomes.filter((outcome) => outcome.kind === "selected").length, 1);
     assert.equal(outcomes.filter((outcome) => outcome.kind === "conversation_not_active").length, 1);
@@ -140,7 +140,7 @@ test("selectShownMatch rolls back every prior write when contact insertion fails
         FOR EACH ROW EXECUTE FUNCTION fail_selection_contact_insert();
     `);
     await assert.rejects(
-      repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "quero o primeiro" }),
+      repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "quero o primeiro", selectionKey: randomUUID() }),
       /intentional selection contact failure/u,
     );
     const state = await query<{
@@ -173,6 +173,43 @@ test("selectShownMatch rolls back every prior write when contact insertion fails
   } finally {
     await query(`DROP TRIGGER IF EXISTS fail_selection_contact_insert ON contacts`);
     await query(`DROP FUNCTION IF EXISTS fail_selection_contact_insert()`);
+    await fixture.cleanup();
+  }
+});
+
+test("selectShownMatch replays a completed selection key without changing persisted state", { concurrency: false }, async () => {
+  const fixture = await createFixture();
+  const repository = new PostgresSelectionMatchRepository();
+  const selectionKey = randomUUID();
+  try {
+    const original = await repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "quero o primeiro", selectionKey });
+    assert.equal(original.kind, "selected");
+    if (original.kind !== "selected") return;
+    const replay = await repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "quero o primeiro", selectionKey });
+    assert.equal(replay.kind, "selected");
+    if (replay.kind !== "selected") return;
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.contactId, original.contactId);
+    assert.equal(replay.matchId, original.matchId);
+    assert.equal(replay.selectedAt.getTime(), original.selectedAt.getTime());
+
+    const state = await query<{ contact_count: number | string; selected_count: number | string; selected_at: Date }>(
+      `SELECT
+         (SELECT COUNT(*) FROM contacts WHERE search_request_id = $1) AS contact_count,
+         (SELECT COUNT(*) FROM matches WHERE search_request_id = $1 AND selected_at IS NOT NULL) AS selected_count,
+         (SELECT selected_at FROM matches WHERE id = $2) AS selected_at`,
+      [fixture.searchRequestId, original.matchId],
+    );
+    assert.equal(Number(state.rows[0]!.contact_count), 1);
+    assert.equal(Number(state.rows[0]!.selected_count), 1);
+    assert.equal(state.rows[0]!.selected_at.getTime(), original.selectedAt.getTime());
+
+    assert.deepEqual(
+      await repository.selectShownMatch({ ...fixture, customerId: randomUUID(), position: 1, lastMessageText: "quero o primeiro", selectionKey }),
+      { kind: "idempotency_conflict" },
+    );
+    assert.equal(Number((await query<{ count: number | string }>(`SELECT COUNT(*) AS count FROM contacts WHERE search_request_id = $1`, [fixture.searchRequestId])).rows[0]!.count), 1);
+  } finally {
     await fixture.cleanup();
   }
 });

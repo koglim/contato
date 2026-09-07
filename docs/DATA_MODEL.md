@@ -14,7 +14,7 @@ Esta primeira versão representa o núcleo persistente do marketplace, sem imple
 - `search_requests`: a solicitação original do cliente. `raw_text` é imutável em intenção e preserva o texto informado.
 - `matches`: lista ordenada de candidatos de uma solicitação. `rank_position` preserva a ordem apresentada; `shown_at` é preenchido somente quando a mensagem outbound associada é confirmada como enviada, e `selected_at` indicará sua escolha. A leitura interna de seleção consulta somente posições com `shown_at` preenchido e lista candidatos pendentes por `rank_position`, sem alterar esses campos.
 - `channel_outbound_message_matches`: associação idempotente entre uma intenção outbound e os matches que ela apresenta. O vínculo é criado com a intenção, mas `shown_at` só é preenchido após sua confirmação válida como enviada.
-- `contacts`: registro do interesse de um cliente por um profissional para uma solicitação.
+- `contacts`: registro do interesse de um cliente por um profissional para uma solicitação. `selection_key`, quando preenchida, identifica de forma única uma tentativa lógica de seleção e permite recuperar o resultado após replay sem duplicar o contato.
 - `reviews`: avaliação vinculada a um contato real, com uma avaliação por contato.
 
 ## Relacionamentos

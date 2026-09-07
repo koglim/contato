@@ -57,6 +57,30 @@ jobs:
       - name: Apply all migrations
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
+      - name: Verify migration 010
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'contacts' AND column_name = 'selection_key'
+            ) THEN
+              RAISE EXCEPTION 'contacts.selection_key was not created';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE tablename = 'contacts'
+                 AND indexname = 'contacts_selection_key_unique_idx'
+                 AND indexdef LIKE '%UNIQUE%'
+                 AND indexdef LIKE '%WHERE (selection_key IS NOT NULL)%'
+            ) THEN
+              RAISE EXCEPTION 'contacts selection_key partial unique index is invalid';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Test selection transaction integration
         run: pnpm --filter @contatocerto/api test:integration
 
@@ -143,6 +167,24 @@ jobs:
            WHERE id = '00000000-0000-0000-0000-000000000002';
           SQL
 
+      - name: Roll back migration 010
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
+      - name: Verify migration 010 rollback
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'contacts' AND column_name = 'selection_key'
+            ) OR to_regclass('contacts_selection_key_unique_idx') IS NOT NULL THEN
+              RAISE EXCEPTION 'contacts selection_key schema remained after rollback';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Roll back migration 009
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
 
@@ -187,5 +229,5 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 and 009
+      - name: Reapply migrations 008, 009 and 010
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up

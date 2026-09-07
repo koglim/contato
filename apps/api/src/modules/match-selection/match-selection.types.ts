@@ -33,6 +33,7 @@ export type SelectShownMatchInput = {
   searchRequestId: string;
   position: number;
   lastMessageText: string;
+  selectionKey: string;
 };
 
 export type SelectShownMatchOutcome =
@@ -45,13 +46,15 @@ export type SelectShownMatchOutcome =
     professionalPhoneE164: string;
     serviceName: string;
     selectedAt: Date;
+    replayed: boolean;
   }
   | { kind: "conversation_not_found" }
   | { kind: "conversation_not_active" }
   | { kind: "conversation_expired" }
   | { kind: "conversation_customer_mismatch" }
   | { kind: "search_request_not_selectable" }
-  | { kind: "match_not_available" };
+  | { kind: "match_not_available" }
+  | { kind: "idempotency_conflict" };
 
 export interface SelectionMatchRepository {
   getState(searchRequestId: string): Promise<SelectionMatchState>;
