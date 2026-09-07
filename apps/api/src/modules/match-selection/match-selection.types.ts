@@ -27,8 +27,35 @@ export type SelectionMatchRecord = {
   effectiveAvailableNow: boolean | null;
 };
 
+export type SelectShownMatchInput = {
+  conversationId: string;
+  customerId: string;
+  searchRequestId: string;
+  position: number;
+  lastMessageText: string;
+};
+
+export type SelectShownMatchOutcome =
+  | {
+    kind: "selected";
+    contactId: string;
+    matchId: string;
+    professionalId: string;
+    professionalDisplayName: string;
+    professionalPhoneE164: string;
+    serviceName: string;
+    selectedAt: Date;
+  }
+  | { kind: "conversation_not_found" }
+  | { kind: "conversation_not_active" }
+  | { kind: "conversation_expired" }
+  | { kind: "conversation_customer_mismatch" }
+  | { kind: "search_request_not_selectable" }
+  | { kind: "match_not_available" };
+
 export interface SelectionMatchRepository {
   getState(searchRequestId: string): Promise<SelectionMatchState>;
   findShownByPosition(searchRequestId: string, position: number): Promise<SelectionMatchRecord | null>;
   listNextUnshown(searchRequestId: string, limit: number): Promise<SelectionMatchRecord[]>;
+  selectShownMatch(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome>;
 }

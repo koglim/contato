@@ -5,6 +5,7 @@ import type { QueryResultRow } from "pg";
 import {
   PostgresSelectionMatchRepository,
   type SelectionMatchQuery,
+  type SelectionMatchTransaction,
 } from "./match-selection.repository.js";
 
 const searchRequestId = randomUUID();
@@ -43,7 +44,61 @@ function fakeDatabase(results: QueryResultRow[][]) {
     calls.push({ text, values });
     return { rows: (results.shift() ?? []) as T[] };
   };
-  return { calls, repository: new PostgresSelectionMatchRepository(execute) };
+  let committed = 0;
+  let rolledBack = 0;
+  const transaction: SelectionMatchTransaction = async (callback) => {
+    try {
+      const value = await callback({ query: execute });
+      committed += 1;
+      return value;
+    } catch (error) {
+      rolledBack += 1;
+      throw error;
+    }
+  };
+  return {
+    calls,
+    transactionState: () => ({ committed, rolledBack }),
+    repository: new PostgresSelectionMatchRepository(execute, transaction),
+  };
+}
+
+const conversationId = randomUUID();
+const customerId = randomUUID();
+const contactId = randomUUID();
+const selectedAtForTest = new Date("2026-09-06T12:10:00.000Z");
+const selectInput = {
+  conversationId,
+  customerId,
+  searchRequestId,
+  position: 2,
+  lastMessageText: "quero a segunda",
+};
+
+function activeConversation(overrides: Record<string, unknown> = {}) {
+  return {
+    customer_id: customerId,
+    status: "active",
+    pending_slot: "selection",
+    search_request_id: searchRequestId,
+    is_current: true,
+    ...overrides,
+  };
+}
+
+function selectableSearchRequest(overrides: Record<string, unknown> = {}) {
+  return { customer_id: customerId, status: "matched", ...overrides };
+}
+
+function selectableMatch(overrides: Record<string, unknown> = {}) {
+  return {
+    match_id: matchId,
+    professional_id: professionalId,
+    display_name: "Ana Eletricista",
+    phone_e164: "+5566999999999",
+    service_name: "Eletricista",
+    ...overrides,
+  };
 }
 
 test("selection match repository returns an empty state when the search has no matches", async () => {
@@ -163,4 +218,84 @@ test("selection match repository lists ordered unshown matches within the reques
   assert.match(context.calls[0]!.text, /LIMIT \$2/u);
   assert.deepEqual(context.calls[0]!.values, [searchRequestId, 2]);
   assert.doesNotMatch(context.calls[0]!.text, /UPDATE|INSERT|DELETE|shown_at\s*=|selected_at\s*=/u);
+});
+
+test("selection match repository selects a shown match atomically and completes its conversation", async () => {
+  const context = fakeDatabase([
+    [activeConversation()],
+    [selectableSearchRequest()],
+    [selectableMatch()],
+    [{ selected_at: selectedAtForTest }],
+    [],
+    [{ id: contactId }],
+    [],
+  ]);
+  assert.deepEqual(await context.repository.selectShownMatch(selectInput), {
+    kind: "selected",
+    contactId,
+    matchId,
+    professionalId,
+    professionalDisplayName: "Ana Eletricista",
+    professionalPhoneE164: "+5566999999999",
+    serviceName: "Eletricista",
+    selectedAt: selectedAtForTest,
+  });
+  assert.equal(context.transactionState().committed, 1);
+  assert.match(context.calls[0]!.text, /search_conversations[\s\S]*FOR UPDATE/u);
+  assert.match(context.calls[0]!.text, /expires_at > NOW\(\) AS is_current/u);
+  assert.match(context.calls[1]!.text, /search_requests[\s\S]*FOR UPDATE/u);
+  assert.match(context.calls[2]!.text, /shown_at IS NOT NULL/u);
+  assert.match(context.calls[2]!.text, /selected_at IS NULL/u);
+  assert.match(context.calls[2]!.text, /FOR UPDATE OF matches/u);
+  assert.match(context.calls[3]!.text, /SET selected_at = NOW\(\)/u);
+  assert.match(context.calls[4]!.text, /status = 'selected'/u);
+  assert.match(context.calls[5]!.text, /INSERT INTO contacts/u);
+  assert.match(context.calls[6]!.text, /status = 'completed'/u);
+  assert.match(context.calls[6]!.text, /processing_token = NULL/u);
+  assert.match(context.calls[6]!.text, /processing_started_at = NULL/u);
+  assert.doesNotMatch(context.calls.map((call) => call.text).join("\n"), /shown_at\s*=/u);
+});
+
+test("selection match repository returns controlled outcomes before writing", async () => {
+  const cases: Array<{ name: string; rows: QueryResultRow[][]; input?: Partial<typeof selectInput>; expected: string }> = [
+    { name: "missing conversation", rows: [[]], expected: "conversation_not_found" },
+    { name: "wrong customer", rows: [[activeConversation({ customer_id: randomUUID() })]], expected: "conversation_customer_mismatch" },
+    { name: "completed conversation", rows: [[activeConversation({ status: "completed", pending_slot: null })]], expected: "conversation_not_active" },
+    { name: "wrong pending slot", rows: [[activeConversation({ pending_slot: "location" })]], expected: "conversation_not_active" },
+    { name: "wrong search request", rows: [[activeConversation({ search_request_id: randomUUID() })]], expected: "conversation_not_active" },
+    { name: "expired conversation", rows: [[activeConversation({ is_current: false })]], expected: "conversation_expired" },
+    { name: "missing search request", rows: [[activeConversation()], []], expected: "search_request_not_selectable" },
+    { name: "foreign search request", rows: [[activeConversation()], [selectableSearchRequest({ customer_id: randomUUID() })]], expected: "search_request_not_selectable" },
+    { name: "unmatched search request", rows: [[activeConversation()], [selectableSearchRequest({ status: "ready" })]], expected: "search_request_not_selectable" },
+    { name: "missing, hidden, unranked, or selected match", rows: [[activeConversation()], [selectableSearchRequest()], []], expected: "match_not_available" },
+  ];
+
+  for (const currentCase of cases) {
+    const context = fakeDatabase(currentCase.rows);
+    const outcome = await context.repository.selectShownMatch({ ...selectInput, ...currentCase.input });
+    assert.equal(outcome.kind, currentCase.expected, currentCase.name);
+    assert.equal(context.calls.some((call) => /UPDATE matches|INSERT INTO contacts|UPDATE search_requests/u.test(call.text)), false, currentCase.name);
+  }
+});
+
+test("selection match repository rolls back if an atomic write fails", async () => {
+  // The contact insertion receives no row, which simulates a database write that
+  // cannot produce the required contact. The transaction must not commit it.
+  const failing = fakeDatabase([
+    [activeConversation()], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [],
+  ]);
+  await assert.rejects(failing.repository.selectShownMatch(selectInput));
+  assert.deepEqual(failing.transactionState(), { committed: 0, rolledBack: 1 });
+});
+
+test("selection match repository serializes competing selections through row locks", async () => {
+  const first = fakeDatabase([
+    [activeConversation()], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [{ id: contactId }], [],
+  ]);
+  assert.equal((await first.repository.selectShownMatch(selectInput)).kind, "selected");
+  const second = fakeDatabase([[activeConversation({ status: "completed", pending_slot: null })]]);
+  assert.equal((await second.repository.selectShownMatch({ ...selectInput, position: 1 })).kind, "conversation_not_active");
+  assert.match(first.calls[0]!.text, /FOR UPDATE/u);
+  assert.match(first.calls[1]!.text, /FOR UPDATE/u);
+  assert.match(first.calls[2]!.text, /FOR UPDATE OF matches/u);
 });
