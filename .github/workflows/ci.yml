@@ -57,6 +57,40 @@ jobs:
       - name: Apply all migrations
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
+      - name: Verify migration 009
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF to_regclass('channel_outbound_message_matches') IS NULL THEN
+              RAISE EXCEPTION 'channel_outbound_message_matches was not created';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conrelid = 'channel_outbound_message_matches'::regclass AND contype = 'p'
+            ) THEN
+              RAISE EXCEPTION 'channel_outbound_message_matches primary key is missing';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conrelid = 'channel_outbound_message_matches'::regclass
+                 AND contype = 'f'
+                 AND confrelid = 'channel_outbound_messages'::regclass
+            ) OR NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conrelid = 'channel_outbound_message_matches'::regclass
+                 AND contype = 'f'
+                 AND confrelid = 'matches'::regclass
+            ) THEN
+              RAISE EXCEPTION 'channel_outbound_message_matches foreign keys are invalid';
+            END IF;
+            IF to_regclass('channel_outbound_message_matches_match_id_idx') IS NULL THEN
+              RAISE EXCEPTION 'channel_outbound_message_matches match index is missing';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Create rollback regression fixture
         run: |
           psql "$DATABASE_URL" <<'SQL'
@@ -106,6 +140,21 @@ jobs:
            WHERE id = '00000000-0000-0000-0000-000000000002';
           SQL
 
+      - name: Roll back migration 009
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
+      - name: Verify migration 009 rollback
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF to_regclass('channel_outbound_message_matches') IS NOT NULL THEN
+              RAISE EXCEPTION 'channel_outbound_message_matches remained after rollback';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Roll back migration 008
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
 
@@ -135,5 +184,5 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migration 008
+      - name: Reapply migrations 008 and 009
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up

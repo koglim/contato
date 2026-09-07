@@ -9,6 +9,7 @@ import type {
 import type { ChannelInboundMessageInput } from "@contatocerto/shared";
 import {
   channelOutboundMessageColumns,
+  associateOutboundMessageMatches,
   toChannelOutboundMessageRecord,
   type ChannelOutboundMessageRow,
 } from "../channel-outbox/channel-outbox.repository.js";
@@ -145,6 +146,7 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
           input.outbound.textContent,
         ],
       );
+      await associateOutboundMessageMatches(client, outbound.rows[0].id, input.outbound);
       return toChannelOutboundMessageRecord(outbound.rows[0]);
     });
   }

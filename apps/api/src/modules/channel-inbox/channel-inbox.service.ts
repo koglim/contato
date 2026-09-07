@@ -18,6 +18,13 @@ function searchRequestIdFrom(record: ReturnType<typeof customerSearchMessageResp
   return result.orchestration?.matching?.search_request_id ?? null;
 }
 
+function presentedMatchIdsFrom(record: ReturnType<typeof customerSearchMessageResponseSchema.parse>): string[] {
+  const result = record.conversation.result;
+  if (result.status !== "matched") return [];
+  const matching = "matching" in result ? result.matching : result.orchestration.matching;
+  return matching?.matches.map((match) => match.match_id) ?? [];
+}
+
 function errorCodeFor(error: unknown) {
   if (!(error instanceof GeocodingProviderError)) return "internal_error";
   if (error.kind === "rate_limited") return "geocoding_rate_limited";
@@ -98,6 +105,8 @@ export class DefaultChannelInboxService implements ChannelInboxService {
           provider: claimed.provider,
           recipientPhoneE164: claimed.phoneE164,
           textContent: replyText,
+          searchRequestId: searchRequestIdFrom(result),
+          matchIds: presentedMatchIdsFrom(result),
         },
       });
       if (!outbound) return { kind: "channel_message_processing" };
@@ -127,6 +136,8 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         provider: record.provider,
         recipientPhoneE164: record.phoneE164,
         textContent: replyText,
+        searchRequestId: searchRequestIdFrom(parsed.data),
+        matchIds: presentedMatchIdsFrom(parsed.data),
       });
     return {
       kind: "response",

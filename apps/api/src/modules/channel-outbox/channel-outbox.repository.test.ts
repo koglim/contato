@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { QueryResultRow } from "pg";
-import { PostgresChannelOutboundMessageRepository, type ChannelOutboxQuery } from "./channel-outbox.repository.js";
+import { PostgresChannelOutboundMessageRepository, type ChannelOutboxQuery, type ChannelOutboxTransaction } from "./channel-outbox.repository.js";
 
 const id = randomUUID();
 const inboundId = randomUUID();
@@ -23,23 +23,46 @@ function fake(results: QueryResultRow[][]) {
     calls.push({ text, values });
     return { rows: (results.shift() ?? []) as T[] };
   };
-  return { calls, repository: new PostgresChannelOutboundMessageRepository(execute) };
+  const transaction: ChannelOutboxTransaction = async (callback) => callback({ query: execute });
+  return { calls, repository: new PostgresChannelOutboundMessageRepository(execute, transaction) };
 }
 
-test("outbox repository recovers one legacy outbound and claims retryable statuses with a lease", async () => {
-  const current = fake([[row()], [row()], [row({ status: "processing", processing_token: token, processing_started_at: new Date(), attempt_count: 2 })], [{ id }], [{ id }]]);
+test("outbox repository recovers one legacy outbound, associates ranked matches, and claims retryable statuses with a lease", async () => {
+  const matchId = randomUUID();
+  const current = fake([[row()], [row()], [{ id: matchId }], [], [row({ status: "processing", processing_token: token, processing_started_at: new Date(), attempt_count: 2 })], [{ id }], [], [{ id }]]);
   assert.equal((await current.repository.findByInboundMessageId(inboundId))?.id, id);
-  const recovered = await current.repository.createOrFindForProcessedInbound({ channelInboundMessageId: inboundId, provider: "test", recipientPhoneE164: "+5566999999999", textContent: "Olá" });
+  const recovered = await current.repository.createOrFindForProcessedInbound({ channelInboundMessageId: inboundId, provider: "test", recipientPhoneE164: "+5566999999999", textContent: "Olá", searchRequestId: randomUUID(), matchIds: [matchId, matchId] });
   assert.equal(recovered.id, id);
   assert.match(current.calls[1]!.text, /INSERT INTO channel_outbound_messages/u);
   assert.match(current.calls[1]!.text, /ON CONFLICT \(channel_inbound_message_id\)/u);
   assert.deepEqual(current.calls[1]!.values, [inboundId, "test", "+5566999999999", "Olá"]);
+  assert.match(current.calls[2]!.text, /search_request_id = \$1/u);
+  assert.match(current.calls[2]!.text, /rank_position IS NOT NULL/u);
+  assert.match(current.calls[3]!.text, /channel_outbound_message_matches/u);
   assert.equal((await current.repository.claim(id, token, 60))?.attemptCount, 2);
-  assert.match(current.calls[2]!.text, /status IN \('pending', 'failed'\)/u);
-  assert.match(current.calls[2]!.text, /processing_started_at <=/u);
-  assert.match(current.calls[2]!.text, /attempt_count = attempt_count \+ 1/u);
+  assert.match(current.calls[4]!.text, /status IN \('pending', 'failed'\)/u);
+  assert.match(current.calls[4]!.text, /processing_started_at <=/u);
+  assert.match(current.calls[4]!.text, /attempt_count = attempt_count \+ 1/u);
   assert.equal(await current.repository.markSent(id, { processing_token: token, provider_message_id: "evolution-001" }), true);
-  assert.match(current.calls[3]!.text, /status = 'sent'/u);
+  assert.match(current.calls[5]!.text, /status = 'sent'/u);
+  assert.match(current.calls[6]!.text, /shown_at = COALESCE\(shown_at, NOW\(\)\)/u);
   assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "evolution_timeout" }), true);
-  assert.match(current.calls[4]!.text, /status = 'failed'/u);
+  assert.match(current.calls[7]!.text, /status = 'failed'/u);
+});
+
+test("outbox repository rejects unranked or foreign matches before creating associations", async () => {
+  const current = fake([[row()], []]);
+  await assert.rejects(
+    current.repository.createOrFindForProcessedInbound({ channelInboundMessageId: inboundId, provider: "test", recipientPhoneE164: "+5566999999999", textContent: "Olá", searchRequestId: randomUUID(), matchIds: [randomUUID()] }),
+    /ranked search request/u,
+  );
+  assert.equal(current.calls.filter((call) => /channel_outbound_message_matches/u.test(call.text)).length, 0);
+});
+
+test("outbox repository does not update matches when sent confirmation is invalid or failed", async () => {
+  const current = fake([[], [{ id }]]);
+  assert.equal(await current.repository.markSent(id, { processing_token: token, provider_message_id: "evolution-001" }), false);
+  assert.equal(current.calls.some((call) => /shown_at/u.test(call.text)), false);
+  assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "evolution_timeout" }), true);
+  assert.equal(current.calls.some((call) => /shown_at/u.test(call.text)), false);
 });

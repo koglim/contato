@@ -26,6 +26,8 @@ export type CreateChannelOutboundMessage = {
   provider: string;
   recipientPhoneE164: string;
   textContent: string;
+  searchRequestId: string | null;
+  matchIds: string[];
 };
 
 export interface ChannelOutboundMessageRepository {

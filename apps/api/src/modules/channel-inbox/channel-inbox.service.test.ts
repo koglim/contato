@@ -49,6 +49,34 @@ function pendingRouterResponse(): CustomerSearchMessageResponse {
   } as CustomerSearchMessageResponse;
 }
 
+function matchedRouterResponse(): CustomerSearchMessageResponse {
+  return {
+    customer_id: customerId,
+    route: "continued",
+    conversation: {
+      conversation_id: conversationId,
+      conversation_status: "completed",
+      pending_slot: null,
+      result: {
+        status: "matched",
+        service_resolution: { status: "resolved", normalized_text: "eletricista", match: { service: { id: customerId, name: "Eletricista", slug: "eletricista" }, method: "exact", matched_term: "eletricista", confidence: 1 }, candidates: [] },
+        location_resolution: { status: "resolved", query: "Sinop", country_code: "BR", match: { label: "Sinop", latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null, country_code: "BR", confidence: 1, layer: "locality" }, candidates: [], provider: "fake" },
+        matching: {
+          search_request_id: searchRequestId, status: "matched", service: { id: customerId, name: "Eletricista", slug: "eletricista" },
+          location: { latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null },
+          matches: [1, 2].map((rank_position) => ({
+            match_id: `${rank_position}1111111-1111-4111-8111-111111111111`, rank_position, distance_meters: 100,
+            effective_available_now: true, professional: { id: `${rank_position}2222222-2222-4222-8222-222222222222`, display_name: `Profissional ${rank_position}`, slug: `profissional-${rank_position}`, bio: null, profile_image_url: null, is_verified: true },
+            service: { professional_service_id: `${rank_position}3333333-3333-4333-8333-333333333333`, description: null, price_mode: "quote", price_from_cents: null, price_to_cents: null },
+            service_area: { id: `${rank_position}4444444-4444-4444-8444-444444444444`, label: null, city: "Sinop", state: "MT", radius_meters: 1000 },
+          })),
+          meta: { count: 2, limit: 3, availability_freshness_minutes: 240 },
+        },
+      },
+    },
+  } as CustomerSearchMessageResponse;
+}
+
 function record(overrides: Partial<ChannelInboundMessageRecord> = {}): ChannelInboundMessageRecord {
   return { id: messageId, provider: "test", providerMessageId: "msg-001", phoneE164: input.phone_e164, rawText: input.raw_text, countryCode: input.country_code, limitValue: input.limit, status: "received", customerId: null, conversationId: null, searchRequestId: null, result: null, errorCode: null, processingToken: null, processingStartedAt: null, ...overrides };
 }
@@ -133,6 +161,18 @@ test("channel inbox processes a new message once and persists its routing refere
   assert.equal(current.repository.markedProcessed?.customerId, customerId);
   assert.equal(current.repository.markedProcessed?.conversationId, conversationId);
   assert.equal(current.repository.markedProcessed?.searchRequestId, searchRequestId);
+  assert.deepEqual(current.repository.markedProcessed?.outbound.matchIds, []);
+});
+
+test("channel inbox associates only the matches rendered in a matched response", async () => {
+  const current = context();
+  current.router.outcome = { kind: "response", response: matchedRouterResponse() };
+  assert.equal((await current.service.receive(input)).kind, "response");
+  assert.equal(current.repository.markedProcessed?.outbound.searchRequestId, searchRequestId);
+  assert.deepEqual(current.repository.markedProcessed?.outbound.matchIds, [
+    "11111111-1111-4111-8111-111111111111",
+    "21111111-1111-4111-8111-111111111111",
+  ]);
 });
 
 test("processed duplicate replays only a schema-validated stored result", async () => {
