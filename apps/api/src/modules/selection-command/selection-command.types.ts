@@ -1,5 +1,5 @@
 import type { GlobalConversationCommand } from "../conversation-commands/conversation-command.types.js";
-import type { SelectShownMatchOutcome, SelectedMatchOutcome, SelectionMatchRepository } from "../match-selection/match-selection.types.js";
+import type { SelectShownMatchOutcome, SelectedMatchOutcome, SelectionMatchRecord, SelectionMatchRepository } from "../match-selection/match-selection.types.js";
 
 export type SelectionCommandInput = {
   conversationId: string;
@@ -9,6 +9,7 @@ export type SelectionCommandInput = {
   rawText: string;
   lastMessageText: string;
   selectionKey: string;
+  limit?: number;
 };
 
 export type SelectionCommandOutcome =
@@ -16,7 +17,7 @@ export type SelectionCommandOutcome =
   | { kind: "global_command"; command: GlobalConversationCommand }
   | { kind: "invalid_selection"; requestedPosition: number; visibleMatchCount: number }
   | { kind: "ambiguous_selection"; options: Array<{ position: number; professionalDisplayName: string }> }
-  | { kind: "show_more_requested"; hasMore: boolean; shownMatchCount: number }
+  | { kind: "show_more_requested"; hasMore: boolean; shownMatchCount: number; matches?: SelectionMatchRecord[] }
   | { kind: "not_command" }
   | {
     kind: "invalid_context";

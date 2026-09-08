@@ -27,6 +27,15 @@ export const selectionMessageContractSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("show_more_requested"),
     shown_match_count: z.number().int().nonnegative(),
+    matches: z.array(z.object({
+      position: z.number().int().positive(),
+      professional_name: z.string().trim().min(1).max(255),
+      service_name: z.string().trim().min(1).max(120),
+      distance_meters: z.number().int().nonnegative().nullable(),
+      price_mode: z.enum(["quote", "fixed", "from", "range"]),
+      price_from_cents: z.number().int().nonnegative().nullable(),
+      price_to_cents: z.number().int().nonnegative().nullable(),
+    }).strict()).min(1).max(10).optional(),
   }).strict(),
   z.object({
     kind: z.literal("global_command"),

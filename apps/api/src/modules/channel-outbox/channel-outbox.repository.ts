@@ -76,7 +76,7 @@ export async function associateOutboundMessageMatches(
     `INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id)
      SELECT $1, match_id
        FROM unnest($2::uuid[]) AS input(match_id)
-     ON CONFLICT DO NOTHING`,
+     ON CONFLICT (match_id) DO NOTHING`,
     [outboundMessageId, matchIds],
   );
 }

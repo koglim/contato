@@ -53,9 +53,11 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
     const activeConversation = await this.conversations.findActiveByCustomerId(customer.id);
     if (activeConversation?.pendingSlot === "selection") {
       if (!input.selectionKey) return { kind: "selection_idempotency_key_required" };
-      const outcome = await this.selectionCommandService.process({ conversationId: activeConversation.id, customerId: customer.id, searchRequestId: activeConversation.searchRequestId, pendingSlot: "selection", rawText: input.raw_text, lastMessageText: input.raw_text, selectionKey: input.selectionKey });
-      if (outcome.kind === "show_more_requested" && outcome.hasMore) return { kind: "selection_show_more_pending" };
-      return { kind: "response", response: { customer_id: customer.id, route: "selection", result: mapSelectionCommandOutcome(outcome) }, conversationId: activeConversation.id, searchRequestId: activeConversation.searchRequestId, presentedMatchIds: [] };
+      const outcome = await this.selectionCommandService.process({ conversationId: activeConversation.id, customerId: customer.id, searchRequestId: activeConversation.searchRequestId, pendingSlot: "selection", rawText: input.raw_text, lastMessageText: input.raw_text, selectionKey: input.selectionKey, limit: activeConversation.limitValue });
+      if (outcome.kind === "show_more_requested" && outcome.hasMore && !(outcome.matches?.length)) {
+        return { kind: "selection_show_more_pending" };
+      }
+      return { kind: "response", response: { customer_id: customer.id, route: "selection", result: mapSelectionCommandOutcome(outcome) }, conversationId: activeConversation.id, searchRequestId: activeConversation.searchRequestId, presentedMatchIds: outcome.kind === "show_more_requested" ? (outcome.matches ?? []).map((match) => match.matchId) : [] };
     }
     if (activeConversation) {
       const outcome = await this.searchConversationService.continueConversation(activeConversation.id, { raw_text: input.raw_text });

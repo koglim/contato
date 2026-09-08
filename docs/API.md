@@ -516,6 +516,8 @@ O n8n não interpreta linguagem nem aplica regras de negócio: ele transporta a 
 
 ## Channel Outbox
 
+Quando o cliente envia “mostrar mais” durante uma seleção, a API não inicia nova busca: consulta a mesma `search_request`, usa o limite original salvo na conversa e cria uma nova mensagem Outbox com a próxima página ordenada por `rank_position`. A numeração é absoluta e a resposta orienta a escolha por número ou nome. Matches já associados a outra apresentação não entram na página; a migration 011 garante essa reserva única por `match_id`.
+
 Depois da resposta da Inbox, o n8n deve operar somente a mensagem Outbox indicada por `outbound.id`:
 
 ```text

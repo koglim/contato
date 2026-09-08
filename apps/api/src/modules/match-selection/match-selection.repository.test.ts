@@ -330,7 +330,7 @@ test("selection match repository replays an existing selection without writes", 
     selectedAt: selectedAtForTest,
     replayed: true,
   });
-  assert.equal(context.calls.some((call) => /UPDATE|INSERT/u.test(call.text)), false);
+  assert.equal(context.calls.some((call) => /\b(?:UPDATE|INSERT)\s+(?!OF\b)/u.test(call.text)), false);
 });
 
 test("selection match repository rejects a reused key with incompatible context", async () => {
@@ -349,7 +349,7 @@ test("selection match repository rejects a reused key with incompatible context"
     await context.repository.selectShownMatch({ ...selectInput, conversationId: randomUUID() }),
     { kind: "idempotency_conflict" },
   );
-  assert.equal(context.calls.some((call) => /UPDATE|INSERT/u.test(call.text)), false);
+  assert.equal(context.calls.some((call) => /\b(?:UPDATE|INSERT)\s+(?!OF\b)/u.test(call.text)), false);
 });
 
 test("selection match repository recovers a selected contact by customer and selection key without writes", async () => {

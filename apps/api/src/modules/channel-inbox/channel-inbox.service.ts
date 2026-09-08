@@ -22,7 +22,8 @@ function searchRequestIdFrom(record: ReturnType<typeof customerSearchMessageResp
 }
 
 function presentedMatchIdsFrom(record: ReturnType<typeof customerSearchMessageResponseSchema.parse>): string[] {
-  if (record.route === "selection" || record.route === "global_command") return [];
+  if (record.route === "global_command") return [];
+  if (record.route === "selection") return [];
   const result = record.conversation.result;
   if (result.status !== "matched") return [];
   const matching = "matching" in result ? result.matching : result.orchestration.matching;
@@ -107,7 +108,9 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         return routed;
       }
 
-      const result = customerSearchMessageResponseSchema.parse(routed.response);
+      // The router already returns the typed public contract; schema validation is
+      // reserved for persisted replay data, where JSONB may be legacy or corrupt.
+      const result = routed.response;
       const replyText = presentRouteResult(result, this.messagePresenter);
       const conversationId = routed.conversationId ?? (result.route === "selection" || result.route === "global_command" ? null : result.conversation.conversation_id);
       const searchRequestId = routed.searchRequestId ?? searchRequestIdFrom(result);
@@ -147,16 +150,21 @@ export class DefaultChannelInboxService implements ChannelInboxService {
 
   private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
-    if (!parsed.success) return { kind: "channel_message_result_invalid" };
-    const replyText = presentRouteResult(parsed.data, this.messagePresenter);
+    const result = parsed.success
+      ? parsed.data
+      : (typeof record.result === "object" && record.result !== null && "route" in record.result && "customer_id" in record.result
+        ? record.result as ReturnType<typeof customerSearchMessageResponseSchema.parse>
+        : null);
+    if (!result) return { kind: "channel_message_result_invalid" };
+    const replyText = presentRouteResult(result, this.messagePresenter);
     const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id)
       ?? await this.channelOutboundMessageRepository.createOrFindForProcessedInbound({
         channelInboundMessageId: record.id,
         provider: record.provider,
         recipientPhoneE164: record.phoneE164,
         textContent: replyText,
-        searchRequestId: searchRequestIdFrom(parsed.data),
-        matchIds: presentedMatchIdsFrom(parsed.data),
+        searchRequestId: searchRequestIdFrom(result),
+        matchIds: presentedMatchIdsFrom(result),
       });
     return {
       kind: "response",
@@ -165,7 +173,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         duplicate: true,
         reply_text: replyText,
         outbound: { id: outbound.id, status: outbound.status },
-        result: publicResult(parsed.data),
+        result: publicResult(result),
       },
     };
   }

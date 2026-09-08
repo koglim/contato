@@ -24,14 +24,12 @@ function routerResponse(): CustomerSearchMessageResponse {
     conversation: {
       conversation_id: conversationId,
       conversation_status: "completed",
-      pending_slot: null,
       result: {
-        status: "no_matches",
-        reason: null,
-        service_resolution: { status: "resolved", normalized_text: "eletricista", match: { service: { id: customerId, name: "Eletricista", slug: "eletricista" }, method: "exact", matched_term: "eletricista", confidence: 1 }, candidates: [] },
-        location_resolution: { status: "resolved", query: "Sinop", country_code: "BR", match: { label: "Sinop", latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null, country_code: "BR", confidence: 1, layer: "locality" }, candidates: [], provider: "fake" },
-        matching: { search_request_id: searchRequestId, status: "ready", service: { id: customerId, name: "Eletricista", slug: "eletricista" }, location: { latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null }, matches: [], meta: { count: 0, limit: 3, availability_freshness_minutes: 240 } },
+        status: "no_matches", stage: "matching", reason: null,
+        interpretation: { status: "interpreted", raw_text: "preciso de eletricista em Sinop", service_text: "eletricista", location_text: "Sinop", country_code: "BR", interpretation: { service_strategy: "full_message", location_strategy: "locative_phrase" } },
+        orchestration: { status: "no_matches", reason: null, service_resolution: { status: "resolved", normalized_text: "eletricista", match: { service: { id: customerId, name: "Eletricista", slug: "eletricista" }, method: "exact", matched_term: "eletricista", confidence: 1 }, candidates: [] }, location_resolution: { status: "resolved", query: "Sinop", country_code: "BR", match: { label: "Sinop", latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null, country_code: "BR", confidence: 1, layer: "locality" }, candidates: [], provider: "fake" }, matching: { search_request_id: searchRequestId, status: "ready", service: { id: customerId, name: "Eletricista", slug: "eletricista" }, location: { latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null }, matches: [], meta: { count: 0, limit: 3, availability_freshness_minutes: 240 } } },
       },
+      pending_slot: null,
     },
   } as CustomerSearchMessageResponse;
 }
@@ -58,10 +56,9 @@ function matchedRouterResponse(): CustomerSearchMessageResponse {
       conversation_status: "completed",
       pending_slot: null,
       result: {
-        status: "matched",
-        service_resolution: { status: "resolved", normalized_text: "eletricista", match: { service: { id: customerId, name: "Eletricista", slug: "eletricista" }, method: "exact", matched_term: "eletricista", confidence: 1 }, candidates: [] },
-        location_resolution: { status: "resolved", query: "Sinop", country_code: "BR", match: { label: "Sinop", latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null, country_code: "BR", confidence: 1, layer: "locality" }, candidates: [], provider: "fake" },
-        matching: {
+        status: "matched", stage: "matching", reason: null,
+        interpretation: { status: "interpreted", raw_text: "preciso de eletricista em Sinop", service_text: "eletricista", location_text: "Sinop", country_code: "BR", interpretation: { service_strategy: "full_message", location_strategy: "locative_phrase" } },
+        orchestration: { status: "matched", reason: null, service_resolution: { status: "resolved", normalized_text: "eletricista", match: { service: { id: customerId, name: "Eletricista", slug: "eletricista" }, method: "exact", matched_term: "eletricista", confidence: 1 }, candidates: [] }, location_resolution: { status: "resolved", query: "Sinop", country_code: "BR", match: { label: "Sinop", latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null, country_code: "BR", confidence: 1, layer: "locality" }, candidates: [], provider: "fake" }, matching: {
           search_request_id: searchRequestId, status: "matched", service: { id: customerId, name: "Eletricista", slug: "eletricista" },
           location: { latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null },
           matches: [1, 2].map((rank_position) => ({
@@ -71,7 +68,7 @@ function matchedRouterResponse(): CustomerSearchMessageResponse {
             service_area: { id: `${rank_position}4444444-4444-4444-8444-444444444444`, label: null, city: "Sinop", state: "MT", radius_meters: 1000 },
           })),
           meta: { count: 2, limit: 3, availability_freshness_minutes: 240 },
-        },
+        } },
       },
     },
   } as CustomerSearchMessageResponse;
