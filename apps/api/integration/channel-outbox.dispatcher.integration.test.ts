@@ -9,14 +9,15 @@ after(async () => closeDatabaseConnection());
 async function insertIndependent(status: "pending" | "processing" = "pending", processingStartedAt: Date | null = null) {
   const result = await query<{ id: string }>(
     `INSERT INTO channel_outbound_messages (
-       purpose, provider, recipient_phone_e164, text_content, status, processing_token, processing_started_at
-     ) VALUES ('professional_contact_notification', 'test', $1, 'Mensagem de teste', $2, $3, $4)
+       purpose, provider, recipient_phone_e164, text_content, status, processing_token, processing_started_at, attempt_count
+     ) VALUES ('professional_contact_notification', 'test', $1, 'Mensagem de teste', $2, $3, $4, $5)
      RETURNING id`,
     [
       `+5566${Math.floor(100000000 + Math.random() * 899999999)}`,
       status,
       status === "processing" ? randomUUID() : null,
       processingStartedAt,
+      status === "processing" ? 1 : 0,
     ],
   );
   return result.rows[0]!.id;
