@@ -31,6 +31,15 @@ export const channelOutboundMessageColumns = `
   status, processing_token, processing_started_at, provider_message_id, attempt_count, last_error_code, sent_at
 `;
 
+export class MatchReservationConflictError extends Error {
+  readonly code = "match_reservation_conflict";
+
+  constructor() {
+    super("A match is already reserved for another outbound message");
+    this.name = "MatchReservationConflictError";
+  }
+}
+
 export function toChannelOutboundMessageRecord(row: ChannelOutboundMessageRow): ChannelOutboundMessageRecord {
   return {
     id: row.id,
@@ -72,13 +81,22 @@ export async function associateOutboundMessageMatches(
     throw new Error("Outbound matches must belong to the ranked search request");
   }
 
-  await client.query(
-    `INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id)
-     SELECT $1, match_id
-       FROM unnest($2::uuid[]) AS input(match_id)
-     ON CONFLICT DO NOTHING`,
-    [outboundMessageId, matchIds],
-  );
+  try {
+    await client.query(
+      `INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id)
+       SELECT $1, match_id
+         FROM unnest($2::uuid[]) AS input(match_id)`,
+      [outboundMessageId, matchIds],
+    );
+  } catch (error) {
+    if (typeof error === "object" && error !== null
+      && "code" in error && (error as { code?: unknown }).code === "23505"
+      && "constraint" in error
+      && (error as { constraint?: unknown }).constraint === "channel_outbound_message_matches_match_id_unique_idx") {
+      throw new MatchReservationConflictError();
+    }
+    throw error;
+  }
 }
 
 export class PostgresChannelOutboundMessageRepository implements ChannelOutboundMessageRepository {

@@ -118,6 +118,26 @@ jobs:
           $$;
           SQL
 
+      - name: Verify migration 011
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF to_regclass('channel_outbound_message_matches_match_id_unique_idx') IS NULL THEN
+              RAISE EXCEPTION 'channel_outbound_message_matches unique reservation index is missing';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE tablename = 'channel_outbound_message_matches'
+                 AND indexname = 'channel_outbound_message_matches_match_id_unique_idx'
+                 AND indexdef LIKE '%UNIQUE%'
+            ) THEN
+              RAISE EXCEPTION 'channel_outbound_message_matches unique reservation index is invalid';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Create rollback regression fixture
         run: |
           psql "$DATABASE_URL" <<'SQL'
@@ -165,6 +185,21 @@ jobs:
              SET status = 'cancelled',
                  pending_slot = NULL
            WHERE id = '00000000-0000-0000-0000-000000000002';
+          SQL
+
+      - name: Roll back migration 011
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
+      - name: Verify migration 011 rollback
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF to_regclass('channel_outbound_message_matches_match_id_unique_idx') IS NOT NULL THEN
+              RAISE EXCEPTION 'channel_outbound_message_matches unique reservation index remained after rollback';
+            END IF;
+          END
+          $$;
           SQL
 
       - name: Roll back migration 010
@@ -229,5 +264,5 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008, 009 and 010
+      - name: Reapply migrations 008, 009, 010 and 011
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up

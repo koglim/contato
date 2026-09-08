@@ -54,11 +54,16 @@ export class DefaultSelectionCommandService implements SelectionCommandService {
         }
       case "selection_command":
         if (routed.command.kind === "show_more") {
-          return {
+          const matches = state.hasMore
+            ? await this.dependencies.selectionMatchRepository.listNextUnshown(input.searchRequestId!, input.limit ?? 3)
+            : [];
+          const result = {
             kind: "show_more_requested",
             hasMore: state.hasMore,
             shownMatchCount: state.shownMatchCount,
-          };
+            ...(matches.length > 0 ? { matches } : {}),
+          } as SelectionCommandOutcome;
+          return result;
         }
         return this.dependencies.selectionMatchRepository.selectShownMatch({
           conversationId: input.conversationId,

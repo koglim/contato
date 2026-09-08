@@ -1,7 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import {
   channelInboundMessageRequestSchema,
-  channelInboundMessageResponseSchema,
 } from "@contatocerto/shared";
 import { createInternalKeyGuard } from "../internal/internal-auth.js";
 import { validationError } from "../internal/validation.js";
@@ -40,7 +39,7 @@ export const channelInboxRoutes: FastifyPluginAsync<ChannelInboxRoutesOptions> =
         duplicate: outcome.response.duplicate,
         status: "processed",
       }, "Channel inbound message processed");
-      return reply.send(channelInboundMessageResponseSchema.parse(outcome.response));
+      return reply.send(outcome.response);
     } catch (error) {
       if (error instanceof GeocodingProviderError) {
         const mapped = geocodingError(error);

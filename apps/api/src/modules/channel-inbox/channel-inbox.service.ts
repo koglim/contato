@@ -7,6 +7,7 @@ import type { MessagePresenter } from "../message-presentation/message-presentat
 import { presentSelectionMessage } from "../selection-message/selection-message.presenter.js";
 import { presentGlobalConversationMessage } from "../global-conversation-commands/global-conversation-message.presenter.js";
 import type { ChannelOutboundMessageRepository } from "../channel-outbox/channel-outbox.types.js";
+import { MatchReservationConflictError } from "../channel-outbox/channel-outbox.repository.js";
 import type {
   ChannelInboxOutcome,
   ChannelInboxService,
@@ -22,7 +23,8 @@ function searchRequestIdFrom(record: ReturnType<typeof customerSearchMessageResp
 }
 
 function presentedMatchIdsFrom(record: ReturnType<typeof customerSearchMessageResponseSchema.parse>): string[] {
-  if (record.route === "selection" || record.route === "global_command") return [];
+  if (record.route === "global_command") return [];
+  if (record.route === "selection") return [];
   const result = record.conversation.result;
   if (result.status !== "matched") return [];
   const matching = "matching" in result ? result.matching : result.orchestration.matching;
@@ -140,6 +142,10 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         },
       };
     } catch (error) {
+      if (error instanceof MatchReservationConflictError) {
+        await this.repository.markFailed(claimed.id, processingToken, "show_more_reservation_conflict");
+        return { kind: "selection_show_more_pending" };
+      }
       await this.repository.markFailed(claimed.id, processingToken, errorCodeFor(error));
       throw error;
     }
@@ -148,15 +154,16 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
     if (!parsed.success) return { kind: "channel_message_result_invalid" };
-    const replyText = presentRouteResult(parsed.data, this.messagePresenter);
+    const result = parsed.data;
+    const replyText = presentRouteResult(result, this.messagePresenter);
     const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id)
       ?? await this.channelOutboundMessageRepository.createOrFindForProcessedInbound({
         channelInboundMessageId: record.id,
         provider: record.provider,
         recipientPhoneE164: record.phoneE164,
         textContent: replyText,
-        searchRequestId: searchRequestIdFrom(parsed.data),
-        matchIds: presentedMatchIdsFrom(parsed.data),
+        searchRequestId: searchRequestIdFrom(result),
+        matchIds: presentedMatchIdsFrom(result),
       });
     return {
       kind: "response",
@@ -165,7 +172,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         duplicate: true,
         reply_text: replyText,
         outbound: { id: outbound.id, status: outbound.status },
-        result: publicResult(parsed.data),
+        result: publicResult(result),
       },
     };
   }

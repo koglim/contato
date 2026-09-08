@@ -33,6 +33,8 @@ type SelectionMatchRow = {
 type SelectionMatchStateRow = {
   total_match_count: number | string;
   shown_match_count: number | string;
+  available_match_count: number | string;
+  pending_reservation_count: number | string;
 };
 
 export type SelectionMatchQuery = <T extends QueryResultRow>(
@@ -197,10 +199,28 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
 
   async getState(searchRequestId: string): Promise<SelectionMatchState> {
     const result = await this.execute<SelectionMatchStateRow>(
-      `SELECT COUNT(*) FILTER (WHERE rank_position IS NOT NULL)::integer AS total_match_count,
+    `SELECT COUNT(*) FILTER (WHERE rank_position IS NOT NULL)::integer AS total_match_count,
               COUNT(*) FILTER (
                 WHERE rank_position IS NOT NULL AND shown_at IS NOT NULL
-              )::integer AS shown_match_count
+              )::integer AS shown_match_count,
+              COUNT(*) FILTER (
+                WHERE rank_position IS NOT NULL AND shown_at IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM channel_outbound_message_matches reservations
+                     WHERE reservations.match_id = matches.id
+                  )
+              )::integer AS available_match_count,
+              COUNT(*) FILTER (
+                WHERE rank_position IS NOT NULL AND shown_at IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                      FROM channel_outbound_message_matches reservations
+                      JOIN channel_outbound_messages outbound
+                        ON outbound.id = reservations.channel_outbound_message_id
+                     WHERE reservations.match_id = matches.id
+                       AND outbound.status IN ('pending', 'processing', 'failed')
+                  )
+              )::integer AS pending_reservation_count
          FROM matches
         WHERE search_request_id = $1`,
       [searchRequestId],
@@ -208,10 +228,14 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
     const row = result.rows[0];
     const totalMatchCount = Number(row?.total_match_count ?? 0);
     const shownMatchCount = Number(row?.shown_match_count ?? 0);
+    const availableMatchCount = row?.available_match_count === undefined
+      ? totalMatchCount - shownMatchCount
+      : Number(row.available_match_count);
     return {
       totalMatchCount,
       shownMatchCount,
-      hasMore: totalMatchCount > shownMatchCount,
+      hasMore: availableMatchCount > 0 || Number(row?.pending_reservation_count ?? 0) > 0,
+      ...(Number(row?.pending_reservation_count ?? 0) > 0 ? { hasPendingReservations: true } : {}),
     };
   }
 
@@ -246,6 +270,10 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         WHERE matches.search_request_id = $1
           AND matches.shown_at IS NULL
           AND matches.rank_position IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM channel_outbound_message_matches reservations
+             WHERE reservations.match_id = matches.id
+          )
         ORDER BY matches.rank_position ASC
         LIMIT $2`,
       [searchRequestId, limit],

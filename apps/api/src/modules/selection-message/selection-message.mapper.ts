@@ -31,9 +31,17 @@ export function mapSelectionCommandOutcome(outcome: SelectionCommandOutcome): Se
     case "not_command":
       return { kind: "not_command" };
     case "show_more_requested":
-      return outcome.hasMore
-        ? { kind: "show_more_requested", shown_match_count: outcome.shownMatchCount }
-        : { kind: "no_more_options" };
+      return outcome.hasMore && (outcome.matches?.length ?? 0) > 0
+        ? { kind: "show_more_requested", shown_match_count: outcome.shownMatchCount, matches: (outcome.matches ?? []).map((match) => ({
+          position: match.rankPosition!,
+          professional_name: match.displayName,
+          service_name: match.serviceName,
+          distance_meters: match.distanceMeters,
+          price_mode: match.priceMode,
+          price_from_cents: match.priceFromCents,
+          price_to_cents: match.priceToCents,
+        })) }
+        : outcome.hasMore ? { kind: "show_more_requested", shown_match_count: outcome.shownMatchCount } : { kind: "no_more_options" };
     case "global_command":
       return { kind: "global_command", command: outcome.command.kind };
     case "conversation_not_found":

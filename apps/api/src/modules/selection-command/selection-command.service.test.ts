@@ -142,6 +142,20 @@ test("selection command service returns show-more state without changing matches
   }
 });
 
+test("selection command service returns the next ranked page using the conversation limit", async () => {
+  const current = context();
+  const next = [
+    { matchId: "88888888-8888-4888-8888-888888888888", rankPosition: 4, displayName: "Maria", serviceName: "Eletricista" },
+    { matchId: "99999999-9999-4999-8999-999999999999", rankPosition: 5, displayName: "Carlos", serviceName: "Eletricista" },
+  ] as never;
+  let requestedLimit = 0;
+  current.selectionMatchRepository.listNextUnshown = async (_searchRequestId: string, limit: number) => { requestedLimit = limit; return next; };
+  const outcome = await current.service.process({ ...input, rawText: "mostrar mais", limit: 2 });
+  assert.equal(requestedLimit, 2);
+  assert.equal(outcome.kind, "show_more_requested");
+  if (outcome.kind === "show_more_requested") assert.deepEqual(outcome.matches, next);
+});
+
 test("selection command service leaves free text and global commands without writes", async () => {
   const cases = [
     ["preciso de dois eletricistas", { kind: "not_command" }],

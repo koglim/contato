@@ -28,7 +28,17 @@ export function presentSelectionMessage(contract: SelectionMessageContract): str
       return "Todas as opções disponíveis já foram apresentadas.";
     case "selection_unavailable":
       return "Essa seleção não está mais disponível. Faça uma nova busca para continuar.";
-    case "show_more_requested":
+    case "show_more_requested": {
+      if (!contract.matches?.length) return null;
+      const money = (cents: number | null) => cents === null ? "Preço sob consulta" : `A partir de R$ ${(cents / 100).toFixed(2).replace(".", ",")}`;
+      const entries = contract.matches.map((match) => [
+        `${match.position}. *${match.professional_name}*`,
+        match.service_name,
+        match.distance_meters === null ? null : `📍 ${match.distance_meters >= 1000 ? `${(match.distance_meters / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km` : `${match.distance_meters} m`}`,
+        `💰 ${match.price_mode === "quote" ? "Sob consulta" : money(match.price_from_cents)}`,
+      ].filter((value): value is string => value !== null).join("\n"));
+      return ["Mais opções para você 👇", ...entries, "Responda com o número ou com o nome do profissional que você quer escolher."].join("\n\n");
+    }
     case "global_command":
       return null;
     default:

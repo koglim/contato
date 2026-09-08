@@ -76,19 +76,28 @@ const activeContinueSearchConversationResponseSchema = z.discriminatedUnion("pen
     conversation_id: z.string().uuid(),
     conversation_status: z.literal("active"),
     pending_slot: z.literal("service"),
-    result: searchOrchestrationNeedsServiceResponseSchema,
+    result: z.union([
+      searchOrchestrationNeedsServiceResponseSchema,
+      messageSearchResponseSchema.refine((value) => value.status === "needs_service"),
+    ]),
   }).strict(),
   z.object({
     conversation_id: z.string().uuid(),
     conversation_status: z.literal("active"),
     pending_slot: z.literal("selection"),
-    result: searchOrchestrationMatchedResponseSchema,
+    result: z.union([
+      searchOrchestrationMatchedResponseSchema,
+      messageSearchResponseSchema.refine((value) => value.status === "matched"),
+    ]),
   }).strict(),
   z.object({
     conversation_id: z.string().uuid(),
     conversation_status: z.literal("active"),
     pending_slot: z.literal("location"),
-    result: searchOrchestrationNeedsLocationResponseSchema,
+    result: z.union([
+      searchOrchestrationNeedsLocationResponseSchema,
+      messageSearchResponseSchema.refine((value) => value.status === "needs_location"),
+    ]),
   }).strict(),
 ]);
 
@@ -98,6 +107,9 @@ export const continueSearchConversationResponseSchema = z.union([
     conversation_id: z.string().uuid(),
     conversation_status: z.literal("completed"),
     pending_slot: z.null(),
-    result: searchOrchestrationNoMatchesResponseSchema,
+    result: z.union([
+      searchOrchestrationNoMatchesResponseSchema,
+      messageSearchResponseSchema.refine((value) => value.status === "no_matches"),
+    ]),
   }).strict(),
 ]);

@@ -105,7 +105,7 @@ test("router handles active selection before any search service and requires an 
   assert.equal(search.continued, undefined);
 });
 
-test("router returns pending show-more without starting a search", async () => {
+test("router keeps a show-more request pending when no page was reserved", async () => {
   const customers = new FakeCustomers(); const conversations = new FakeConversations(); conversations.active = selectionConversation(); const search = new FakeSearchConversationService();
   const selection = selectionService({ kind: "show_more_requested", hasMore: true, shownMatchCount: 3 });
   const router = new DefaultCustomerSearchRouter(customers, conversations, search, selection as never, globalService() as never);
