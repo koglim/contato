@@ -3,6 +3,16 @@ import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import { closeDatabaseConnection, query } from "../src/database/connection.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
+import { PostgresCustomerRepository } from "../src/modules/customers/customer.repository.js";
+import { PostgresSearchConversationRepository } from "../src/modules/search-conversations/search-conversation.repository.js";
+import { DefaultSelectionCommandService } from "../src/modules/selection-command/selection-command.service.js";
+import { PostgresGlobalConversationCommandRepository } from "../src/modules/global-conversation-commands/global-conversation-command.repository.js";
+import { DefaultGlobalConversationCommandService } from "../src/modules/global-conversation-commands/global-conversation-command.service.js";
+import { DefaultCustomerSearchRouter } from "../src/modules/customer-search/customer-search.service.js";
+import { DefaultChannelInboxService } from "../src/modules/channel-inbox/channel-inbox.service.js";
+import { PostgresChannelInboundMessageRepository } from "../src/modules/channel-inbox/channel-inbox.repository.js";
+import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel-outbox/channel-outbox.repository.js";
+import { DefaultMessagePresenter } from "../src/modules/message-presentation/message-presentation.service.js";
 
 type Fixture = {
   customerId: string;
@@ -221,6 +231,102 @@ test("selectShownMatch replays a completed selection key without changing persis
     );
     assert.equal(Number((await query<{ count: number | string }>(`SELECT COUNT(*) AS count FROM contacts WHERE search_request_id = $1`, [fixture.searchRequestId])).rows[0]!.count), 1);
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("channel inbox selects once and replays the same inbound safely", { concurrency: false }, async () => {
+  const fixture = await createFixture();
+  const selectionRepository = new PostgresSelectionMatchRepository();
+  let routerCalls = 0;
+  const router = new DefaultCustomerSearchRouter(
+    new PostgresCustomerRepository(),
+    new PostgresSearchConversationRepository(),
+    { async start() { throw new Error("search must not start during selection"); }, async continueConversation() { throw new Error("search must not continue during selection"); } } as never,
+    new DefaultSelectionCommandService({ selectionMatchRepository: selectionRepository }),
+    new DefaultGlobalConversationCommandService(new PostgresGlobalConversationCommandRepository()),
+  );
+  const countedRouter = { async route(input: Parameters<typeof router.route>[0]) { routerCalls += 1; return router.route(input); } };
+  const inbox = new DefaultChannelInboxService(
+    new PostgresChannelInboundMessageRepository(), countedRouter, { processingLeaseSeconds: 60 },
+    new DefaultMessagePresenter(), new PostgresChannelOutboundMessageRepository(),
+  );
+  const providerMessageId = `selection-${randomUUID()}`;
+  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: "+5566999999999", raw_text: "1", country_code: "BR", limit: 2 };
+  try {
+    const first = await inbox.receive(input);
+    assert.equal(first.kind, "response");
+    if (first.kind !== "response") return;
+    assert.match(first.response.reply_text, /\+5566988888888/u);
+    assert.equal(first.response.reply_text.includes(input.phone_e164), false);
+    assert.equal(first.response.reply_text.includes(fixture.matchIds[0]), false);
+    const duplicate = await inbox.receive(input);
+    assert.equal(duplicate.kind, "response");
+    if (duplicate.kind !== "response") return;
+    assert.equal(duplicate.response.duplicate, true);
+    assert.equal(duplicate.response.outbound.id, first.response.outbound.id);
+    assert.equal(duplicate.response.reply_text, first.response.reply_text);
+    assert.equal(routerCalls, 1);
+    const state = await query<{ contacts: string; outbounds: string; status: string }>(
+      `SELECT (SELECT COUNT(*) FROM contacts WHERE search_request_id = $1) AS contacts,
+              (SELECT COUNT(*) FROM channel_outbound_messages WHERE channel_inbound_message_id = $2) AS outbounds,
+              (SELECT status FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $3) AS status`,
+      [fixture.searchRequestId, first.response.message_id, providerMessageId],
+    );
+    assert.equal(Number(state.rows[0]!.contacts), 1);
+    assert.equal(Number(state.rows[0]!.outbounds), 1);
+    assert.equal(state.rows[0]!.status, "processed");
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1)`, [providerMessageId]);
+    await query(`DELETE FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1`, [providerMessageId]);
+    await fixture.cleanup();
+  }
+});
+
+test("channel inbox recovers a completed selection after a crash before inbound processing", { concurrency: false }, async () => {
+  const fixture = await createFixture();
+  const selectionRepository = new PostgresSelectionMatchRepository();
+  const inboundRepository = new PostgresChannelInboundMessageRepository();
+  const providerMessageId = `crash-selection-${randomUUID()}`;
+  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: "+5566999999999", raw_text: "1", country_code: "BR", limit: 2 };
+  const registered = await inboundRepository.createOrFind(input);
+  const selected = await selectionRepository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "1", selectionKey: registered.record.id });
+  assert.equal(selected.kind, "selected");
+  let searchCalls = 0;
+  const router = new DefaultCustomerSearchRouter(
+    new PostgresCustomerRepository(), new PostgresSearchConversationRepository(),
+    { async start() { searchCalls += 1; throw new Error("search must not start"); }, async continueConversation() { searchCalls += 1; throw new Error("search must not continue"); } } as never,
+    new DefaultSelectionCommandService({ selectionMatchRepository: selectionRepository }),
+    new DefaultGlobalConversationCommandService(new PostgresGlobalConversationCommandRepository()),
+  );
+  const inbox = new DefaultChannelInboxService(inboundRepository, router, { processingLeaseSeconds: 60 }, new DefaultMessagePresenter(), new PostgresChannelOutboundMessageRepository());
+  try {
+    const stateBefore = await query<{ status: string; contacts: string; outbounds: string }>(
+      `SELECT (SELECT status FROM channel_inbound_messages WHERE id = $1) AS status,
+              (SELECT COUNT(*) FROM contacts WHERE search_request_id = $2) AS contacts,
+              (SELECT COUNT(*) FROM channel_outbound_messages WHERE channel_inbound_message_id = $1) AS outbounds`,
+      [registered.record.id, fixture.searchRequestId],
+    );
+    assert.equal(stateBefore.rows[0]!.status, "received");
+    assert.equal(Number(stateBefore.rows[0]!.contacts), 1);
+    assert.equal(Number(stateBefore.rows[0]!.outbounds), 0);
+    const replayed = await inbox.receive(input);
+    assert.equal(replayed.kind, "response");
+    if (replayed.kind !== "response") return;
+    assert.match(replayed.response.reply_text, /Ana Eletricista/u);
+    assert.equal(searchCalls, 0);
+    const state = await query<{ status: string; contacts: string; outbounds: string }>(
+      `SELECT (SELECT status FROM channel_inbound_messages WHERE id = $1) AS status,
+              (SELECT COUNT(*) FROM contacts WHERE search_request_id = $2) AS contacts,
+              (SELECT COUNT(*) FROM channel_outbound_messages WHERE channel_inbound_message_id = $1) AS outbounds`,
+      [registered.record.id, fixture.searchRequestId],
+    );
+    assert.equal(state.rows[0]!.status, "processed");
+    assert.equal(Number(state.rows[0]!.contacts), 1);
+    assert.equal(Number(state.rows[0]!.outbounds), 1);
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id = $1`, [registered.record.id]);
+    await query(`DELETE FROM channel_inbound_messages WHERE id = $1`, [registered.record.id]);
     await fixture.cleanup();
   }
 });

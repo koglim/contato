@@ -51,9 +51,26 @@ function activeConversation(): SearchConversationRecord {
   return { id: conversationId, customerId, status: "active", pendingSlot: "location", originalRawText: input.raw_text, serviceText: input.raw_text, locationText: null, countryCode: "BR", limitValue: 3, lastMessageText: input.raw_text, searchRequestId: null, expiresAt: new Date(now.getTime() + 60_000), createdAt: now, updatedAt: now, completedAt: null, isExpired: false };
 }
 
+function selectionConversation(): SearchConversationRecord {
+  return { ...activeConversation(), pendingSlot: "selection", searchRequestId: "33333333-3333-4333-8333-333333333333" };
+}
+
+function selectionService(outcome: Record<string, unknown> = { kind: "not_command" }) {
+  return {
+    recovered: null as Record<string, unknown> | null,
+    calls: 0,
+    async recoverSelection() { return this.recovered; },
+    async process() { this.calls += 1; return outcome; },
+  };
+}
+
+function globalService() {
+  return { async execute() { return { kind: "help", pendingSlot: "selection" as const }; } };
+}
+
 test("router starts with a customer context after expiring stale state", async () => {
   const customers = new FakeCustomers(); const conversations = new FakeConversations(); const service = new FakeSearchConversationService();
-  const router = new DefaultCustomerSearchRouter(customers, conversations, service);
+  const router = new DefaultCustomerSearchRouter(customers, conversations, service, selectionService() as never, globalService() as never);
   const outcome = await router.route(input);
   assert.equal(outcome.kind, "response");
   if (outcome.kind === "response") assert.equal(outcome.response.route, "started");
@@ -64,10 +81,107 @@ test("router starts with a customer context after expiring stale state", async (
 
 test("router continues only the active conversation owned by the resolved customer", async () => {
   const customers = new FakeCustomers(); const conversations = new FakeConversations(); conversations.active = activeConversation(); const service = new FakeSearchConversationService();
-  const router = new DefaultCustomerSearchRouter(customers, conversations, service);
+  const router = new DefaultCustomerSearchRouter(customers, conversations, service, selectionService() as never, globalService() as never);
   const outcome = await router.route({ ...input, raw_text: "Sinop" });
   assert.equal(outcome.kind, "response");
   if (outcome.kind === "response") assert.equal(outcome.response.route, "continued");
   assert.deepEqual(service.continued, { id: conversationId, rawText: "Sinop" });
   assert.equal(service.startContext, undefined);
+});
+
+test("router handles active selection before any search service and requires an idempotency key", async () => {
+  const customers = new FakeCustomers(); const conversations = new FakeConversations(); conversations.active = selectionConversation(); const search = new FakeSearchConversationService();
+  const selection = selectionService({ kind: "selected", contactId: customerId, matchId: conversationId, professionalId: customerId, professionalDisplayName: "Ana", professionalPhoneE164: "+5566999999999", serviceName: "Eletricista", selectedAt: new Date(), replayed: false });
+  const router = new DefaultCustomerSearchRouter(customers, conversations, search, selection as never, globalService() as never);
+  assert.deepEqual(await router.route(input), { kind: "selection_idempotency_key_required" });
+  const outcome = await router.route({ ...input, raw_text: "2", selectionKey: "77777777-7777-4777-8777-777777777777" });
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") {
+    assert.equal(outcome.response.route, "selection");
+    assert.equal(JSON.stringify(outcome.response).includes("contactId"), false);
+  }
+  assert.equal(selection.calls, 1);
+  assert.equal(search.startContext, undefined);
+  assert.equal(search.continued, undefined);
+});
+
+test("router returns pending show-more without starting a search", async () => {
+  const customers = new FakeCustomers(); const conversations = new FakeConversations(); conversations.active = selectionConversation(); const search = new FakeSearchConversationService();
+  const selection = selectionService({ kind: "show_more_requested", hasMore: true, shownMatchCount: 3 });
+  const router = new DefaultCustomerSearchRouter(customers, conversations, search, selection as never, globalService() as never);
+  assert.deepEqual(await router.route({ ...input, raw_text: "mostrar mais", selectionKey: "77777777-7777-4777-8777-777777777777" }), { kind: "selection_show_more_pending" });
+  assert.equal(search.startContext, undefined);
+  assert.equal(search.continued, undefined);
+});
+
+test("global command has priority over selection recovery, active selection and search", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  conversations.active = selectionConversation();
+  const search = new FakeSearchConversationService();
+  const selection = selectionService();
+  let recoveryCalls = 0;
+  selection.recoverSelection = async () => { recoveryCalls += 1; return null; };
+  let globalCalls = 0;
+  const global = { async execute() { globalCalls += 1; return { kind: "cancelled" as const }; } };
+  const router = new DefaultCustomerSearchRouter(customers, conversations, search, selection as never, global as never);
+
+  const outcome = await router.route({ ...input, raw_text: "cancelar", selectionKey: "77777777-7777-4777-8777-777777777777" });
+
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") assert.equal(outcome.response.route, "global_command");
+  assert.equal(globalCalls, 1);
+  assert.equal(recoveryCalls, 0);
+  assert.equal(selection.calls, 0);
+  assert.equal(search.startContext, undefined);
+  assert.equal(search.continued, undefined);
+  assert.equal(conversations.expiredFor, undefined);
+});
+
+test("selectionKey recovery has priority over an active conversation and search", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  conversations.active = activeConversation();
+  const search = new FakeSearchConversationService();
+  const selection = selectionService({
+    kind: "selected",
+    contactId: customerId,
+    matchId: conversationId,
+    professionalId: customerId,
+    professionalDisplayName: "Ana",
+    professionalPhoneE164: "+5566999999999",
+    serviceName: "Eletricista",
+    selectedAt: new Date(),
+    replayed: true,
+  });
+  selection.recovered = {
+    kind: "selected",
+    contactId: customerId,
+    matchId: conversationId,
+    professionalId: customerId,
+    professionalDisplayName: "Ana",
+    professionalPhoneE164: "+5566999999999",
+    serviceName: "Eletricista",
+    selectedAt: new Date(),
+    replayed: true,
+  };
+  const recoveryCalls: string[] = [];
+  selection.recoverSelection = async (_customerId: string, selectionKey: string) => {
+    recoveryCalls.push(selectionKey);
+    return selection.recovered;
+  };
+  let globalCalls = 0;
+  const global = { async execute() { globalCalls += 1; return { kind: "cancelled" as const }; } };
+  const router = new DefaultCustomerSearchRouter(customers, conversations, search, selection as never, global as never);
+
+  const outcome = await router.route({ ...input, raw_text: "2", selectionKey: "77777777-7777-4777-8777-777777777777" });
+
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") assert.equal(outcome.response.route, "selection");
+  assert.deepEqual(recoveryCalls, ["77777777-7777-4777-8777-777777777777"]);
+  assert.equal(globalCalls, 0);
+  assert.equal(selection.calls, 0);
+  assert.equal(search.startContext, undefined);
+  assert.equal(search.continued, undefined);
+  assert.equal(conversations.expiredFor, undefined);
 });

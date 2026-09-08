@@ -175,6 +175,58 @@ test("channel inbox associates only the matches rendered in a matched response",
   ]);
 });
 
+test("channel inbox persists and replays a confirmed selection without exposing customer phone", async () => {
+  const current = context();
+  current.router.outcome = {
+    kind: "response",
+    response: {
+      customer_id: customerId,
+      route: "selection",
+      result: {
+        kind: "selected",
+        professional_name: "Ana Eletricista",
+        service_name: "Eletricista",
+        professional_phone_e164: "+5566988888888",
+      },
+    },
+    conversationId,
+    searchRequestId,
+    presentedMatchIds: [],
+  } as never;
+  const first = await current.service.receive(input);
+  assert.equal(first.kind, "response");
+  if (first.kind === "response") {
+    assert.match(first.response.reply_text, /\+5566988888888/u);
+    assert.equal(first.response.reply_text.includes(input.phone_e164), false);
+    assert.equal(first.response.result.route, "selection");
+  }
+  current.repository.created = false;
+  const replay = await current.service.receive(input);
+  assert.equal(replay.kind, "response");
+  if (replay.kind === "response") assert.equal(replay.response.duplicate, true);
+  assert.equal(current.router.calls, 1);
+});
+
+test("channel inbox persists and replays a global command", async () => {
+  const current = context();
+  current.router.outcome = { kind: "response", response: { customer_id: customerId, route: "global_command", result: { kind: "cancelled" } }, conversationId: null, searchRequestId: null, presentedMatchIds: [] } as never;
+  const first = await current.service.receive(input);
+  assert.equal(first.kind, "response");
+  if (first.kind === "response") assert.match(first.response.reply_text, /Busca cancelada/u);
+  current.repository.created = false;
+  const replay = await current.service.receive(input);
+  assert.equal(replay.kind, "response");
+  assert.equal(current.router.calls, 1);
+});
+
+test("show-more pending fails the inbound without an outbound", async () => {
+  const current = context();
+  current.router.outcome = { kind: "selection_show_more_pending" };
+  assert.deepEqual(await current.service.receive(input), { kind: "selection_show_more_pending" });
+  assert.equal(current.repository.markedFailed, "selection_show_more_pending");
+  assert.equal(current.repository.markedProcessed, undefined);
+});
+
 test("processed duplicate replays only a schema-validated stored result", async () => {
   const current = context();
   current.repository.created = false;
@@ -252,7 +304,7 @@ test("failed and stale processing only reclaim matching payloads and use the cla
   current.repository.current = record({ status: "failed", rawText: "Sinop", countryCode: "BR", limitValue: 2 });
   const requestWithSamePayload = { ...input, raw_text: "Sinop", limit: 2 };
   assert.equal((await current.service.receive(requestWithSamePayload)).kind, "response");
-  assert.deepEqual(current.router.received, { phone_e164: input.phone_e164, raw_text: "Sinop", country_code: "BR", limit: 2 });
+  assert.deepEqual(current.router.received, { phone_e164: input.phone_e164, raw_text: "Sinop", country_code: "BR", limit: 2, selectionKey: messageId });
 
   const conflict = context();
   conflict.repository.created = false;

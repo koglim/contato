@@ -47,6 +47,12 @@ import { PostgresCustomerRepository, type CustomerRepository } from "./modules/c
 import { customerSearchRoutes } from "./modules/customer-search/customer-search.routes.js";
 import { DefaultCustomerSearchRouter } from "./modules/customer-search/customer-search.service.js";
 import type { CustomerSearchRouter } from "./modules/customer-search/customer-search.types.js";
+import { PostgresSelectionMatchRepository } from "./modules/match-selection/match-selection.repository.js";
+import { DefaultSelectionCommandService } from "./modules/selection-command/selection-command.service.js";
+import type { SelectionCommandService } from "./modules/selection-command/selection-command.types.js";
+import { PostgresGlobalConversationCommandRepository } from "./modules/global-conversation-commands/global-conversation-command.repository.js";
+import { DefaultGlobalConversationCommandService } from "./modules/global-conversation-commands/global-conversation-command.service.js";
+import type { GlobalConversationCommandService } from "./modules/global-conversation-commands/global-conversation-command.types.js";
 import { channelInboxRoutes } from "./modules/channel-inbox/channel-inbox.routes.js";
 import { DefaultChannelInboxService } from "./modules/channel-inbox/channel-inbox.service.js";
 import { PostgresChannelInboundMessageRepository } from "./modules/channel-inbox/channel-inbox.repository.js";
@@ -80,6 +86,8 @@ type AppDependencies = {
   searchConversationConfig?: SearchConversationConfig;
   customerRepository?: CustomerRepository;
   customerSearchRouter?: CustomerSearchRouter;
+  selectionCommandService?: SelectionCommandService;
+  globalConversationCommandService?: GlobalConversationCommandService;
   channelInboundMessageRepository?: ChannelInboundMessageRepository;
   channelInboxService?: ChannelInboxService;
   channelInboxConfig?: ChannelInboxConfig;
@@ -137,6 +145,8 @@ export function buildApp({
   searchConversationConfig,
   customerRepository,
   customerSearchRouter,
+  selectionCommandService,
+  globalConversationCommandService,
   channelInboundMessageRepository,
   channelInboxService,
   channelInboxConfig,
@@ -186,6 +196,8 @@ export function buildApp({
     customerRepository ?? new PostgresCustomerRepository(),
     resolvedSearchConversationRepository,
     resolvedSearchConversationService,
+    selectionCommandService ?? new DefaultSelectionCommandService({ selectionMatchRepository: new PostgresSelectionMatchRepository() }),
+    globalConversationCommandService ?? new DefaultGlobalConversationCommandService(new PostgresGlobalConversationCommandRepository()),
   );
   const resolvedChannelOutboundMessageRepository = channelOutboundMessageRepository ?? new PostgresChannelOutboundMessageRepository();
   const resolvedChannelOutboundService = channelOutboundService ?? new DefaultChannelOutboundService(

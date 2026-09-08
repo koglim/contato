@@ -1,5 +1,5 @@
-import type { CustomerSearchMessageResponse, MatchingSearchResponse } from "@contatocerto/shared";
-import type { MessagePresenter } from "./message-presentation.types.js";
+import type { MatchingSearchResponse } from "@contatocerto/shared";
+import type { MessagePresenter, SearchRouteMessageResponse } from "./message-presentation.types.js";
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -23,7 +23,7 @@ function formatPrice(service: MatchingSearchResponse["matches"][number]["service
   return "Preço sob consulta";
 }
 
-type CustomerSearchResult = CustomerSearchMessageResponse["conversation"]["result"];
+type CustomerSearchResult = SearchRouteMessageResponse["conversation"]["result"];
 type MatchedCustomerSearchResult = Extract<CustomerSearchResult, { status: "matched" }>;
 
 function matchingFrom(result: MatchedCustomerSearchResult): MatchingSearchResponse {
@@ -35,7 +35,7 @@ function presentMatches(matching: MatchingSearchResponse) {
   const plural = matching.matches.length === 1 ? "um profissional" : `${matching.matches.length} profissionais`;
   const title = `Encontrei ${plural} para você 👇`;
   const entries = matching.matches.map((match, index) => {
-    const prefix = matching.matches.length === 1 ? "" : `${index + 1}. `;
+    const prefix = `${index + 1}. `;
     return [
       `${prefix}*${match.professional.display_name}*`,
       matching.service.name,
@@ -43,7 +43,7 @@ function presentMatches(matching: MatchingSearchResponse) {
       `💰 ${formatPrice(match.service)}`,
     ].join("\n");
   });
-  return [title, ...entries].join("\n\n");
+  return [title, ...entries, "Responda com o número da opção que você quer escolher."].join("\n\n");
 }
 
 function assertNever(value: never): never {
@@ -51,7 +51,7 @@ function assertNever(value: never): never {
 }
 
 export class DefaultMessagePresenter implements MessagePresenter {
-  present(response: CustomerSearchMessageResponse): string {
+  present(response: SearchRouteMessageResponse): string {
     const result = response.conversation.result;
     switch (result.status) {
       case "needs_location":

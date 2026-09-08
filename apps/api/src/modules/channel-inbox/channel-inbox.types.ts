@@ -53,7 +53,9 @@ export type ChannelInboxOutcome =
   | { kind: "channel_message_result_invalid" }
   | { kind: "customer_conversation_conflict" }
   | { kind: "conversation_processing" }
-  | { kind: "service_unavailable" };
+  | { kind: "service_unavailable" }
+  | { kind: "selection_idempotency_key_required" }
+  | { kind: "selection_show_more_pending" };
 
 export interface ChannelInboxService {
   receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome>;

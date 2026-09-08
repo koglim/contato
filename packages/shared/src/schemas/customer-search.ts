@@ -4,6 +4,8 @@ import {
   startSearchConversationResponseSchema,
 } from "./search-conversation.js";
 import { phoneE164Schema } from "./phone.js";
+import { selectionMessageContractSchema } from "./selection-message.js";
+import { globalConversationMessageContractSchema } from "./global-conversation-message.js";
 
 export const customerSearchMessageRequestSchema = z.object({
   phone_e164: phoneE164Schema,
@@ -22,5 +24,15 @@ export const customerSearchMessageResponseSchema = z.discriminatedUnion("route",
     customer_id: z.string().uuid(),
     route: z.literal("continued"),
     conversation: continueSearchConversationResponseSchema,
+  }).strict(),
+  z.object({
+    customer_id: z.string().uuid(),
+    route: z.literal("selection"),
+    result: selectionMessageContractSchema,
+  }).strict(),
+  z.object({
+    customer_id: z.string().uuid(),
+    route: z.literal("global_command"),
+    result: globalConversationMessageContractSchema,
   }).strict(),
 ]);
