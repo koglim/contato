@@ -4,6 +4,7 @@ import type { ChannelInboundMessageInput, CustomerSearchMessageResponse } from "
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import { DefaultChannelInboxService } from "./channel-inbox.service.js";
 import { DefaultMessagePresenter } from "../message-presentation/message-presentation.service.js";
+import { MatchReservationConflictError } from "../channel-outbox/channel-outbox.repository.js";
 import type { ChannelOutboundMessageRecord, ChannelOutboundMessageRepository } from "../channel-outbox/channel-outbox.types.js";
 import type {
   ChannelInboundMessageRecord,
@@ -24,12 +25,12 @@ function routerResponse(): CustomerSearchMessageResponse {
     conversation: {
       conversation_id: conversationId,
       conversation_status: "completed",
+      pending_slot: null,
       result: {
         status: "no_matches", stage: "matching", reason: null,
         interpretation: { status: "interpreted", raw_text: "preciso de eletricista em Sinop", service_text: "eletricista", location_text: "Sinop", country_code: "BR", interpretation: { service_strategy: "full_message", location_strategy: "locative_phrase" } },
         orchestration: { status: "no_matches", reason: null, service_resolution: { status: "resolved", normalized_text: "eletricista", match: { service: { id: customerId, name: "Eletricista", slug: "eletricista" }, method: "exact", matched_term: "eletricista", confidence: 1 }, candidates: [] }, location_resolution: { status: "resolved", query: "Sinop", country_code: "BR", match: { label: "Sinop", latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null, country_code: "BR", confidence: 1, layer: "locality" }, candidates: [], provider: "fake" }, matching: { search_request_id: searchRequestId, status: "ready", service: { id: customerId, name: "Eletricista", slug: "eletricista" }, location: { latitude: -11.86, longitude: -55.5, city: "Sinop", state: "MT", neighborhood: null }, matches: [], meta: { count: 0, limit: 3, availability_freshness_minutes: 240 } } },
       },
-      pending_slot: null,
     },
   } as CustomerSearchMessageResponse;
 }
@@ -53,8 +54,8 @@ function matchedRouterResponse(): CustomerSearchMessageResponse {
     route: "continued",
     conversation: {
       conversation_id: conversationId,
-      conversation_status: "completed",
-      pending_slot: null,
+      conversation_status: "active",
+      pending_slot: "selection",
       result: {
         status: "matched", stage: "matching", reason: null,
         interpretation: { status: "interpreted", raw_text: "preciso de eletricista em Sinop", service_text: "eletricista", location_text: "Sinop", country_code: "BR", interpretation: { service_strategy: "full_message", location_strategy: "locative_phrase" } },
@@ -89,6 +90,7 @@ class FakeRepository implements ChannelInboundMessageRepository {
     processingToken: null, processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null,
   };
   markedFailed: string | undefined;
+  reservationConflict = false;
   async createOrFind() { return { record: this.current, created: this.created }; }
   async findById() { return this.current; }
   async claim(_id: string, token: string) {
@@ -98,6 +100,7 @@ class FakeRepository implements ChannelInboundMessageRepository {
     return this.current;
   }
   async markProcessedAndCreateOutbound(value: MarkProcessedInboundMessage & { outbound: { textContent: string } }) {
+    if (this.reservationConflict) throw new MatchReservationConflictError();
     this.markedProcessed = value;
     this.outbound = { ...this.outbound, textContent: value.outbound.textContent };
     this.current = record({ status: "processed", result: value.result, customerId: value.customerId, conversationId: value.conversationId, searchRequestId: value.searchRequestId });
@@ -222,6 +225,22 @@ test("show-more pending fails the inbound without an outbound", async () => {
   assert.deepEqual(await current.service.receive(input), { kind: "selection_show_more_pending" });
   assert.equal(current.repository.markedFailed, "selection_show_more_pending");
   assert.equal(current.repository.markedProcessed, undefined);
+});
+
+test("show-more reservation collisions roll back the inbound and return a safe pending outcome", async () => {
+  const current = context();
+  current.repository.reservationConflict = true;
+  assert.deepEqual(await current.service.receive(input), { kind: "selection_show_more_pending" });
+  assert.equal(current.repository.markedFailed, "show_more_reservation_conflict");
+  assert.equal(current.repository.markedProcessed, undefined);
+});
+
+test("new Inbox responses are validated before persistence", async () => {
+  const current = context();
+  current.router.outcome = { kind: "response", response: { customer_id: customerId, route: "started", conversation: { corrupt: true } } } as never;
+  await assert.rejects(() => current.service.receive(input));
+  assert.equal(current.repository.markedProcessed, undefined);
+  assert.equal(current.repository.markedFailed, "internal_error");
 });
 
 test("processed duplicate replays only a schema-validated stored result", async () => {

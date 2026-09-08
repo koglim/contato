@@ -4,6 +4,7 @@ export type SelectionMatchState = {
   totalMatchCount: number;
   shownMatchCount: number;
   hasMore: boolean;
+  hasPendingReservations?: boolean;
 };
 
 export type SelectionMatchRecord = {

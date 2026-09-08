@@ -34,6 +34,7 @@ type SelectionMatchStateRow = {
   total_match_count: number | string;
   shown_match_count: number | string;
   available_match_count: number | string;
+  pending_reservation_count: number | string;
 };
 
 export type SelectionMatchQuery = <T extends QueryResultRow>(
@@ -198,7 +199,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
 
   async getState(searchRequestId: string): Promise<SelectionMatchState> {
     const result = await this.execute<SelectionMatchStateRow>(
-      `SELECT COUNT(*) FILTER (WHERE rank_position IS NOT NULL)::integer AS total_match_count,
+    `SELECT COUNT(*) FILTER (WHERE rank_position IS NOT NULL)::integer AS total_match_count,
               COUNT(*) FILTER (
                 WHERE rank_position IS NOT NULL AND shown_at IS NOT NULL
               )::integer AS shown_match_count,
@@ -208,7 +209,18 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
                     SELECT 1 FROM channel_outbound_message_matches reservations
                      WHERE reservations.match_id = matches.id
                   )
-              )::integer AS available_match_count
+              )::integer AS available_match_count,
+              COUNT(*) FILTER (
+                WHERE rank_position IS NOT NULL AND shown_at IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                      FROM channel_outbound_message_matches reservations
+                      JOIN channel_outbound_messages outbound
+                        ON outbound.id = reservations.channel_outbound_message_id
+                     WHERE reservations.match_id = matches.id
+                       AND outbound.status IN ('pending', 'processing', 'failed')
+                  )
+              )::integer AS pending_reservation_count
          FROM matches
         WHERE search_request_id = $1`,
       [searchRequestId],
@@ -222,7 +234,8 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
     return {
       totalMatchCount,
       shownMatchCount,
-      hasMore: availableMatchCount > 0,
+      hasMore: availableMatchCount > 0 || Number(row?.pending_reservation_count ?? 0) > 0,
+      ...(Number(row?.pending_reservation_count ?? 0) > 0 ? { hasPendingReservations: true } : {}),
     };
   }
 

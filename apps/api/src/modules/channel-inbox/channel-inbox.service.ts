@@ -7,6 +7,7 @@ import type { MessagePresenter } from "../message-presentation/message-presentat
 import { presentSelectionMessage } from "../selection-message/selection-message.presenter.js";
 import { presentGlobalConversationMessage } from "../global-conversation-commands/global-conversation-message.presenter.js";
 import type { ChannelOutboundMessageRepository } from "../channel-outbox/channel-outbox.types.js";
+import { MatchReservationConflictError } from "../channel-outbox/channel-outbox.repository.js";
 import type {
   ChannelInboxOutcome,
   ChannelInboxService,
@@ -108,9 +109,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         return routed;
       }
 
-      // The router already returns the typed public contract; schema validation is
-      // reserved for persisted replay data, where JSONB may be legacy or corrupt.
-      const result = routed.response;
+      const result = customerSearchMessageResponseSchema.parse(routed.response);
       const replyText = presentRouteResult(result, this.messagePresenter);
       const conversationId = routed.conversationId ?? (result.route === "selection" || result.route === "global_command" ? null : result.conversation.conversation_id);
       const searchRequestId = routed.searchRequestId ?? searchRequestIdFrom(result);
@@ -143,6 +142,10 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         },
       };
     } catch (error) {
+      if (error instanceof MatchReservationConflictError) {
+        await this.repository.markFailed(claimed.id, processingToken, "show_more_reservation_conflict");
+        return { kind: "selection_show_more_pending" };
+      }
       await this.repository.markFailed(claimed.id, processingToken, errorCodeFor(error));
       throw error;
     }
@@ -150,12 +153,8 @@ export class DefaultChannelInboxService implements ChannelInboxService {
 
   private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
-    const result = parsed.success
-      ? parsed.data
-      : (typeof record.result === "object" && record.result !== null && "route" in record.result && "customer_id" in record.result
-        ? record.result as ReturnType<typeof customerSearchMessageResponseSchema.parse>
-        : null);
-    if (!result) return { kind: "channel_message_result_invalid" };
+    if (!parsed.success) return { kind: "channel_message_result_invalid" };
+    const result = parsed.data;
     const replyText = presentRouteResult(result, this.messagePresenter);
     const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id)
       ?? await this.channelOutboundMessageRepository.createOrFindForProcessedInbound({
