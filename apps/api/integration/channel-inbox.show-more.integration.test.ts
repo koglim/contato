@@ -57,13 +57,18 @@ async function createFixture(): Promise<Fixture> {
      ) VALUES ($1, $2, 'active', 'selection', 'preciso de eletricista', 'eletricista', 'BR', 2, $3, NOW() + INTERVAL '1 hour')`,
     [conversationId, customerId, searchRequestId],
   );
-  const matches = await query<{ id: string; shown_at: Date }>(
+  await query(
     `INSERT INTO matches (id, search_request_id, professional_id, rank_position, shown_at)
      VALUES ($1, $2, $3, 1, NOW()), ($4, $2, $5, 2, NOW()),
-            ($6, $2, $7, 3, NULL), ($8, $2, $9, 4, NULL)
-     RETURNING id, shown_at
-     ORDER BY rank_position`,
+            ($6, $2, $7, 3, NULL), ($8, $2, $9, 4, NULL)`,
     [matchIds[0], searchRequestId, professionalIds[0], matchIds[1], professionalIds[1], matchIds[2], professionalIds[2], matchIds[3], professionalIds[3]],
+  );
+  const matches = await query<{ id: string; shown_at: Date }>(
+    `SELECT id, shown_at
+       FROM matches
+      WHERE id = ANY($1::uuid[])
+      ORDER BY rank_position`,
+    [matchIds as unknown as string],
   );
 
   return {
@@ -142,7 +147,7 @@ test("Channel Inbox serializes concurrent show-more pages without duplicate prof
     );
     assert.equal(inbound.rows.filter((row) => row.status === "processed").length, 1);
     assert.equal(inbound.rows.filter((row) => row.status === "failed").length, 1);
-    assert.ok(inbound.rows.every((row) => Number(row.outbound_count) <= 1));
+    assert.deepEqual(inbound.rows.map((row) => Number(row.outbound_count)).sort(), [0, 1]);
 
     const original = await query<{ id: string; shown_at: Date | null; reservation_count: number | string }>(
       `SELECT matches.id, matches.shown_at,
