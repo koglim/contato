@@ -85,7 +85,7 @@ class FakeRepository implements ChannelInboundMessageRepository {
   claimed = true;
   markedProcessed: MarkProcessedInboundMessage | undefined;
   outbound: ChannelOutboundMessageRecord = {
-    id: "55555555-5555-4555-8555-555555555555", channelInboundMessageId: messageId, provider: input.provider,
+    id: "55555555-5555-4555-8555-555555555555", channelInboundMessageId: messageId, purpose: "customer_reply", provider: input.provider,
     recipientPhoneE164: input.phone_e164, messageType: "text", textContent: "", status: "pending",
     processingToken: null, processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null,
   };
@@ -119,13 +119,16 @@ class FakeOutboundRepository implements ChannelOutboundMessageRepository {
     this.legacyCreates += 1;
     this.current ??= {
       id: "66666666-6666-4666-8666-666666666666", channelInboundMessageId: inputValue.channelInboundMessageId,
+      purpose: "customer_reply",
       provider: inputValue.provider, recipientPhoneE164: inputValue.recipientPhoneE164, messageType: "text",
       textContent: inputValue.textContent, status: "pending", processingToken: null, processingStartedAt: null,
       providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null,
     };
     return this.current;
   }
+  async createIndependent() { return this.current!; }
   async claim() { return null; }
+  async claimNextPending() { return null; }
   async markSent() { return false; }
   async markFailed() { return false; }
 }

@@ -20,6 +20,12 @@ function routeError(reply: { code(status: number): { send(payload: unknown): unk
 export const channelOutboundRoutes: FastifyPluginAsync<ChannelOutboundRoutesOptions> = async (app, options) => {
   const requireInternalKey = createInternalKeyGuard(options.internalApiKey ?? process.env.INTERNAL_API_KEY);
 
+  app.post("/next/claim", { preHandler: requireInternalKey }, async (_request, reply) => {
+    const outcome = await options.service.claimNextPending();
+    if (outcome.kind !== "response") return routeError(reply, outcome.kind);
+    return reply.send(channelOutboundMessageClaimResponseSchema.parse(outcome.response));
+  });
+
   app.post("/:outboundId/claim", { preHandler: requireInternalKey }, async (request, reply) => {
     const params = channelOutboundMessageParamsSchema.safeParse(request.params);
     if (!params.success) return validationError(reply, params.error.issues);

@@ -516,6 +516,8 @@ O n8n não interpreta linguagem nem aplica regras de negócio: ele transporta a 
 
 ## Channel Outbox
 
+Cada registro Outbox possui uma finalidade explícita: `customer_reply` para a resposta vinculada a um inbound (mantendo uma por inbound) ou `professional_contact_notification` para uma futura mensagem independente. Nesta etapa somente a primeira finalidade é criada pelo fluxo de negócio; nenhuma notificação ao profissional é gerada.
+
 Quando o cliente envia “mostrar mais” durante uma seleção, a API não inicia nova busca: consulta a mesma `search_request`, usa o limite original salvo na conversa e cria uma nova mensagem Outbox com a próxima página ordenada por `rank_position`. A numeração é absoluta e a resposta orienta a escolha por número ou nome. Matches já associados a outra apresentação não entram na página; a migration 011 garante essa reserva única por `match_id`. A reserva e a criação da Outbox são protegidas pela transação: uma colisão concorrente reverte o inbound e retorna `selection_show_more_pending`, sem criar uma Outbox sem associações. Enquanto uma página estiver pendente ou falha, novas solicitações não são tratadas como “não há mais opções”.
 
 Depois da resposta da Inbox, o n8n deve operar somente a mensagem Outbox indicada por `outbound.id`:
@@ -532,7 +534,7 @@ Em erro de transporte, o n8n chama `POST /internal/channel/outbound/:id/failed`.
 
 Após a Evolution aceitar a mensagem, `POST /internal/channel/outbound/:outboundId/sent` recebe `processing_token` e `provider_message_id`; somente o claim atual pode marcar `sent`. Em falha, `POST /internal/channel/outbound/:outboundId/failed` recebe o token e um `error_code` controlado. Ambos retornam somente `{ id, status }`; token inválido, expirado ou já concluído retorna `409 outbound_message_claim_invalid`.
 
-`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade, há no máximo uma intenção outbound por inbound e não há Redis, chamada à Evolution pela API, outbox worker ou retry automático nesta etapa.
+`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem pendente, falha ou abandonada; o claim individual existente continua compatível. Esta etapa não envia mensagens, não cria notificação ao profissional e não altera o n8n.
 
 Há uma janela residual inevitável: a Evolution pode aceitar a mensagem e o n8n cair antes de confirmar `/sent`; após a lease expirar, um novo claim poderá reenviá-la. A arquitetura evita perda da intenção e duplicações lógicas usuais, mas não promete exactly-once matemático.
 

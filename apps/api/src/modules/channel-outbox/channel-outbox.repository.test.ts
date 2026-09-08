@@ -10,7 +10,7 @@ const token = randomUUID();
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
-    id, channel_inbound_message_id: inboundId, provider: "test", recipient_phone_e164: "+5566999999999",
+    id, channel_inbound_message_id: inboundId, purpose: "customer_reply", provider: "test", recipient_phone_e164: "+5566999999999",
     message_type: "text", text_content: "Olá", status: "pending", processing_token: null,
     processing_started_at: null, provider_message_id: null, attempt_count: 0, last_error_code: null, sent_at: null,
     ...overrides,
@@ -35,7 +35,7 @@ test("outbox repository recovers one legacy outbound, associates ranked matches,
   assert.equal(recovered.id, id);
   assert.match(current.calls[1]!.text, /INSERT INTO channel_outbound_messages/u);
   assert.match(current.calls[1]!.text, /ON CONFLICT \(channel_inbound_message_id\)/u);
-  assert.deepEqual(current.calls[1]!.values, [inboundId, "test", "+5566999999999", "Olá"]);
+  assert.deepEqual(current.calls[1]!.values, [inboundId, "customer_reply", "test", "+5566999999999", "Olá"]);
   assert.match(current.calls[2]!.text, /search_request_id = \$1/u);
   assert.match(current.calls[2]!.text, /rank_position IS NOT NULL/u);
   assert.match(current.calls[3]!.text, /channel_outbound_message_matches/u);
@@ -65,4 +65,26 @@ test("outbox repository does not update matches when sent confirmation is invali
   assert.equal(current.calls.some((call) => /shown_at/u.test(call.text)), false);
   assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "evolution_timeout" }), true);
   assert.equal(current.calls.some((call) => /shown_at/u.test(call.text)), false);
+});
+
+test("outbox repository creates an independent purpose and atomically claims the next message", async () => {
+  const current = fake([
+    [row({ id: randomUUID(), channel_inbound_message_id: null, purpose: "professional_contact_notification" })],
+    [row({ id: randomUUID(), status: "processing", processing_token: token, processing_started_at: new Date(), attempt_count: 3 })],
+  ]);
+  const independent = await current.repository.createIndependent({
+    purpose: "professional_contact_notification",
+    provider: "test",
+    recipientPhoneE164: "+5566999999999",
+    textContent: "Um cliente escolheu seu perfil.",
+  });
+  assert.equal(independent.purpose, "professional_contact_notification");
+  assert.equal(independent.channelInboundMessageId, null);
+  assert.match(current.calls[0]!.text, /purpose/u);
+  assert.match(current.calls[0]!.text, /VALUES \(NULL, \$1, \$2, \$3, \$4\)/u);
+
+  const claimed = await current.repository.claimNextPending(token, 60);
+  assert.equal(claimed?.status, "processing");
+  assert.match(current.calls[1]!.text, /FOR UPDATE SKIP LOCKED/u);
+  assert.match(current.calls[1]!.text, /processing_started_at <=/u);
 });

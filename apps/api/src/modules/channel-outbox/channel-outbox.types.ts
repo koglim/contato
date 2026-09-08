@@ -1,5 +1,6 @@
 import type {
   ChannelOutboundMessageClaimResponse,
+  ChannelOutboundMessagePurpose,
   ChannelOutboundMessageStatus,
   MarkChannelOutboundMessageFailedInput,
   MarkChannelOutboundMessageSentInput,
@@ -7,7 +8,8 @@ import type {
 
 export type ChannelOutboundMessageRecord = {
   id: string;
-  channelInboundMessageId: string;
+  channelInboundMessageId: string | null;
+  purpose: ChannelOutboundMessagePurpose;
   provider: string;
   recipientPhoneE164: string;
   messageType: "text";
@@ -30,11 +32,20 @@ export type CreateChannelOutboundMessage = {
   matchIds: string[];
 };
 
+export type CreateIndependentChannelOutboundMessage = {
+  purpose: "professional_contact_notification";
+  provider: string;
+  recipientPhoneE164: string;
+  textContent: string;
+};
+
 export interface ChannelOutboundMessageRepository {
   findById(id: string): Promise<ChannelOutboundMessageRecord | null>;
   findByInboundMessageId(channelInboundMessageId: string): Promise<ChannelOutboundMessageRecord | null>;
   createOrFindForProcessedInbound(input: CreateChannelOutboundMessage): Promise<ChannelOutboundMessageRecord>;
+  createIndependent(input: CreateIndependentChannelOutboundMessage): Promise<ChannelOutboundMessageRecord>;
   claim(id: string, processingToken: string, processingLeaseSeconds: number): Promise<ChannelOutboundMessageRecord | null>;
+  claimNextPending(processingToken: string, processingLeaseSeconds: number): Promise<ChannelOutboundMessageRecord | null>;
   markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<boolean>;
   markFailed(id: string, input: MarkChannelOutboundMessageFailedInput): Promise<boolean>;
 }
@@ -51,6 +62,7 @@ export type ChannelOutboundMutationOutcome =
 
 export interface ChannelOutboundService {
   claim(id: string): Promise<ChannelOutboundClaimOutcome>;
+  claimNextPending(): Promise<ChannelOutboundClaimOutcome>;
   markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<ChannelOutboundMutationOutcome>;
   markFailed(id: string, input: MarkChannelOutboundMessageFailedInput): Promise<ChannelOutboundMutationOutcome>;
 }
