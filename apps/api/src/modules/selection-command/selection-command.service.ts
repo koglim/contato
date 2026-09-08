@@ -1,4 +1,5 @@
 import { routeConversationCommand } from "../conversation-commands/conversation-command.router.js";
+import { resolveProfessionalSelection } from "./professional-selection.resolver.js";
 import type {
   SelectionCommandDependencies,
   SelectionCommandInput,
@@ -33,7 +34,24 @@ export class DefaultSelectionCommandService implements SelectionCommandService {
       case "invalid_selection":
         return routed;
       case "not_command":
-        return routed;
+        {
+          const resolution = resolveProfessionalSelection(
+            input.rawText,
+            await this.dependencies.selectionMatchRepository.listShown(input.searchRequestId!),
+          );
+          if (resolution.kind === "selected") {
+            return this.dependencies.selectionMatchRepository.selectShownMatch({
+              conversationId: input.conversationId,
+              customerId: input.customerId!,
+              searchRequestId: input.searchRequestId!,
+              position: resolution.position,
+              lastMessageText: input.lastMessageText,
+              selectionKey: input.selectionKey,
+            });
+          }
+          if (resolution.kind === "ambiguous") return { kind: "ambiguous_selection", options: resolution.options };
+          return routed;
+        }
       case "selection_command":
         if (routed.command.kind === "show_more") {
           return {

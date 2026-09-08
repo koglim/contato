@@ -32,6 +32,10 @@ class FakeSelectionMatchRepository implements SelectionMatchRepository {
   recoveryCalls: Array<[string, string]> = [];
   async getState() { this.getStateCalls += 1; return this.state; }
   async findShownByPosition() { return null; }
+  async listShown() { return [
+    { rankPosition: 1, displayName: "Ana Eletricista" },
+    { rankPosition: 2, displayName: "João Encanador" },
+  ] as never; }
   async listNextUnshown() { return []; }
   async findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string) {
     this.recoveryCalls.push([customerId, selectionKey]);
@@ -62,6 +66,30 @@ test("selection command service selects numbered and ordinal shown matches", asy
       selectionKey: input.selectionKey,
     }]);
   }
+});
+
+test("selection command service selects shown professionals by name and natural phrase", async () => {
+  for (const rawText of ["Ana Eletricista", "ana", "quero a Ana", "pode ser o João"]) {
+    const current = context();
+    assert.equal((await current.service.process({ ...input, rawText })).kind, "selected");
+    assert.equal(current.selectionMatchRepository.selectCalls.length, 1);
+  }
+});
+
+test("selection command service returns ambiguity without selecting when names are not unique", async () => {
+  const current = context();
+  current.selectionMatchRepository.listShown = async () => [
+    { rankPosition: 1, displayName: "Ana Souza" },
+    { rankPosition: 3, displayName: "Ana Silva" },
+  ] as never;
+  assert.deepEqual(await current.service.process({ ...input, rawText: "quero a Ana" }), {
+    kind: "ambiguous_selection",
+    options: [
+      { position: 1, professionalDisplayName: "Ana Souza" },
+      { position: 3, professionalDisplayName: "Ana Silva" },
+    ],
+  });
+  assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
 });
 
 test("selection command service rejects positions that were not presented without writes", async () => {

@@ -20,6 +20,14 @@ export function mapSelectionCommandOutcome(outcome: SelectionCommandOutcome): Se
         requested_position: outcome.requestedPosition,
         visible_match_count: outcome.visibleMatchCount,
       };
+    case "ambiguous_selection":
+      return {
+        kind: "ambiguous_selection",
+        options: outcome.options.map((option) => ({
+          position: option.position,
+          professional_name: option.professionalDisplayName,
+        })),
+      };
     case "not_command":
       return { kind: "not_command" };
     case "show_more_requested":

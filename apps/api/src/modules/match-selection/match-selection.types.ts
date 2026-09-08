@@ -61,6 +61,7 @@ export type SelectedMatchOutcome = Extract<SelectShownMatchOutcome, { kind: "sel
 export interface SelectionMatchRepository {
   getState(searchRequestId: string): Promise<SelectionMatchState>;
   findShownByPosition(searchRequestId: string, position: number): Promise<SelectionMatchRecord | null>;
+  listShown(searchRequestId: string): Promise<SelectionMatchRecord[]>;
   listNextUnshown(searchRequestId: string, limit: number): Promise<SelectionMatchRecord[]>;
   findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string): Promise<SelectedMatchOutcome | null>;
   selectShownMatch(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome>;

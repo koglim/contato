@@ -15,6 +15,13 @@ export const selectionMessageContractSchema = z.discriminatedUnion("kind", [
     requested_position: z.number().int().positive(),
     visible_match_count: z.number().int().nonnegative(),
   }).strict(),
+  z.object({
+    kind: z.literal("ambiguous_selection"),
+    options: z.array(z.object({
+      position: z.number().int().positive(),
+      professional_name: z.string().trim().min(1).max(255),
+    }).strict()).min(2).max(10),
+  }).strict(),
   z.object({ kind: z.literal("not_command") }).strict(),
   z.object({ kind: z.literal("no_more_options") }).strict(),
   z.object({

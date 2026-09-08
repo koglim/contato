@@ -43,7 +43,7 @@ function presentMatches(matching: MatchingSearchResponse) {
       `💰 ${formatPrice(match.service)}`,
     ].join("\n");
   });
-  return [title, ...entries, "Responda com o número da opção que você quer escolher."].join("\n\n");
+  return [title, ...entries, "Responda com o número ou com o nome do profissional que você quer escolher."].join("\n\n");
 }
 
 function assertNever(value: never): never {

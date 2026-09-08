@@ -52,7 +52,7 @@ test("presents concise prompts for pending location and service", () => {
 });
 
 test("presents one matched professional using public fields only", () => {
-  assert.equal(presenter.present(response("matched") as never), "Encontrei um profissional para você 👇\n\n1. *Ricardo Santos*\nEletricista\n📍 2,5 km\n💰 A partir de R$ 150,00\n\nResponda com o número da opção que você quer escolher.");
+  assert.equal(presenter.present(response("matched") as never), "Encontrei um profissional para você 👇\n\n1. *Ricardo Santos*\nEletricista\n📍 2,5 km\n💰 A partir de R$ 150,00\n\nResponda com o número ou com o nome do profissional que você quer escolher.");
 });
 
 test("presents matches in their received order", () => {
@@ -66,7 +66,7 @@ test("presents matches in their received order", () => {
   assert.match(text, /^Encontrei 2 profissionais para você 👇/u);
   assert.ok(text.indexOf("1. *Ricardo Santos*") < text.indexOf("2. *Ana Lima*"));
   assert.match(text, /📍 850 m/u);
-  assert.match(text, /Responda com o número da opção/u);
+  assert.match(text, /Responda com o número ou com o nome do profissional/u);
 });
 
 test("presents the no matches guidance", () => {

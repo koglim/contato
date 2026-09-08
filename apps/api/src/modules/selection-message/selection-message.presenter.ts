@@ -16,8 +16,14 @@ export function presentSelectionMessage(contract: SelectionMessageContract): str
       return contract.visible_match_count > 0
         ? `Escolha um número de 1 a ${contract.visible_match_count}.`
         : "Não há opções apresentadas para escolher no momento.";
+    case "ambiguous_selection":
+      return [
+        "Encontrei mais de uma opção com esse nome:",
+        contract.options.map((option) => `${option.position}. ${option.professional_name}`).join("\n"),
+        "Responda com o número ou com o nome completo.",
+      ].join("\n\n");
     case "not_command":
-      return "Responda com o número da opção que você quer escolher.";
+      return "Não consegui identificar qual profissional você escolheu. Responda com o número ou com o nome da opção.";
     case "no_more_options":
       return "Todas as opções disponíveis já foram apresentadas.";
     case "selection_unavailable":

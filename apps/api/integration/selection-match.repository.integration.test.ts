@@ -33,6 +33,8 @@ async function createFixture(): Promise<Fixture> {
   const secondProfessionalId = randomUUID();
   const firstMatchId = randomUUID();
   const secondMatchId = randomUUID();
+  const firstProfessionalServiceId = randomUUID();
+  const secondProfessionalServiceId = randomUUID();
 
   await query(`INSERT INTO customers (id, phone_e164) VALUES ($1, $2)`, [customerId, "+5566999999999"]);
   await query(`INSERT INTO service_categories (id, name, slug) VALUES ($1, $2, $3)`, [categoryId, "Teste", `teste-${categoryId}`]);
@@ -44,6 +46,11 @@ async function createFixture(): Promise<Fixture> {
       firstProfessionalId, "Ana Eletricista", `ana-${firstProfessionalId}`, "+5566988888888",
       secondProfessionalId, "Bia Eletricista", `bia-${secondProfessionalId}`, "+5566977777777",
     ],
+  );
+  await query(
+    `INSERT INTO professional_services (id, professional_id, service_id, price_mode, price_from_cents)
+     VALUES ($1, $2, $3, 'from', 10000), ($4, $5, $3, 'from', 12000)`,
+    [firstProfessionalServiceId, firstProfessionalId, serviceId, secondProfessionalServiceId, secondProfessionalId],
   );
   await query(
     `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status)
@@ -75,6 +82,7 @@ async function createFixture(): Promise<Fixture> {
       await query(`DELETE FROM matches WHERE search_request_id = $1`, [searchRequestId]);
       await query(`DELETE FROM search_conversations WHERE id = $1`, [conversationId]);
       await query(`DELETE FROM search_requests WHERE id = $1`, [searchRequestId]);
+      await query(`DELETE FROM professional_services WHERE id = $1 OR id = $2`, [firstProfessionalServiceId, secondProfessionalServiceId]);
       await query(`DELETE FROM professionals WHERE id = $1 OR id = $2`, [firstProfessionalId, secondProfessionalId]);
       await query(`DELETE FROM services WHERE id = $1`, [serviceId]);
       await query(`DELETE FROM service_categories WHERE id = $1`, [categoryId]);
@@ -235,7 +243,7 @@ test("selectShownMatch replays a completed selection key without changing persis
   }
 });
 
-test("channel inbox selects once and replays the same inbound safely", { concurrency: false }, async () => {
+test("channel inbox selects by professional name and replays the same inbound safely", { concurrency: false }, async () => {
   const fixture = await createFixture();
   const selectionRepository = new PostgresSelectionMatchRepository();
   let routerCalls = 0;
@@ -252,7 +260,7 @@ test("channel inbox selects once and replays the same inbound safely", { concurr
     new DefaultMessagePresenter(), new PostgresChannelOutboundMessageRepository(),
   );
   const providerMessageId = `selection-${randomUUID()}`;
-  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: "+5566999999999", raw_text: "1", country_code: "BR", limit: 2 };
+  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: "+5566999999999", raw_text: "Ana Eletricista", country_code: "BR", limit: 2 };
   try {
     const first = await inbox.receive(input);
     assert.equal(first.kind, "response");
