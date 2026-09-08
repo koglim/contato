@@ -81,7 +81,7 @@ jobs:
           $$;
           SQL
 
-      - name: Test selection transaction integration
+      - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 
       - name: Verify migration 009
