@@ -113,3 +113,75 @@ test("router returns pending show-more without starting a search", async () => {
   assert.equal(search.startContext, undefined);
   assert.equal(search.continued, undefined);
 });
+
+test("global command has priority over selection recovery, active selection and search", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  conversations.active = selectionConversation();
+  const search = new FakeSearchConversationService();
+  const selection = selectionService();
+  let recoveryCalls = 0;
+  selection.recoverSelection = async () => { recoveryCalls += 1; return null; };
+  let globalCalls = 0;
+  const global = { async execute() { globalCalls += 1; return { kind: "cancelled" as const }; } };
+  const router = new DefaultCustomerSearchRouter(customers, conversations, search, selection as never, global as never);
+
+  const outcome = await router.route({ ...input, raw_text: "cancelar", selectionKey: "77777777-7777-4777-8777-777777777777" });
+
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") assert.equal(outcome.response.route, "global_command");
+  assert.equal(globalCalls, 1);
+  assert.equal(recoveryCalls, 0);
+  assert.equal(selection.calls, 0);
+  assert.equal(search.startContext, undefined);
+  assert.equal(search.continued, undefined);
+  assert.equal(conversations.expiredFor, undefined);
+});
+
+test("selectionKey recovery has priority over an active conversation and search", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  conversations.active = activeConversation();
+  const search = new FakeSearchConversationService();
+  const selection = selectionService({
+    kind: "selected",
+    contactId: customerId,
+    matchId: conversationId,
+    professionalId: customerId,
+    professionalDisplayName: "Ana",
+    professionalPhoneE164: "+5566999999999",
+    serviceName: "Eletricista",
+    selectedAt: new Date(),
+    replayed: true,
+  });
+  selection.recovered = {
+    kind: "selected",
+    contactId: customerId,
+    matchId: conversationId,
+    professionalId: customerId,
+    professionalDisplayName: "Ana",
+    professionalPhoneE164: "+5566999999999",
+    serviceName: "Eletricista",
+    selectedAt: new Date(),
+    replayed: true,
+  };
+  const recoveryCalls: string[] = [];
+  selection.recoverSelection = async (_customerId: string, selectionKey: string) => {
+    recoveryCalls.push(selectionKey);
+    return selection.recovered;
+  };
+  let globalCalls = 0;
+  const global = { async execute() { globalCalls += 1; return { kind: "cancelled" as const }; } };
+  const router = new DefaultCustomerSearchRouter(customers, conversations, search, selection as never, global as never);
+
+  const outcome = await router.route({ ...input, raw_text: "2", selectionKey: "77777777-7777-4777-8777-777777777777" });
+
+  assert.equal(outcome.kind, "response");
+  if (outcome.kind === "response") assert.equal(outcome.response.route, "selection");
+  assert.deepEqual(recoveryCalls, ["77777777-7777-4777-8777-777777777777"]);
+  assert.equal(globalCalls, 0);
+  assert.equal(selection.calls, 0);
+  assert.equal(search.startContext, undefined);
+  assert.equal(search.continued, undefined);
+  assert.equal(conversations.expiredFor, undefined);
+});
