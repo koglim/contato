@@ -53,6 +53,7 @@ export {
 } from "./schemas/customer-search.js";
 export { phoneE164Schema } from "./schemas/phone.js";
 export { selectionMessageContractSchema } from "./schemas/selection-message.js";
+export { globalConversationMessageContractSchema } from "./schemas/global-conversation-message.js";
 export {
   channelInboundMessageRequestSchema,
   channelInboundMessageResponseSchema,
@@ -129,3 +130,4 @@ export type {
   MarkChannelOutboundMessageSentInput,
 } from "./types/channel-outbound.js";
 export type { SelectionMessageContract } from "./types/selection-message.js";
+export type { GlobalConversationMessageContract } from "./types/global-conversation-message.js";
