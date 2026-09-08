@@ -283,6 +283,54 @@ test("channel inbox selects once and replays the same inbound safely", { concurr
   }
 });
 
+test("channel inbox recovers a completed selection after a crash before inbound processing", { concurrency: false }, async () => {
+  const fixture = await createFixture();
+  const selectionRepository = new PostgresSelectionMatchRepository();
+  const inboundRepository = new PostgresChannelInboundMessageRepository();
+  const providerMessageId = `crash-selection-${randomUUID()}`;
+  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: "+5566999999999", raw_text: "1", country_code: "BR", limit: 2 };
+  const registered = await inboundRepository.createOrFind(input);
+  const selected = await selectionRepository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "1", selectionKey: registered.record.id });
+  assert.equal(selected.kind, "selected");
+  let searchCalls = 0;
+  const router = new DefaultCustomerSearchRouter(
+    new PostgresCustomerRepository(), new PostgresSearchConversationRepository(),
+    { async start() { searchCalls += 1; throw new Error("search must not start"); }, async continueConversation() { searchCalls += 1; throw new Error("search must not continue"); } } as never,
+    new DefaultSelectionCommandService({ selectionMatchRepository: selectionRepository }),
+    new DefaultGlobalConversationCommandService(new PostgresGlobalConversationCommandRepository()),
+  );
+  const inbox = new DefaultChannelInboxService(inboundRepository, router, { processingLeaseSeconds: 60 }, new DefaultMessagePresenter(), new PostgresChannelOutboundMessageRepository());
+  try {
+    const stateBefore = await query<{ status: string; contacts: string; outbounds: string }>(
+      `SELECT (SELECT status FROM channel_inbound_messages WHERE id = $1) AS status,
+              (SELECT COUNT(*) FROM contacts WHERE search_request_id = $2) AS contacts,
+              (SELECT COUNT(*) FROM channel_outbound_messages WHERE channel_inbound_message_id = $1) AS outbounds`,
+      [registered.record.id, fixture.searchRequestId],
+    );
+    assert.equal(stateBefore.rows[0]!.status, "received");
+    assert.equal(Number(stateBefore.rows[0]!.contacts), 1);
+    assert.equal(Number(stateBefore.rows[0]!.outbounds), 0);
+    const replayed = await inbox.receive(input);
+    assert.equal(replayed.kind, "response");
+    if (replayed.kind !== "response") return;
+    assert.match(replayed.response.reply_text, /Ana Eletricista/u);
+    assert.equal(searchCalls, 0);
+    const state = await query<{ status: string; contacts: string; outbounds: string }>(
+      `SELECT (SELECT status FROM channel_inbound_messages WHERE id = $1) AS status,
+              (SELECT COUNT(*) FROM contacts WHERE search_request_id = $2) AS contacts,
+              (SELECT COUNT(*) FROM channel_outbound_messages WHERE channel_inbound_message_id = $1) AS outbounds`,
+      [registered.record.id, fixture.searchRequestId],
+    );
+    assert.equal(state.rows[0]!.status, "processed");
+    assert.equal(Number(state.rows[0]!.contacts), 1);
+    assert.equal(Number(state.rows[0]!.outbounds), 1);
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id = $1`, [registered.record.id]);
+    await query(`DELETE FROM channel_inbound_messages WHERE id = $1`, [registered.record.id]);
+    await fixture.cleanup();
+  }
+});
+
 after(async () => {
   await closeDatabaseConnection();
 });

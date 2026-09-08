@@ -207,6 +207,26 @@ test("channel inbox persists and replays a confirmed selection without exposing 
   assert.equal(current.router.calls, 1);
 });
 
+test("channel inbox persists and replays a global command", async () => {
+  const current = context();
+  current.router.outcome = { kind: "response", response: { customer_id: customerId, route: "global_command", result: { kind: "cancelled" } }, conversationId: null, searchRequestId: null, presentedMatchIds: [] } as never;
+  const first = await current.service.receive(input);
+  assert.equal(first.kind, "response");
+  if (first.kind === "response") assert.match(first.response.reply_text, /Busca cancelada/u);
+  current.repository.created = false;
+  const replay = await current.service.receive(input);
+  assert.equal(replay.kind, "response");
+  assert.equal(current.router.calls, 1);
+});
+
+test("show-more pending fails the inbound without an outbound", async () => {
+  const current = context();
+  current.router.outcome = { kind: "selection_show_more_pending" };
+  assert.deepEqual(await current.service.receive(input), { kind: "selection_show_more_pending" });
+  assert.equal(current.repository.markedFailed, "selection_show_more_pending");
+  assert.equal(current.repository.markedProcessed, undefined);
+});
+
 test("processed duplicate replays only a schema-validated stored result", async () => {
   const current = context();
   current.repository.created = false;
