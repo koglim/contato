@@ -29,6 +29,12 @@ export const customerSearchRoutes: FastifyPluginAsync<CustomerSearchRoutesOption
       if (outcome.kind === "conversation_processing") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "service_unavailable") return reply.code(409).send({ error: outcome.kind });
 
+      if (outcome.kind === "selection_idempotency_key_required" || outcome.kind === "selection_show_more_pending") {
+        return reply.code(409).send({ error: outcome.kind });
+      }
+      if (outcome.response.route === "selection" || outcome.response.route === "global_command") {
+        return reply.send(customerSearchMessageResponseSchema.parse(outcome.response));
+      }
       const conversation = outcome.response.conversation;
       app.log.info({
         customer_id: outcome.response.customer_id,

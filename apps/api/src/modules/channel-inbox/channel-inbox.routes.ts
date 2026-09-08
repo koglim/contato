@@ -31,6 +31,8 @@ export const channelInboxRoutes: FastifyPluginAsync<ChannelInboxRoutesOptions> =
       if (outcome.kind === "customer_conversation_conflict") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "conversation_processing") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "service_unavailable") return reply.code(409).send({ error: outcome.kind });
+      if (outcome.kind === "selection_idempotency_key_required") return reply.code(409).send({ error: outcome.kind });
+      if (outcome.kind === "selection_show_more_pending") return reply.code(409).send({ error: outcome.kind });
 
       app.log.info({
         inbound_message_id: outcome.response.message_id,

@@ -52,7 +52,7 @@ test("presents concise prompts for pending location and service", () => {
 });
 
 test("presents one matched professional using public fields only", () => {
-  assert.equal(presenter.present(response("matched")), "Encontrei um profissional para você 👇\n\n*Ricardo Santos*\nEletricista\n📍 2,5 km\n💰 A partir de R$ 150,00");
+  assert.equal(presenter.present(response("matched") as never), "Encontrei um profissional para você 👇\n\n1. *Ricardo Santos*\nEletricista\n📍 2,5 km\n💰 A partir de R$ 150,00\n\nResponda com o número da opção que você quer escolher.");
 });
 
 test("presents matches in their received order", () => {
@@ -62,10 +62,11 @@ test("presents matches in their received order", () => {
     professional: { id: customerId, display_name: "Ana Lima", slug: "ana-lima", bio: null, profile_image_url: null, is_verified: true },
     distance_meters: 850,
   });
-  const text = presenter.present(value as CustomerSearchMessageResponse);
+  const text = presenter.present(value as never);
   assert.match(text, /^Encontrei 2 profissionais para você 👇/u);
   assert.ok(text.indexOf("1. *Ricardo Santos*") < text.indexOf("2. *Ana Lima*"));
   assert.match(text, /📍 850 m/u);
+  assert.match(text, /Responda com o número da opção/u);
 });
 
 test("presents the no matches guidance", () => {
@@ -77,14 +78,14 @@ test("formats every price mode and missing values safely", () => {
   const range = matchedWith({ service: { professional_service_id: conversationId, description: null, price_mode: "range", price_from_cents: 15000, price_to_cents: 25000 } });
   const quote = matchedWith({ service: { professional_service_id: conversationId, description: null, price_mode: "quote", price_from_cents: null, price_to_cents: null } });
   const missing = matchedWith({ service: { professional_service_id: conversationId, description: null, price_mode: "fixed", price_from_cents: null, price_to_cents: null } });
-  assert.match(presenter.present(fixed), /💰 R\$\s?150,00/u);
-  assert.match(presenter.present(range), /💰 R\$\s?150,00 a R\$\s?250,00/u);
-  assert.match(presenter.present(quote), /💰 Sob consulta/u);
-  assert.match(presenter.present(missing), /💰 Preço sob consulta/u);
+  assert.match(presenter.present(fixed as never), /💰 R\$\s?150,00/u);
+  assert.match(presenter.present(range as never), /💰 R\$\s?150,00 a R\$\s?250,00/u);
+  assert.match(presenter.present(quote as never), /💰 Sob consulta/u);
+  assert.match(presenter.present(missing as never), /💰 Preço sob consulta/u);
 });
 
 test("does not leak private or internal values", () => {
-  const text = presenter.present(response("matched"));
+  const text = presenter.present(response("matched") as never);
   for (const value of ["+5566999999999", "email@teste.com", customerId, conversationId, searchRequestId, matchId, professionalId, "score 0.9"]) {
     assert.equal(text.includes(value), false);
   }

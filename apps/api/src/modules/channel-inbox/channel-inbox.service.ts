@@ -4,6 +4,8 @@ import { GeocodingProviderError } from "../location-resolution/location-resoluti
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import type { ChannelInboxConfig } from "../../config/channel-inbox.js";
 import type { MessagePresenter } from "../message-presentation/message-presentation.types.js";
+import { presentSelectionMessage } from "../selection-message/selection-message.presenter.js";
+import { presentGlobalConversationMessage } from "../global-conversation-commands/global-conversation-message.presenter.js";
 import type { ChannelOutboundMessageRepository } from "../channel-outbox/channel-outbox.types.js";
 import type {
   ChannelInboxOutcome,
@@ -13,12 +15,14 @@ import type {
 } from "./channel-inbox.types.js";
 
 function searchRequestIdFrom(record: ReturnType<typeof customerSearchMessageResponseSchema.parse>): string | null {
+  if (record.route === "selection" || record.route === "global_command") return null;
   const result = record.conversation.result;
   if ("matching" in result) return result.matching?.search_request_id ?? null;
   return result.orchestration?.matching?.search_request_id ?? null;
 }
 
 function presentedMatchIdsFrom(record: ReturnType<typeof customerSearchMessageResponseSchema.parse>): string[] {
+  if (record.route === "selection" || record.route === "global_command") return [];
   const result = record.conversation.result;
   if (result.status !== "matched") return [];
   const matching = "matching" in result ? result.matching : result.orchestration.matching;
@@ -33,6 +37,7 @@ function errorCodeFor(error: unknown) {
 }
 
 function publicResult(result: ReturnType<typeof customerSearchMessageResponseSchema.parse>) {
+  if (result.route === "selection" || result.route === "global_command") return result;
   const sanitized = JSON.parse(JSON.stringify(result)) as {
     conversation: { result: Record<string, unknown> };
   } & typeof result;
@@ -42,6 +47,16 @@ function publicResult(result: ReturnType<typeof customerSearchMessageResponseSch
     delete (interpretation as Record<string, unknown>).service_text;
   }
   return sanitized;
+}
+
+function presentRouteResult(result: ReturnType<typeof customerSearchMessageResponseSchema.parse>, searchPresenter: MessagePresenter): string {
+  if (result.route === "selection") {
+    const text = presentSelectionMessage(result.result);
+    if (!text) throw new Error("Selection action cannot create an outbound response");
+    return text;
+  }
+  if (result.route === "global_command") return presentGlobalConversationMessage(result.result);
+  return searchPresenter.present(result);
 }
 
 function sameInboundPayload(record: ChannelInboundMessageRecord, input: ChannelInboundMessageInput) {
@@ -85,6 +100,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         raw_text: claimed.rawText,
         country_code: claimed.countryCode,
         limit: claimed.limitValue,
+        selectionKey: claimed.id,
       });
       if (routed.kind !== "response") {
         await this.repository.markFailed(claimed.id, processingToken, routed.kind);
@@ -92,21 +108,24 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       }
 
       const result = customerSearchMessageResponseSchema.parse(routed.response);
-      const replyText = this.messagePresenter.present(result);
+      const replyText = presentRouteResult(result, this.messagePresenter);
+      const conversationId = routed.conversationId ?? (result.route === "selection" || result.route === "global_command" ? null : result.conversation.conversation_id);
+      const searchRequestId = routed.searchRequestId ?? searchRequestIdFrom(result);
+      const presentedMatchIds = routed.presentedMatchIds ?? presentedMatchIdsFrom(result);
       const outbound = await this.repository.markProcessedAndCreateOutbound({
         id: claimed.id,
         processingToken,
         result,
         customerId: result.customer_id,
-        conversationId: result.conversation.conversation_id,
-        searchRequestId: searchRequestIdFrom(result),
+        conversationId,
+        searchRequestId,
         outbound: {
           channelInboundMessageId: claimed.id,
           provider: claimed.provider,
           recipientPhoneE164: claimed.phoneE164,
           textContent: replyText,
-          searchRequestId: searchRequestIdFrom(result),
-          matchIds: presentedMatchIdsFrom(result),
+          searchRequestId,
+          matchIds: presentedMatchIds,
         },
       });
       if (!outbound) return { kind: "channel_message_processing" };
@@ -129,7 +148,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
     if (!parsed.success) return { kind: "channel_message_result_invalid" };
-    const replyText = this.messagePresenter.present(parsed.data);
+    const replyText = presentRouteResult(parsed.data, this.messagePresenter);
     const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id)
       ?? await this.channelOutboundMessageRepository.createOrFindForProcessedInbound({
         channelInboundMessageId: record.id,
