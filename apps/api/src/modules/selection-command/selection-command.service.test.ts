@@ -92,6 +92,21 @@ test("selection command service returns ambiguity without selecting when names a
   assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
 });
 
+test("selection command service keeps the conversation active for non-affirmative or mixed references", async () => {
+  for (const rawText of [
+    "não quero a Ana",
+    "A Ana atende domingo?",
+    "quanto cobra a Ana?",
+    "se a Ana atender hoje eu escolho ela",
+    "opção 1 ou João",
+  ]) {
+    const current = context();
+    const outcome = await current.service.process({ ...input, rawText });
+    assert.deepEqual(outcome, { kind: "not_command" }, rawText);
+    assert.deepEqual(current.selectionMatchRepository.selectCalls, [], rawText);
+  }
+});
+
 test("selection command service rejects positions that were not presented without writes", async () => {
   const current = context();
   assert.deepEqual(await current.service.process({ ...input, rawText: "3" }), {

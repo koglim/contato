@@ -291,6 +291,51 @@ test("channel inbox selects by professional name and replays the same inbound sa
   }
 });
 
+test("channel inbox keeps questions active, then selects by name idempotently", { concurrency: false }, async () => {
+  const fixture = await createFixture();
+  const selectionRepository = new PostgresSelectionMatchRepository();
+  const router = new DefaultCustomerSearchRouter(
+    new PostgresCustomerRepository(),
+    new PostgresSearchConversationRepository(),
+    { async start() { throw new Error("search must not start during selection"); }, async continueConversation() { throw new Error("search must not continue during selection"); } } as never,
+    new DefaultSelectionCommandService({ selectionMatchRepository: selectionRepository }),
+    new DefaultGlobalConversationCommandService(new PostgresGlobalConversationCommandRepository()),
+  );
+  const inbox = new DefaultChannelInboxService(
+    new PostgresChannelInboundMessageRepository(), router, { processingLeaseSeconds: 60 },
+    new DefaultMessagePresenter(), new PostgresChannelOutboundMessageRepository(),
+  );
+  const questionProviderMessageId = `selection-question-${randomUUID()}`;
+  const selectionProviderMessageId = `selection-affirmative-${randomUUID()}`;
+  const question = { provider: "test", provider_message_id: questionProviderMessageId, phone_e164: "+5566999999999", raw_text: "A Ana atende domingo?", country_code: "BR", limit: 2 };
+  const selection = { ...question, provider_message_id: selectionProviderMessageId, raw_text: "Ana" };
+  try {
+    const questionResult = await inbox.receive(question);
+    assert.equal(questionResult.kind, "response");
+    if (questionResult.kind !== "response") return;
+    assert.match(questionResult.response.reply_text, /Não consegui identificar/u);
+    assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM contacts WHERE search_request_id = $1`, [fixture.searchRequestId])).rows[0]!.count), 0);
+    assert.equal((await query<{ status: string; pending_slot: string }>(`SELECT status, pending_slot FROM search_conversations WHERE id = $1`, [fixture.conversationId])).rows[0]!.status, "active");
+
+    const selected = await inbox.receive(selection);
+    assert.equal(selected.kind, "response");
+    if (selected.kind !== "response") return;
+    assert.match(selected.response.reply_text, /Ana Eletricista/u);
+    assert.equal(selected.response.duplicate, false);
+    assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM contacts WHERE search_request_id = $1`, [fixture.searchRequestId])).rows[0]!.count), 1);
+
+    const replay = await inbox.receive(selection);
+    assert.equal(replay.kind, "response");
+    if (replay.kind !== "response") return;
+    assert.equal(replay.response.duplicate, true);
+    assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM channel_outbound_messages WHERE channel_inbound_message_id = $1`, [replay.response.message_id])).rows[0]!.count), 1);
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [questionProviderMessageId, selectionProviderMessageId]);
+    await query(`DELETE FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2)`, [questionProviderMessageId, selectionProviderMessageId]);
+    await fixture.cleanup();
+  }
+});
+
 test("channel inbox recovers a completed selection after a crash before inbound processing", { concurrency: false }, async () => {
   const fixture = await createFixture();
   const selectionRepository = new PostgresSelectionMatchRepository();

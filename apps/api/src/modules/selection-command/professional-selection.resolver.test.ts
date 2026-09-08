@@ -42,6 +42,38 @@ test("returns ambiguity for repeated first names and multiple names", () => {
   assert.equal(resolveProfessionalSelection("Ana e João", options).kind, "ambiguous");
 });
 
+test("does not select questions, refusals or hypothetical statements", () => {
+  for (const text of [
+    "não quero a Ana",
+    "A Ana atende domingo?",
+    "quanto cobra a Ana?",
+    "se a Ana atender hoje eu escolho ela",
+  ]) {
+    assert.deepEqual(resolveProfessionalSelection(text, options), { kind: "unresolved" }, text);
+  }
+});
+
+test("does not guess an unknown surname or mix different references", () => {
+  assert.deepEqual(resolveProfessionalSelection("Ana Paula", [{ rankPosition: 1, displayName: "Ana Souza" }]), { kind: "unresolved" });
+  assert.equal(resolveProfessionalSelection("opção 1 ou João", options).kind, "unresolved");
+  assert.equal(resolveProfessionalSelection("Ana Souza e Ana", [
+    { rankPosition: 1, displayName: "Ana Souza" },
+    { rankPosition: 3, displayName: "Ana Silva" },
+  ]).kind, "ambiguous");
+  assert.equal(resolveProfessionalSelection("Ana Souza ou Ana Paula", [
+    { rankPosition: 1, displayName: "Ana Souza" },
+  ]).kind, "unresolved");
+});
+
+test("prefers the longest presented full name when names overlap", () => {
+  const overlapping = [
+    { rankPosition: 1, displayName: "João Silva" },
+    { rankPosition: 2, displayName: "João Silva Junior" },
+  ];
+  assert.deepEqual(resolveProfessionalSelection("João Silva Junior", overlapping), { kind: "selected", position: 2 });
+  assert.deepEqual(resolveProfessionalSelection("quero o João Silva Junior", overlapping), { kind: "selected", position: 2 });
+});
+
 test("never resolves an unshown or unranked match", () => {
   assert.deepEqual(resolveProfessionalSelection("Carlos", [{ rankPosition: null, displayName: "Carlos" }]), { kind: "unresolved" });
 });
