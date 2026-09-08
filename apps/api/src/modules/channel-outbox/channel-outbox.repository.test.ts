@@ -87,4 +87,5 @@ test("outbox repository creates an independent purpose and atomically claims the
   assert.equal(claimed?.status, "processing");
   assert.match(current.calls[1]!.text, /FOR UPDATE SKIP LOCKED/u);
   assert.match(current.calls[1]!.text, /processing_started_at <=/u);
+  assert.match(current.calls[1]!.text, /RETURNING\s+outbound\.id/u);
 });

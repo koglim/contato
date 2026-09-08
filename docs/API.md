@@ -534,7 +534,7 @@ Em erro de transporte, o n8n chama `POST /internal/channel/outbound/:id/failed`.
 
 Após a Evolution aceitar a mensagem, `POST /internal/channel/outbound/:outboundId/sent` recebe `processing_token` e `provider_message_id`; somente o claim atual pode marcar `sent`. Em falha, `POST /internal/channel/outbound/:outboundId/failed` recebe o token e um `error_code` controlado. Ambos retornam somente `{ id, status }`; token inválido, expirado ou já concluído retorna `409 outbound_message_claim_invalid`.
 
-`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem pendente, falha ou abandonada; o claim individual existente continua compatível. Esta etapa não envia mensagens, não cria notificação ao profissional e não altera o n8n.
+`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem pendente, falha ou abandonada; quando a fila está vazia, retorna `204 No Content`. O claim individual existente continua retornando `404` para um ID inexistente. Esta etapa não envia mensagens, não cria notificação ao profissional e não altera o n8n.
 
 Há uma janela residual inevitável: a Evolution pode aceitar a mensagem e o n8n cair antes de confirmar `/sent`; após a lease expirar, um novo claim poderá reenviá-la. A arquitetura evita perda da intenção e duplicações lógicas usuais, mas não promete exactly-once matemático.
 

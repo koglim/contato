@@ -46,7 +46,7 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
   async claimNextPending(): Promise<ChannelOutboundClaimOutcome> {
     const claimed = await this.repository.claimNextPending(randomUUID(), this.config.processingLeaseSeconds);
     if (claimed) return { kind: "response", response: claimResponse(claimed) };
-    return { kind: "outbound_message_not_found" };
+    return { kind: "outbound_queue_empty" };
   }
 
   async markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<ChannelOutboundMutationOutcome> {

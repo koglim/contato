@@ -32,6 +32,13 @@ export const channelOutboundMessageColumns = `
   status, processing_token, processing_started_at, provider_message_id, attempt_count, last_error_code, sent_at
 `;
 
+const qualifiedChannelOutboundMessageColumns = `
+  outbound.id, outbound.channel_inbound_message_id, outbound.purpose, outbound.provider,
+  outbound.recipient_phone_e164, outbound.message_type, outbound.text_content, outbound.status,
+  outbound.processing_token, outbound.processing_started_at, outbound.provider_message_id,
+  outbound.attempt_count, outbound.last_error_code, outbound.sent_at
+`;
+
 export class MatchReservationConflictError extends Error {
   readonly code = "match_reservation_conflict";
 
@@ -182,7 +189,7 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
           SET status = 'processing', processing_token = $2, processing_started_at = NOW(), attempt_count = attempt_count + 1
          FROM candidate
         WHERE outbound.id = candidate.id
-       RETURNING ${channelOutboundMessageColumns}`,
+       RETURNING ${qualifiedChannelOutboundMessageColumns}`,
       [processingLeaseSeconds, processingToken],
     );
     return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;

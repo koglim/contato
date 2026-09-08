@@ -134,9 +134,9 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
 
       const outbound = await client.query<ChannelOutboundMessageRow>(
         `INSERT INTO channel_outbound_messages (
-           channel_inbound_message_id, provider, recipient_phone_e164, text_content
-         ) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (channel_inbound_message_id) DO UPDATE
+           channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content
+         ) VALUES ($1, 'customer_reply', $2, $3, $4)
+         ON CONFLICT (channel_inbound_message_id) WHERE channel_inbound_message_id IS NOT NULL DO UPDATE
            SET channel_inbound_message_id = EXCLUDED.channel_inbound_message_id
          RETURNING ${channelOutboundMessageColumns}`,
         [

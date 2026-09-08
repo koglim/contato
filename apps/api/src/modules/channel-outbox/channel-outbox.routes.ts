@@ -22,6 +22,7 @@ export const channelOutboundRoutes: FastifyPluginAsync<ChannelOutboundRoutesOpti
 
   app.post("/next/claim", { preHandler: requireInternalKey }, async (_request, reply) => {
     const outcome = await options.service.claimNextPending();
+    if (outcome.kind === "outbound_queue_empty") return reply.code(204).send();
     if (outcome.kind !== "response") return routeError(reply, outcome.kind);
     return reply.send(channelOutboundMessageClaimResponseSchema.parse(outcome.response));
   });

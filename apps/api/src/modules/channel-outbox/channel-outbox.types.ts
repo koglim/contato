@@ -53,6 +53,7 @@ export interface ChannelOutboundMessageRepository {
 export type ChannelOutboundClaimOutcome =
   | { kind: "response"; response: ChannelOutboundMessageClaimResponse }
   | { kind: "outbound_message_not_found" }
+  | { kind: "outbound_queue_empty" }
   | { kind: "outbound_message_processing" };
 
 export type ChannelOutboundMutationOutcome =

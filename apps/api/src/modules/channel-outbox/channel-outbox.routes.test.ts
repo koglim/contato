@@ -19,7 +19,7 @@ class FakeOutbox implements ChannelOutboundService {
   }
   async markSent() { return { kind: "response" as const, response: { id: outboundId, status: "sent" as const } }; }
   async markFailed() { return { kind: "response" as const, response: { id: outboundId, status: "failed" as const } }; }
-  async claimNextPending() { return { kind: "outbound_message_not_found" as const }; }
+  async claimNextPending() { return { kind: "outbound_queue_empty" as const }; }
 }
 
 test("outbox routes require auth, validate input and expose recipient only on a claim", async () => {
@@ -47,7 +47,7 @@ test("outbox routes require auth, validate input and expose recipient only on a 
 test("outbox route can claim the next pending message without an outbound id", async () => {
   const app = buildApp({ channelOutboundService: new FakeOutbox(), internalApiKey });
   const response = await app.inject({ method: "POST", url: "/internal/channel/outbound/next/claim", headers: { "x-internal-key": internalApiKey } });
-  assert.equal(response.statusCode, 404);
-  assert.deepEqual(response.json(), { error: "outbound_message_not_found" });
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.body, "");
   await app.close();
 });

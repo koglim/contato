@@ -86,3 +86,9 @@ test("sent and failed mutations protect the current processing token", async () 
     { kind: "outbound_message_claim_invalid" },
   );
 });
+
+test("claiming the next message treats an empty queue as a normal state", async () => {
+  const current = context();
+  current.repository.current = null;
+  assert.deepEqual(await current.service.claimNextPending(), { kind: "outbound_queue_empty" });
+});

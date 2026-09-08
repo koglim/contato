@@ -41,7 +41,9 @@ test("inbox repository uses the provider-scoped key and claims with a recoverabl
   assert.equal(outbound?.status, "pending");
   assert.match(current.calls[2]!.text, /result = \$6::jsonb/u);
   assert.match(current.calls[3]!.text, /INSERT INTO channel_outbound_messages/u);
-  assert.match(current.calls[3]!.text, /ON CONFLICT \(channel_inbound_message_id\)/u);
+  assert.match(current.calls[3]!.text, /purpose/u);
+  assert.match(current.calls[3]!.text, /'customer_reply'/u);
+  assert.match(current.calls[3]!.text, /ON CONFLICT \(channel_inbound_message_id\) WHERE channel_inbound_message_id IS NOT NULL/u);
   assert.equal(await current.repository.markFailed(id, token, "internal_error"), true);
   assert.match(current.calls[4]!.text, /status = 'failed'/u);
 });
