@@ -70,8 +70,14 @@ function countStandalonePhrase(text: string, phrase: string) {
   return count;
 }
 
-function hasPositionReference(normalizedText: string) {
-  return /\b(?:opcao|opcoes|primeiro|primeira|segundo|segunda|terceiro|terceira|um|uma|dois|duas|[1-9]|10)\b/u.test(normalizedText);
+function explicitOptionPosition(normalizedText: string) {
+  const match = /\bopcao(?:s)?\s+(10|[1-9]|um|uma|dois|duas|tres|três|quatro|cinco|seis|sete|oito|nove|dez)\b/u.exec(normalizedText);
+  if (!match) return null;
+  const positions = new Map([
+    ["um", 1], ["uma", 1], ["dois", 2], ["duas", 2], ["tres", 3], ["três", 3],
+    ["quatro", 4], ["cinco", 5], ["seis", 6], ["sete", 7], ["oito", 8], ["nove", 9], ["dez", 10],
+  ]);
+  return positions.get(match[1]) ?? Number(match[1]);
 }
 
 export function resolveProfessionalSelection(
@@ -103,7 +109,19 @@ export function resolveProfessionalSelection(
       && isBareFirstNameReference(normalizedText, firstName, maximalFullNameMatches.map((full) => full.normalizedName));
   });
 
-  if (hasPositionReference(normalizedText) && identified.length > 0) return { kind: "ambiguous", options: identified.map((match) => ({ position: match.position, professionalDisplayName: match.displayName })) };
+  const explicitPosition = explicitOptionPosition(normalizedText);
+  if (explicitPosition !== null) {
+    if (identified.length === 1 && identified[0]!.position === explicitPosition) return { kind: "selected", position: explicitPosition };
+    if (identified.length > 1) {
+      return {
+        kind: "ambiguous",
+        options: identified
+          .sort((left, right) => left.position - right.position)
+          .map((match) => ({ position: match.position, professionalDisplayName: match.displayName })),
+      };
+    }
+    return { kind: "unresolved" };
+  }
 
   for (const firstName of fullNameFirstNames) {
     if (countStandalonePhrase(normalizedText, firstName) > 1) {

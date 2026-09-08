@@ -74,6 +74,15 @@ test("prefers the longest presented full name when names overlap", () => {
   assert.deepEqual(resolveProfessionalSelection("quero o João Silva Junior", overlapping), { kind: "selected", position: 2 });
 });
 
+test("does not emit one-option ambiguity for consistent or incomplete references", () => {
+  assert.deepEqual(resolveProfessionalSelection("Ana opção 1", options), { kind: "selected", position: 1 });
+  assert.deepEqual(resolveProfessionalSelection("quero a Ana opção 1", options), { kind: "selected", position: 1 });
+  assert.deepEqual(resolveProfessionalSelection("quero uma Ana", options), { kind: "selected", position: 1 });
+  assert.deepEqual(resolveProfessionalSelection("quero um João", options), { kind: "selected", position: 2 });
+  assert.deepEqual(resolveProfessionalSelection("Ana opção 2", options), { kind: "unresolved" });
+  assert.notEqual(resolveProfessionalSelection("Ana opção 1", options).kind, "ambiguous");
+});
+
 test("never resolves an unshown or unranked match", () => {
   assert.deepEqual(resolveProfessionalSelection("Carlos", [{ rankPosition: null, displayName: "Carlos" }]), { kind: "unresolved" });
 });

@@ -336,6 +336,49 @@ test("channel inbox keeps questions active, then selects by name idempotently", 
   }
 });
 
+test("channel inbox keeps an inconsistent name and position from creating a contact", { concurrency: false }, async () => {
+  const fixture = await createFixture();
+  const selectionRepository = new PostgresSelectionMatchRepository();
+  const router = new DefaultCustomerSearchRouter(
+    new PostgresCustomerRepository(), new PostgresSearchConversationRepository(),
+    { async start() { throw new Error("search must not start during selection"); }, async continueConversation() { throw new Error("search must not continue during selection"); } } as never,
+    new DefaultSelectionCommandService({ selectionMatchRepository: selectionRepository }),
+    new DefaultGlobalConversationCommandService(new PostgresGlobalConversationCommandRepository()),
+  );
+  const inbox = new DefaultChannelInboxService(
+    new PostgresChannelInboundMessageRepository(), router, { processingLeaseSeconds: 60 },
+    new DefaultMessagePresenter(), new PostgresChannelOutboundMessageRepository(),
+  );
+  const inconsistentId = `selection-inconsistent-${randomUUID()}`;
+  const validId = `selection-consistent-${randomUUID()}`;
+  const inconsistent = { provider: "test", provider_message_id: inconsistentId, phone_e164: "+5566999999999", raw_text: "Ana opção 2", country_code: "BR", limit: 2 };
+  const valid = { ...inconsistent, provider_message_id: validId, raw_text: "Ana opção 1" };
+  try {
+    const rejected = await inbox.receive(inconsistent);
+    assert.equal(rejected.kind, "response");
+    if (rejected.kind !== "response") return;
+    assert.match(rejected.response.reply_text, /Não consegui identificar/u);
+    assert.equal(rejected.response.duplicate, false);
+    assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM contacts WHERE search_request_id = $1`, [fixture.searchRequestId])).rows[0]!.count), 0);
+
+    const selected = await inbox.receive(valid);
+    assert.equal(selected.kind, "response");
+    if (selected.kind !== "response") return;
+    assert.equal(selected.response.duplicate, false);
+    assert.match(selected.response.reply_text, /Ana Eletricista/u);
+
+    const replay = await inbox.receive(valid);
+    assert.equal(replay.kind, "response");
+    if (replay.kind !== "response") return;
+    assert.equal(replay.response.duplicate, true);
+    assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM contacts WHERE search_request_id = $1`, [fixture.searchRequestId])).rows[0]!.count), 1);
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [inconsistentId, validId]);
+    await query(`DELETE FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2)`, [inconsistentId, validId]);
+    await fixture.cleanup();
+  }
+});
+
 test("channel inbox recovers a completed selection after a crash before inbound processing", { concurrency: false }, async () => {
   const fixture = await createFixture();
   const selectionRepository = new PostgresSelectionMatchRepository();

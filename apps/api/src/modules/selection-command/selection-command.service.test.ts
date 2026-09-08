@@ -107,6 +107,18 @@ test("selection command service keeps the conversation active for non-affirmativ
   }
 });
 
+test("selection command service never returns one-option ambiguity", async () => {
+  for (const rawText of ["Ana opção 1", "quero a Ana opção 1", "quero uma Ana", "quero um João"]) {
+    const current = context();
+    const outcome = await current.service.process({ ...input, rawText });
+    assert.equal(outcome.kind, "selected", rawText);
+    assert.equal(current.selectionMatchRepository.selectCalls.length, 1, rawText);
+  }
+  const conflicting = context();
+  assert.deepEqual(await conflicting.service.process({ ...input, rawText: "Ana opção 2" }), { kind: "not_command" });
+  assert.deepEqual(conflicting.selectionMatchRepository.selectCalls, []);
+});
+
 test("selection command service rejects positions that were not presented without writes", async () => {
   const current = context();
   assert.deepEqual(await current.service.process({ ...input, rawText: "3" }), {
