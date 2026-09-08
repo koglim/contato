@@ -15,6 +15,7 @@ export type SelectionCommandOutcome =
   | SelectShownMatchOutcome
   | { kind: "global_command"; command: GlobalConversationCommand }
   | { kind: "invalid_selection"; requestedPosition: number; visibleMatchCount: number }
+  | { kind: "ambiguous_selection"; options: Array<{ position: number; professionalDisplayName: string }> }
   | { kind: "show_more_requested"; hasMore: boolean; shownMatchCount: number }
   | { kind: "not_command" }
   | {

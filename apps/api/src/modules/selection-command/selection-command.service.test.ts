@@ -32,6 +32,10 @@ class FakeSelectionMatchRepository implements SelectionMatchRepository {
   recoveryCalls: Array<[string, string]> = [];
   async getState() { this.getStateCalls += 1; return this.state; }
   async findShownByPosition() { return null; }
+  async listShown() { return [
+    { rankPosition: 1, displayName: "Ana Eletricista" },
+    { rankPosition: 2, displayName: "João Encanador" },
+  ] as never; }
   async listNextUnshown() { return []; }
   async findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string) {
     this.recoveryCalls.push([customerId, selectionKey]);
@@ -62,6 +66,57 @@ test("selection command service selects numbered and ordinal shown matches", asy
       selectionKey: input.selectionKey,
     }]);
   }
+});
+
+test("selection command service selects shown professionals by name and natural phrase", async () => {
+  for (const rawText of ["Ana Eletricista", "ana", "quero a Ana", "pode ser o João"]) {
+    const current = context();
+    assert.equal((await current.service.process({ ...input, rawText })).kind, "selected");
+    assert.equal(current.selectionMatchRepository.selectCalls.length, 1);
+  }
+});
+
+test("selection command service returns ambiguity without selecting when names are not unique", async () => {
+  const current = context();
+  current.selectionMatchRepository.listShown = async () => [
+    { rankPosition: 1, displayName: "Ana Souza" },
+    { rankPosition: 3, displayName: "Ana Silva" },
+  ] as never;
+  assert.deepEqual(await current.service.process({ ...input, rawText: "quero a Ana" }), {
+    kind: "ambiguous_selection",
+    options: [
+      { position: 1, professionalDisplayName: "Ana Souza" },
+      { position: 3, professionalDisplayName: "Ana Silva" },
+    ],
+  });
+  assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
+});
+
+test("selection command service keeps the conversation active for non-affirmative or mixed references", async () => {
+  for (const rawText of [
+    "não quero a Ana",
+    "A Ana atende domingo?",
+    "quanto cobra a Ana?",
+    "se a Ana atender hoje eu escolho ela",
+    "opção 1 ou João",
+  ]) {
+    const current = context();
+    const outcome = await current.service.process({ ...input, rawText });
+    assert.deepEqual(outcome, { kind: "not_command" }, rawText);
+    assert.deepEqual(current.selectionMatchRepository.selectCalls, [], rawText);
+  }
+});
+
+test("selection command service never returns one-option ambiguity", async () => {
+  for (const rawText of ["Ana opção 1", "quero a Ana opção 1", "quero uma Ana", "quero um João"]) {
+    const current = context();
+    const outcome = await current.service.process({ ...input, rawText });
+    assert.equal(outcome.kind, "selected", rawText);
+    assert.equal(current.selectionMatchRepository.selectCalls.length, 1, rawText);
+  }
+  const conflicting = context();
+  assert.deepEqual(await conflicting.service.process({ ...input, rawText: "Ana opção 2" }), { kind: "not_command" });
+  assert.deepEqual(conflicting.selectionMatchRepository.selectCalls, []);
 });
 
 test("selection command service rejects positions that were not presented without writes", async () => {

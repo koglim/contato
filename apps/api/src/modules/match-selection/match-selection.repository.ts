@@ -253,6 +253,25 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
     return result.rows.map(toSelectionMatchRecord);
   }
 
+  async listShown(searchRequestId: string) {
+    const result = await this.execute<SelectionMatchRow>(
+      `SELECT ${selectionMatchColumns}
+         FROM matches
+         JOIN search_requests ON search_requests.id = matches.search_request_id
+         JOIN professionals ON professionals.id = matches.professional_id
+         JOIN services ON services.id = search_requests.service_id
+         JOIN professional_services
+           ON professional_services.professional_id = matches.professional_id
+          AND professional_services.service_id = search_requests.service_id
+        WHERE matches.search_request_id = $1
+          AND matches.shown_at IS NOT NULL
+          AND matches.rank_position IS NOT NULL
+        ORDER BY matches.rank_position ASC`,
+      [searchRequestId],
+    );
+    return result.rows.map(toSelectionMatchRecord);
+  }
+
   async findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string) {
     const result = await this.execute<ExistingSelectionRow>(
       `SELECT contacts.id AS contact_id,

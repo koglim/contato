@@ -221,6 +221,20 @@ test("selection match repository lists ordered unshown matches within the reques
   assert.doesNotMatch(context.calls[0]!.text, /UPDATE|INSERT|DELETE|shown_at\s*=|selected_at\s*=/u);
 });
 
+test("selection match repository lists only shown ranked matches for name resolution", async () => {
+  const context = fakeDatabase([[
+    row({ rank_position: 1, shown_at: shownAt, selected_at: null }),
+    row({ match_id: randomUUID(), rank_position: 3, shown_at: shownAt, selected_at: null }),
+  ]]);
+  const matches = await context.repository.listShown(searchRequestId);
+  assert.deepEqual(matches.map((match) => match.rankPosition), [1, 3]);
+  assert.match(context.calls[0]!.text, /matches.shown_at IS NOT NULL/u);
+  assert.match(context.calls[0]!.text, /matches.rank_position IS NOT NULL/u);
+  assert.match(context.calls[0]!.text, /ORDER BY matches.rank_position ASC/u);
+  assert.deepEqual(context.calls[0]!.values, [searchRequestId]);
+  assert.doesNotMatch(context.calls[0]!.text, /UPDATE|INSERT|DELETE|shown_at\s*=|selected_at\s*=/u);
+});
+
 test("selection match repository selects a shown match atomically and completes its conversation", async () => {
   const context = fakeDatabase([
     [],
