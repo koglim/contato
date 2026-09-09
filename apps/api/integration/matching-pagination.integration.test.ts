@@ -5,6 +5,7 @@ import { buildApp } from "../src/app.js";
 import { closeDatabaseConnection, query, withTransaction } from "../src/database/connection.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
 import { PostgresMatchingRepository } from "../src/modules/matching/matching.repository.js";
+import { associateOutboundMessageMatches, MatchReservationConflictError } from "../src/modules/channel-outbox/channel-outbox.repository.js";
 
 const internalApiKey = "pagination-integration-only";
 const headers = { "x-internal-key": internalApiKey };
@@ -177,6 +178,42 @@ test("legacy limit controls only the page, never the internal pool", async () =>
       assert.equal(result.response.meta.limit, Math.min(limit, 3));
       assert.equal((await new PostgresSelectionMatchRepository().getState(result.response.search_request_id)).totalMatchCount, 20);
     }
+  } finally {
+    await current.app.close();
+    await current.cleanup();
+  }
+});
+
+test("page reservations serialize safely when both transactions already hold foreign-key locks", { timeout: 15000 }, async () => {
+  const current = await fixture(6);
+  try {
+    const result = await new PostgresMatchingRepository().search({ service_id: current.serviceId, raw_text: "pool", latitude: -11.86, longitude: -55.5, limit: 3 });
+    if (result.kind !== "success") throw new Error("expected successful search");
+    const searchId = result.response.search_request_id;
+    const matchIds = result.response.matches.map((match) => match.match_id);
+    let arrived = 0;
+    let release!: () => void;
+    const bothHoldForeignKeyLock = new Promise<void>((resolve) => { release = resolve; });
+    const reserve = () => withTransaction(async (client) => {
+      // Real FK insertion takes KEY SHARE before the production page lock.
+      const inbound = await client.query<{ id: string }>(
+        `INSERT INTO channel_inbound_messages (provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, search_request_id)
+         VALUES ('pool-lock-test', $1, $2, 'mostrar mais', 'BR', 3, $3) RETURNING id`, [randomUUID(), current.phone, searchId],
+      );
+      const outbound = await client.query<{ id: string }>(
+        `INSERT INTO channel_outbound_messages (channel_inbound_message_id, provider, recipient_phone_e164, text_content)
+         VALUES ($1, 'pool-lock-test', $2, 'opções de teste') RETURNING id`, [inbound.rows[0].id, current.phone],
+      );
+      arrived += 1;
+      if (arrived === 2) release();
+      await bothHoldForeignKeyLock;
+      await associateOutboundMessageMatches(client, outbound.rows[0].id, { searchRequestId: searchId, matchIds });
+    });
+    const outcomes = await Promise.allSettled([reserve(), reserve()]);
+    assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+    const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+    assert.ok(rejected?.status === "rejected" && rejected.reason instanceof MatchReservationConflictError, "loser must get a controlled reservation conflict, not a PostgreSQL deadlock");
+    assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 = $1", [current.phone])).rows.length, 1);
   } finally {
     await current.app.close();
     await current.cleanup();

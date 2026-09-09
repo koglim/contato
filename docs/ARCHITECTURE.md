@@ -263,6 +263,8 @@ Agregações SQL por conjunto usam apenas profissionais elegíveis; não há con
 
 Essa política não garante cotas comerciais de leads nem distribuição igual entre profissionais de qualidade operacional diferente. Requer calibração em produção e análise de planos com cardinalidades reais; os testes PostgreSQL provam comportamento/rotação com 25 perfis, não constituem benchmark de escala. CI valida os índices, rollback 013 com dados preservados, rollbacks anteriores e execução das integrações novamente após reaplicar.
 
+A reserva usa `FOR NO KEY UPDATE` sobre a busca: a Inbox pode já possuir `KEY SHARE` devido à FK `search_request_id`. Usar `FOR UPDATE` nesse ponto provocaria upgrade conflitante/deadlock entre duas mensagens. Uma regressão PostgreSQL sincroniza duas transações depois das inserções com FK e exige exatamente uma reserva e um conflito controlado, sem temporização arbitrária.
+
 Não há garantia exactly-once matemática: se a Evolution aceitar o texto e o n8n cair antes da confirmação, uma lease vencida poderá ser reivindicada e reenviada. A Outbox evita a perda da intenção e múltiplas mensagens lógicas por inbound, além de tornar tentativas e estados observáveis. Logs incluem apenas IDs internos, provider, status, tentativas, flag de duplicata e código de erro controlado — nunca telefone, texto ou payload de webhook.
 
 Essa camada reduz duplicatas usuais de uma entrega at-least-once e garante um único processamento ativo em condições normais. Não promete exactly-once matemático: se o processo cair após o efeito do router mas antes do `markProcessed`, um reclaim posterior pode reexecutar o domínio. Idempotência de eventos e adaptação concreta da Evolution permanecem deliberadamente para a próxima fase.

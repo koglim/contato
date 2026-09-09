@@ -82,7 +82,9 @@ export async function associateOutboundMessageMatches(
 
   // Serialize reservations for this search, including disjoint pages computed
   // from stale reads. Sending happens outside this short transaction.
-  await client.query("SELECT id FROM search_requests WHERE id = $1 FOR UPDATE", [input.searchRequestId]);
+  // Inbox FK writes may already hold KEY SHARE on this row. NO KEY UPDATE
+  // serializes reservers without deadlocking on concurrent FK lock upgrades.
+  await client.query("SELECT id FROM search_requests WHERE id = $1 FOR NO KEY UPDATE", [input.searchRequestId]);
 
   const valid = await client.query<{ id: string }>(
     `SELECT id

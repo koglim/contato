@@ -36,7 +36,7 @@ test("outbox repository recovers one legacy outbound, associates ranked matches,
   assert.match(current.calls[1]!.text, /INSERT INTO channel_outbound_messages/u);
   assert.match(current.calls[1]!.text, /ON CONFLICT \(channel_inbound_message_id\)/u);
   assert.deepEqual(current.calls[1]!.values, [inboundId, "customer_reply", "test", "+5566999999999", "Olá"]);
-  assert.match(current.calls[2]!.text, /search_requests.*FOR UPDATE/u);
+  assert.match(current.calls[2]!.text, /search_requests.*FOR NO KEY UPDATE/u);
   assert.match(current.calls[3]!.text, /search_request_id = \$1/u);
   assert.match(current.calls[3]!.text, /rank_position IS NOT NULL/u);
   assert.match(current.calls[3]!.text, /rank_position <= \$3/u);
