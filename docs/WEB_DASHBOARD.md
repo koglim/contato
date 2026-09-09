@@ -2,6 +2,13 @@
 
 O painel temporário está em `/dashboard` e usa a API interna existente por meio de Route Handlers do Next.js. O navegador nunca recebe `INTERNAL_API_KEY` nem chama a API diretamente.
 
+Status administrativo e telefone são somente leitura. O BFF rejeita alterações
+nesses campos mesmo com sessão válida; perfil permite apenas nome, e-mail, bio e
+foto. Métodos, UUIDs e ações são validados antes do proxy. O ID do profissional
+permanece configurado no servidor: ainda é demonstração, não autenticação
+individual/ownership multiusuário. Troca de telefone depende de verificação
+pela equipe até existir a jornada segura de identidade.
+
 ## Configuração
 
 Defina no ambiente do web:

@@ -1,4 +1,5 @@
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
+import { apiLoggerOptions, type LogStream } from "./observability/logging.js";
 import { ProfessionalOpportunityService } from "./modules/professional-opportunity/professional-opportunity.service.js";
 import { healthResponseSchema } from "@contatocerto/shared";
 import { checkDatabaseConnection } from "./database/connection.js";
@@ -68,6 +69,7 @@ import type { ChannelOutboundMessageRepository, ChannelOutboundService } from ".
 import { readChannelOutboundConfig, type ChannelOutboundConfig } from "./config/channel-outbound.js";
 
 type AppDependencies = {
+  logStream?: LogStream;
   checkDatabase?: () => Promise<void>;
   professionalsRepository?: ProfessionalsRepository;
   catalogRepository?: CatalogRepository;
@@ -157,8 +159,19 @@ export function buildApp({
   channelOutboundService,
   channelOutboundConfig,
   professionalOpportunityService,
+  logStream,
 }: AppDependencies = {}) {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: apiLoggerOptions(logStream), logController: new LogController({ disableRequestLogging: true }), requestIdHeader: false });
+  app.addHook("onError", async (request, _reply, error) => {
+    request.log.error({ err: error }, "Request failed");
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    request.log.info({
+      code: "http_request_completed", method: request.method,
+      route: request.routeOptions.url ?? "unmatched", status_code: reply.statusCode,
+      duration_ms: reply.elapsedTime,
+    }, "Request completed");
+  });
   const resolvedMessageInterpretationFallbackConfig =
     messageInterpretationFallbackConfig ?? readMessageInterpretationFallbackConfig();
   const resolvedServiceResolutionRepository = serviceResolutionRepository ?? new PostgresServiceResolutionRepository();

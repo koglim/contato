@@ -1,5 +1,10 @@
 # Arquitetura atual
 
+Logs HTTP usam rota parametrizada, código, status, duração e request ID gerado
+no servidor. Serializers e hook nativos removem detalhes de erros e seu `msg`,
+sem registrar query, headers, corpo ou IP. Política e limitações operacionais:
+[OPERATIONS.md](OPERATIONS.md). Isso não substitui revisão de retenção e acesso.
+
 A operação dispõe de `GET /internal/channel/outbound/queue-status`: agregado
 somente leitura por finalidade, protegido pela chave interna e contrato estrito
 sem PII. Usa o prazo de lease do dispatcher, sem reclamar/terminalizar mensagens.
