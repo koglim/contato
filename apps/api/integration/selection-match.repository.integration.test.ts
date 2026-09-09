@@ -30,7 +30,7 @@ type Fixture = {
 
 function phoneFromId(id: string) {
   const digits = BigInt(`0x${id.replaceAll("-", "").slice(0, 12)}`).toString().padStart(12, "0");
-  return `+55${digits}`;
+  return `+55${digits[0] === "0" ? `1${digits.slice(1)}` : digits}`;
 }
 
 async function createFixture(legacy = false): Promise<Fixture> {

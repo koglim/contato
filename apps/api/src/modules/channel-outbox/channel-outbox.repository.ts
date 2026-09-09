@@ -272,7 +272,9 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
   async markFailed(id: string, input: MarkChannelOutboundMessageFailedInput) {
     const result = await this.execute<{ id: string }>(
       `UPDATE channel_outbound_messages
-       SET status = CASE WHEN attempt_count >= $4 THEN 'failed' ELSE 'pending' END,
+       SET status = CASE WHEN attempt_count >= $4
+         THEN 'failed'::channel_outbound_message_status
+         ELSE 'pending'::channel_outbound_message_status END,
            next_attempt_at = CASE WHEN attempt_count >= $4 THEN NULL
              ELSE NOW() + (CASE attempt_count ${retryBackoffSql} ELSE ${OUTBOX_RETRY_BACKOFF_SECONDS.at(-1)} END * INTERVAL '1 second') END,
            last_error_code = $3, processing_token = NULL, processing_started_at = NULL
