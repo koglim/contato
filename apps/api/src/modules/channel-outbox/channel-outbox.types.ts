@@ -42,6 +42,7 @@ export type CreateIndependentChannelOutboundMessage = {
 };
 
 export interface ChannelOutboundMessageRepository {
+  holdDelivery(id: string, input: HoldOutboundInput): Promise<boolean>;
   findById(id: string): Promise<ChannelOutboundMessageRecord | null>;
   findByInboundMessageId(channelInboundMessageId: string): Promise<ChannelOutboundMessageRecord | null>;
   createOrFindForProcessedInbound(input: CreateChannelOutboundMessage): Promise<ChannelOutboundMessageRecord>;
@@ -64,8 +65,19 @@ export type ChannelOutboundMutationOutcome =
   | { kind: "outbound_message_claim_invalid" };
 
 export interface ChannelOutboundService {
+  holdDelivery(id: string, input: HoldOutboundInput): Promise<ChannelOutboundHoldOutcome>;
   claim(id: string): Promise<ChannelOutboundClaimOutcome>;
   claimNextPending(): Promise<ChannelOutboundClaimOutcome>;
   markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<ChannelOutboundMutationOutcome>;
   markFailed(id: string, input: MarkChannelOutboundMessageFailedInput): Promise<ChannelOutboundMutationOutcome>;
 }
+
+export type HoldOutboundInput = {
+  processing_token: string;
+  reason: "transport_outcome_unknown" | "confirmation_pending";
+};
+
+export type ChannelOutboundHoldOutcome =
+  | { kind: "response"; response: { id: string; status: "processing"; delivery_status: "reconciliation_required" } }
+  | { kind: "outbound_message_not_found" }
+  | { kind: "outbound_message_claim_invalid" };

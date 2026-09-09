@@ -25,6 +25,7 @@ function record(overrides: Partial<ChannelOutboundMessageRecord> = {}): ChannelO
 }
 
 class FakeRepository implements ChannelOutboundMessageRepository {
+  async holdDelivery() { return false; }
   current: ChannelOutboundMessageRecord | null = record();
   async findById() { return this.current; }
   async findByInboundMessageId() { return this.current; }

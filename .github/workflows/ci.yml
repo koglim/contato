@@ -103,6 +103,20 @@ jobs:
           $$;
           SQL
 
+      - name: Verify migration 017 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF (SELECT COUNT(*) FROM information_schema.columns
+              WHERE table_name = 'channel_outbound_messages'
+                AND column_name IN ('sent_token_hash', 'delivery_hold_reason')) <> 2
+              OR to_regclass('channel_outbound_recipient_queue_idx') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name = '017_add_outbound_delivery_receipt') THEN
+              RAISE EXCEPTION 'migration 017 is incomplete';
+            END IF;
+          END $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 
@@ -209,7 +223,7 @@ jobs:
             ('00000000-0000-0000-0000-000000000016', 'professional_contact_notification', 'test', '+5566900000016', 'retry rollback fixture', NOW() + INTERVAL '1 minute');
           SQL
           set +e
-          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down 2>&1)
+          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 2 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
           rollback_status=$?
           set -e
           echo "$rollback_output"
@@ -271,6 +285,22 @@ jobs:
              SET status = 'cancelled',
                  pending_slot = NULL
            WHERE id = '00000000-0000-0000-0000-000000000002';
+          SQL
+
+      - name: Roll back migration 017 with compatible data
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
+
+      - name: Verify migration 017 rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'channel_outbound_messages'
+                AND column_name IN ('sent_token_hash', 'delivery_hold_reason'))
+              OR to_regclass('channel_outbound_recipient_queue_idx') IS NOT NULL THEN
+              RAISE EXCEPTION 'migration 017 remained after rollback';
+            END IF;
+          END $$;
           SQL
 
       - name: Roll back migration 016 with compatible data
@@ -431,7 +461,7 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 016
+      - name: Reapply migrations 008 through 017
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
       - name: Test PostgreSQL integrations after reapply

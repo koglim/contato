@@ -5,6 +5,8 @@ import {
   channelOutboundMessageParamsSchema,
   markChannelOutboundMessageFailedSchema,
   markChannelOutboundMessageSentSchema,
+  holdChannelOutboundMessageSchema,
+  channelOutboundHoldResponseSchema,
 } from "@contatocerto/shared";
 import { createInternalKeyGuard } from "../internal/internal-auth.js";
 import { validationError } from "../internal/validation.js";
@@ -24,6 +26,16 @@ export const channelOutboundRoutes: FastifyPluginAsync<ChannelOutboundRoutesOpti
     return reply.code(500).send({ error: "internal_error" });
   });
   const requireInternalKey = createInternalKeyGuard(options.internalApiKey ?? process.env.INTERNAL_API_KEY);
+
+  app.post("/:outboundId/hold", { preHandler: requireInternalKey }, async (request, reply) => {
+    const params = channelOutboundMessageParamsSchema.safeParse(request.params);
+    if (!params.success) return validationError(reply, params.error.issues);
+    const body = holdChannelOutboundMessageSchema.safeParse(request.body);
+    if (!body.success) return validationError(reply, body.error.issues);
+    const outcome = await options.service.holdDelivery(params.data.outboundId, body.data);
+    if (outcome.kind !== "response") return routeError(reply, outcome.kind);
+    return reply.send(channelOutboundHoldResponseSchema.parse(outcome.response));
+  });
 
   app.post("/next/claim", { preHandler: requireInternalKey }, async (_request, reply) => {
     const outcome = await options.service.claimNextPending();

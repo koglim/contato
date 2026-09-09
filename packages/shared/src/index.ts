@@ -66,6 +66,8 @@ export {
   channelOutboundMessagePurposeSchema,
   markChannelOutboundMessageFailedSchema,
   markChannelOutboundMessageSentSchema,
+  holdChannelOutboundMessageSchema,
+  channelOutboundHoldResponseSchema,
 } from "./schemas/channel-outbound.js";
 export type { HealthResponse } from "./types/health.js";
 export type {

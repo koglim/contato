@@ -1,5 +1,10 @@
 # Arquitetura atual
 
+Confirmações repetidas e retenções de entrega usam recibo persistido (017).
+Notificações independentes são ordenadas por destinatário; leases abandonadas
+têm limite terminal. O contrato e as limitações operacionais estão em
+[OUTBOUND_DELIVERY.md](OUTBOUND_DELIVERY.md).
+
 Estado canônico e checkpoints: [V1_EXECUTION.md](V1_EXECUTION.md). Seções de etapas
 anteriores permanecem como histórico. A elegibilidade de status, serviço, contato
 canônico e cobertura é agora obrigatória também na primeira escolha/apresentação,

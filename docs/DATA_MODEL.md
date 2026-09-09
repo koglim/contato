@@ -1,5 +1,17 @@
 # Modelo de dados
 
+## Evolução 017 — recibo e retenção de entrega
+
+`channel_outbound_messages.sent_token_hash` guarda SHA-256 do token que confirmou
+o envio; só existe em `sent`. `delivery_hold_reason` só existe em `processing`,
+com motivos limitados a `transport_outcome_unknown` e `confirmation_pending`.
+Nenhum token/recibo retroativo é gerado para dados legados. Índice parcial
+`channel_outbound_recipient_queue_idx` apoia ordenação de notificações por
+provider, destinatário, criação e ID. Não há nova variável.
+
+Down rejeita evidências incompatíveis com `P0017`, preservando integralmente os
+dados e as migrations anteriores. Ver [OUTBOUND_DELIVERY.md](OUTBOUND_DELIVERY.md).
+
 ## Evolução 014 — oportunidade bilateral e rollback protegido
 
 - `contacts.public_code`: código canônico `CC-` + oito caracteres aleatórios, único por `lower(public_code)`. Sem sequência, UUID ou PII. Novos contatos bilaterais têm uma única oportunidade por busca, protegida por índice parcial.

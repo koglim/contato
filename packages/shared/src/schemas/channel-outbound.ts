@@ -42,6 +42,17 @@ export const markChannelOutboundMessageFailedSchema = z.object({
   error_code: z.string().trim().regex(/^[a-z][a-z0-9_]{0,119}$/u),
 }).strict();
 
+export const holdChannelOutboundMessageSchema = z.object({
+  processing_token: z.string().uuid(),
+  reason: z.enum(["transport_outcome_unknown", "confirmation_pending"]),
+}).strict();
+
+export const channelOutboundHoldResponseSchema = z.object({
+  id: z.string().uuid(),
+  status: z.literal("processing"),
+  delivery_status: z.literal("reconciliation_required"),
+}).strict();
+
 export const channelOutboundMessageMutationResponseSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(["sent", "pending", "failed"]),

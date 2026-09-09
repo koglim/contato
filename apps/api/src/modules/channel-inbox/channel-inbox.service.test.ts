@@ -110,6 +110,7 @@ class FakeRepository implements ChannelInboundMessageRepository {
 }
 
 class FakeOutboundRepository implements ChannelOutboundMessageRepository {
+  async holdDelivery() { return false; }
   current: ChannelOutboundMessageRecord | null;
   legacyCreates = 0;
   constructor(recordValue: ChannelOutboundMessageRecord) { this.current = recordValue; }

@@ -16,6 +16,32 @@ const retryBackoffSql = OUTBOX_RETRY_BACKOFF_SECONDS
   .map((seconds, index) => `WHEN ${index + 1} THEN ${seconds}`)
   .join(" ");
 
+// A crashed consumer cannot reserve a sixth attempt. Use SKIP LOCKED for the
+// terminalization too: unrelated queue consumers must never wait on this sweep.
+function exhaustAbandonedSql(leaseParameter: string, maxParameter: string) {
+  return `UPDATE channel_outbound_messages SET status = 'failed',
+    processing_token = NULL, processing_started_at = NULL, next_attempt_at = NULL,
+    last_error_code = 'lease_attempt_limit'
+    WHERE id IN (SELECT id FROM channel_outbound_messages
+      WHERE status = 'processing' AND delivery_hold_reason IS NULL
+        AND attempt_count >= ${maxParameter}
+        AND processing_started_at <= NOW() - (${leaseParameter} * INTERVAL '1 second')
+      FOR UPDATE SKIP LOCKED)`;
+}
+
+// Independent business notifications are FIFO. Inline replies retain their
+// compatibility path (including a new delivered consent prompt replacing an
+// unsent prompt); they must not be blocked by an older inline reply.
+const recipientTurnSql = `(outbound.purpose NOT IN ('professional_contact_notification', 'customer_contact_update') OR NOT EXISTS (
+  SELECT 1 FROM channel_outbound_messages earlier
+  WHERE earlier.provider = outbound.provider
+    AND earlier.recipient_phone_e164 = outbound.recipient_phone_e164
+    AND earlier.purpose IN ('professional_contact_notification', 'customer_contact_update')
+    AND (earlier.created_at, earlier.id) < (outbound.created_at, outbound.id)
+    AND (earlier.status IN ('pending', 'processing')
+      OR (earlier.status = 'failed' AND earlier.attempt_count < ${OUTBOX_MAX_ATTEMPTS}))
+))`;
+
 export type ChannelOutboundMessageRow = {
   id: string;
   channel_inbound_message_id: string | null;
@@ -206,10 +232,13 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
 
   async claim(id: string, processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<ChannelOutboundMessageRow>(
-      `UPDATE channel_outbound_messages
+      `WITH exhausted AS (${exhaustAbandonedSql("$3", "$4")})
+       UPDATE channel_outbound_messages AS outbound
        SET status = 'processing', processing_token = $2, processing_started_at = NOW(),
            next_attempt_at = NULL, attempt_count = attempt_count + 1
        WHERE id = $1
+         AND attempt_count < $4 AND delivery_hold_reason IS NULL
+         AND ${recipientTurnSql}
          AND (
            (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
            OR (status = 'failed' AND attempt_count < $4 AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
@@ -223,14 +252,16 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
 
   async claimNextPending(processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<ChannelOutboundMessageRow>(
-      `WITH candidate AS (
-         SELECT id
-           FROM channel_outbound_messages
-          WHERE (
+      `WITH exhausted AS (${exhaustAbandonedSql("$1", "$2")}), candidate AS (
+         SELECT outbound.id
+           FROM channel_outbound_messages AS outbound
+          WHERE attempt_count < $2 AND delivery_hold_reason IS NULL
+            AND ${recipientTurnSql}
+            AND ((
             (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
             OR (status = 'failed' AND attempt_count < $2 AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
           )
-             OR (status = 'processing' AND processing_started_at <= NOW() - ($1 * INTERVAL '1 second'))
+             OR (status = 'processing' AND processing_started_at <= NOW() - ($1 * INTERVAL '1 second')))
           ORDER BY created_at ASC, id ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
@@ -251,12 +282,21 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
       const result = await client.query<{ id: string }>(
       `UPDATE channel_outbound_messages
        SET status = 'sent', provider_message_id = $3, sent_at = NOW(), processing_token = NULL,
-           processing_started_at = NULL, next_attempt_at = NULL, last_error_code = NULL
+           processing_started_at = NULL, next_attempt_at = NULL, last_error_code = NULL,
+           sent_token_hash = encode(digest($2::text, 'sha256'), 'hex'), delivery_hold_reason = NULL
        WHERE id = $1 AND status = 'processing' AND processing_token = $2
        RETURNING id`,
         [id, input.processing_token, input.provider_message_id],
       );
-      if (result.rows.length !== 1) return false;
+      if (result.rows.length !== 1) {
+        // Separate statement gives a fresh READ COMMITTED snapshot after a
+        // competing confirmation commits. Never touch timestamps on replay.
+        const receipt = await client.query<{ id: string }>(`SELECT id FROM channel_outbound_messages
+          WHERE id = $1 AND status = 'sent' AND provider_message_id = $3
+            AND sent_token_hash = encode(digest($2::text, 'sha256'), 'hex')`,
+        [id, input.processing_token, input.provider_message_id]);
+        return receipt.rows.length === 1;
+      }
       await client.query(
         `UPDATE matches
             SET shown_at = COALESCE(shown_at, NOW())
@@ -278,10 +318,19 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
            next_attempt_at = CASE WHEN attempt_count >= $4 THEN NULL
              ELSE NOW() + (CASE attempt_count ${retryBackoffSql} ELSE ${OUTBOX_RETRY_BACKOFF_SECONDS.at(-1)} END * INTERVAL '1 second') END,
            last_error_code = $3, processing_token = NULL, processing_started_at = NULL
-       WHERE id = $1 AND status = 'processing' AND processing_token = $2
+       WHERE id = $1 AND status = 'processing' AND processing_token = $2 AND delivery_hold_reason IS NULL
        RETURNING id`,
       [id, input.processing_token, input.error_code, OUTBOX_MAX_ATTEMPTS],
     );
+    return result.rows.length === 1;
+  }
+
+  async holdDelivery(id: string, input: { processing_token: string; reason: "transport_outcome_unknown" | "confirmation_pending" }) {
+    const result = await this.execute<{ id: string }>(`UPDATE channel_outbound_messages
+      SET delivery_hold_reason = $3, last_error_code = $3
+      WHERE id = $1 AND status = 'processing' AND processing_token = $2
+        AND (delivery_hold_reason IS NULL OR delivery_hold_reason = $3)
+      RETURNING id`, [id, input.processing_token, input.reason]);
     return result.rows.length === 1;
   }
 }

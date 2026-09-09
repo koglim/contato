@@ -1,5 +1,21 @@
 # API interna
 
+## Confirmação e reconciliação Outbox (017)
+
+`POST /internal/channel/outbound/:id/sent` aceita repetição idêntica com o token
+original e o mesmo `provider_message_id`, sem alterar timestamps. ID/token
+conflitantes continuam retornando 409. Recibos legados não são inventados.
+
+Novo `POST /internal/channel/outbound/:id/hold`, protegido por `X-Internal-Key`:
+`{ "processing_token": "<uuid>", "reason": "transport_outcome_unknown" }`.
+Também aceita `confirmation_pending`. Retorna 200 com
+`{ "id": "<uuid>", "status": "processing", "delivery_status": "reconciliation_required" }`.
+Uma retenção impede reclaim e `/failed`; o token original ainda pode confirmar
+`/sent` quando houver prova de aceitação. Corpo inválido: 400; sem chave: 401;
+ID ausente: 404; token inválido: 409. Nenhum payload privado na resposta.
+
+Contrato completo, limites e operação: [OUTBOUND_DELIVERY.md](OUTBOUND_DELIVERY.md).
+
 ## Contato bilateral — contrato atual
 
 Esta seção atualiza a jornada Inbox/Outbox descrita nas etapas históricas abaixo. Endpoints e consumidor por `outbound.id` permanecem compatíveis; nenhuma variável de ambiente nova ou alteração n8n foi introduzida. Aplicar a migration 014 antes de executar esta versão da API.

@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { rollbackThrough } from "./rollback-helper.js";
 import { after, test } from "node:test";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
 import { buildApp } from "../src/app.js";
@@ -344,8 +342,7 @@ test("migration 015 refuses destructive rollback and events cannot be overwritte
        WHERE recipient_phone_e164 IN ($1,$2) ORDER BY id`,[f.customerPhone,f.professionalPhone]);
     // Exercise the protected 015 rollback with the supported CLI syntax. The
     // explicit single transaction must roll back 016 as well when 015 rejects.
-    await assert.rejects(promisify(execFile)(process.execPath,["node_modules/node-pg-migrate/bin/node-pg-migrate.js","down","2","--single-transaction","-m","database/migrations","--database-url-var","DATABASE_URL"],
-      {cwd:fileURLToPath(new URL("../../../",import.meta.url))}), (error: unknown) => {
+    await assert.rejects(rollbackThrough("015_add_opportunity_responses"), (error: unknown) => {
       assert.ok(error instanceof Error && "stderr" in error);
       assert.match(String(error.stderr),/OPPORTUNITY_RESPONSE_ROLLBACK_BLOCKED/);
       assert.match(String(error.stderr),/P0015/); return true;

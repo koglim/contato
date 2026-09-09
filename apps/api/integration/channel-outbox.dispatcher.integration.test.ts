@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import { closeDatabaseConnection, query } from "../src/database/connection.js";
 import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel-outbox/channel-outbox.repository.js";
+import { rollbackThrough } from "./rollback-helper.js";
 
 after(async () => closeDatabaseConnection());
 
@@ -149,3 +150,107 @@ test("independent business key serializes creation and replay preserves an alrea
     assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE business_key = $1", [businessKey])).rows.length, 1);
   } finally { await query("DELETE FROM channel_outbound_messages WHERE business_key = $1", [businessKey]); }
 });
+
+test("sent confirmation survives a lost response and rejects stale tokens or conflicting provider ids", async () => {
+  const id = await insertIndependent();
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    const token = randomUUID();
+    await repository.claim(id, token, 60);
+    const input = { processing_token: token, provider_message_id: "provider-accepted-once" };
+    assert.deepEqual(await Promise.all([repository.markSent(id, input), repository.markSent(id, input)]), [true, true]);
+    const before = await repository.findById(id);
+    assert.equal(await repository.markSent(id, input), true);
+    assert.equal(await repository.markSent(id, { ...input, processing_token: randomUUID() }), false);
+    assert.equal(await repository.markSent(id, { ...input, provider_message_id: "another-send" }), false);
+    assert.equal(await repository.markFailed(id, { processing_token: token, error_code: "late_error" }), false);
+    assert.deepEqual(await repository.findById(id), before);
+    assert.equal(await repository.claim(id, randomUUID(), 60), null);
+  } finally { await query("DELETE FROM channel_outbound_messages WHERE id = $1", [id]); }
+});
+
+for (const byId of [false, true]) {
+  test(`abandoned leases reach an observable terminal state through ${byId ? "id" : "queue"} claim`, async () => {
+    const id = await insertIndependent();
+    const repository = new PostgresChannelOutboundMessageRepository();
+    try {
+      for (let attempt = 1; attempt <= 5; attempt += 1) {
+        const claimed = byId ? await repository.claim(id, randomUUID(), 60) : await repository.claimNextPending(randomUUID(), 60);
+        assert.equal(claimed?.id, id);
+        assert.equal(claimed?.attemptCount, attempt);
+        await query("UPDATE channel_outbound_messages SET processing_started_at = NOW() - INTERVAL '2 minutes' WHERE id = $1", [id]);
+      }
+      assert.equal(byId ? await repository.claim(id, randomUUID(), 60) : await repository.claimNextPending(randomUUID(), 60), null);
+      const terminal = await repository.findById(id);
+      assert.equal(terminal?.status, "failed");
+      assert.equal(terminal?.attemptCount, 5);
+      assert.equal(terminal?.lastErrorCode, "lease_attempt_limit");
+      assert.equal(terminal?.processingToken, null);
+      assert.equal(await repository.claimNextPending(randomUUID(), 60), null);
+    } finally { await query("DELETE FROM channel_outbound_messages WHERE id = $1", [id]); }
+  });
+}
+
+test("messages to the same recipient are delivered in creation order across concurrent consumers", async () => {
+  const first = await insertIndependent();
+  const second = await insertIndependent();
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    await query(`UPDATE channel_outbound_messages SET recipient_phone_e164 = '+5566991234567',
+      created_at = CASE WHEN id = $1 THEN NOW() - INTERVAL '1 minute' ELSE NOW() END WHERE id IN ($1, $2)`, [first, second]);
+    const claimed = await Promise.all([repository.claimNextPending(randomUUID(), 60), repository.claimNextPending(randomUUID(), 60)]);
+    assert.deepEqual(claimed.filter(Boolean).map((item) => item!.id), [first]);
+    assert.equal(await repository.claim(second, randomUUID(), 60), null);
+    const active = claimed.find(Boolean)!;
+    assert.equal(await repository.markSent(first, { processing_token: active.processingToken!, provider_message_id: "first" }), true);
+    assert.equal((await repository.claimNextPending(randomUUID(), 60))?.id, second);
+  } finally { await query("DELETE FROM channel_outbound_messages WHERE id IN ($1, $2)", [first, second]); }
+});
+
+test("uncertain delivery is held beyond its lease and only its original token can confirm it", async () => {
+  const id = await insertIndependent();
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    const token = randomUUID();
+    await repository.claim(id, token, 60);
+    assert.equal(await repository.holdDelivery(id, { processing_token: randomUUID(), reason: "transport_outcome_unknown" }), false);
+    const input = { processing_token: token, reason: "transport_outcome_unknown" as const };
+    assert.equal(await repository.holdDelivery(id, input), true);
+    assert.equal(await repository.holdDelivery(id, input), true);
+    await query("UPDATE channel_outbound_messages SET processing_started_at = NOW() - INTERVAL '1 hour' WHERE id = $1", [id]);
+    assert.equal(await repository.claimNextPending(randomUUID(), 60), null);
+    assert.equal(await repository.claim(id, randomUUID(), 60), null);
+    assert.equal(await repository.markFailed(id, { processing_token: token, error_code: "transport_failure" }), false);
+    assert.equal((await repository.findById(id))?.attemptCount, 1);
+    assert.equal(await repository.markSent(id, { processing_token: token, provider_message_id: "reconciled-provider-id" }), true);
+    assert.equal((await repository.findById(id))?.status, "sent");
+    assert.equal(await repository.holdDelivery(id, input), false);
+  } finally { await query("DELETE FROM channel_outbound_messages WHERE id = $1", [id]); }
+});
+
+for (const state of ["receipt", "hold"] as const) {
+  test(`migration 017 preserves ${state}, data and schema when rollback is blocked`, async () => {
+    const id = await insertIndependent();
+    const repository = new PostgresChannelOutboundMessageRepository();
+    try {
+      const token = randomUUID();
+      await repository.claim(id, token, 60);
+      if (state === "receipt") await repository.markSent(id, { processing_token: token, provider_message_id: "receipt" });
+      else await repository.holdDelivery(id, { processing_token: token, reason: "confirmation_pending" });
+      const fingerprint = async () => (await query(`SELECT
+        (SELECT md5(jsonb_agg(to_jsonb(t) ORDER BY id)::text) FROM channel_outbound_messages t) data,
+        (SELECT md5(jsonb_agg(to_jsonb(t) ORDER BY id)::text) FROM pgmigrations t) migrations,
+        (SELECT md5(jsonb_agg(to_jsonb(t) ORDER BY table_name, ordinal_position)::text)
+          FROM information_schema.columns t WHERE table_schema = 'public') schema`)).rows;
+      const before = await fingerprint();
+      await assert.rejects(rollbackThrough("017_add_outbound_delivery_receipt"), (error: unknown) => {
+        assert.ok(error instanceof Error && "stderr" in error);
+        assert.match(String(error.stderr), /P0017/u);
+        assert.match(String(error.stderr), /OUTBOUND_RECEIPT_ROLLBACK_BLOCKED/u);
+        return true;
+      });
+      assert.deepEqual(await fingerprint(), before);
+      assert.equal((await query("SELECT name FROM pgmigrations WHERE name = '017_add_outbound_delivery_receipt'")).rows.length, 1);
+    } finally { await query("DELETE FROM channel_outbound_messages WHERE id = $1", [id]); }
+  });
+}

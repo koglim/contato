@@ -7,6 +7,7 @@ const internalApiKey = "test-internal-key";
 const outboundId = "11111111-1111-4111-8111-111111111111";
 
 class FakeOutbox implements ChannelOutboundService {
+  async holdDelivery() { return { kind: "response" as const, response: { id: outboundId, status: "processing" as const, delivery_status: "reconciliation_required" as const } }; }
   next = false;
   async claim() {
     return {
@@ -61,4 +62,17 @@ test("outbox route can claim the next pending message without an outbound id", a
   assert.equal(claim.json().purpose, "customer_reply");
   assert.equal(claim.json().recipient_phone_e164, "+5566999999999");
   await app.close();
+});
+
+test("delivery hold requires internal authentication and a bounded reason without exposing content", async () => {
+  const app = buildApp({ channelOutboundService: new FakeOutbox(), internalApiKey });
+  const url = `/internal/channel/outbound/${outboundId}/hold`;
+  try {
+    const payload = { processing_token: "22222222-2222-4222-8222-222222222222", reason: "transport_outcome_unknown" };
+    assert.equal((await app.inject({ method: "POST", url, payload })).statusCode, 401);
+    const held = await app.inject({ method: "POST", url, payload, headers: { "x-internal-key": internalApiKey } });
+    assert.equal(held.statusCode, 200);
+    assert.deepEqual(held.json(), { id: outboundId, status: "processing", delivery_status: "reconciliation_required" });
+    assert.equal((await app.inject({ method: "POST", url, payload: { ...payload, reason: "sensitive provider error" }, headers: { "x-internal-key": internalApiKey } })).statusCode, 400);
+  } finally { await app.close(); }
 });

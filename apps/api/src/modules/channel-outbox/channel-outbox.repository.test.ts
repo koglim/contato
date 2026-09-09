@@ -66,7 +66,7 @@ test("outbox repository rejects unranked or foreign matches before creating asso
 });
 
 test("outbox repository does not update matches when sent confirmation is invalid or failed", async () => {
-  const current = fake([[], [{ id }]]);
+  const current = fake([[], [], [{ id }]]);
   assert.equal(await current.repository.markSent(id, { processing_token: token, provider_message_id: "evolution-001" }), false);
   assert.equal(current.calls.some((call) => /shown_at/u.test(call.text)), false);
   assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "evolution_timeout" }), true);
