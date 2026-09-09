@@ -79,8 +79,8 @@ async function createFixture(legacy = false): Promise<Fixture> {
   await query("UPDATE channel_inbound_messages SET customer_id = $2, conversation_id = $3, search_request_id = $4 WHERE id = $1",
     [presentationInbound.record.id, customerId, conversationId, searchRequestId]);
   const presentation = await query<{ id: string }>(`INSERT INTO channel_outbound_messages
-    (channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version)
-    VALUES ($1, 'bilateral-fixture', '+5566999999999', $2, 'sent', NOW(), $3) RETURNING id`,
+    (channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id)
+    VALUES ($1, 'bilateral-fixture', '+5566999999999', $2, 'sent', NOW(), $3, 'fixture-sent') RETURNING id`,
   [presentationInbound.record.id, legacy ? "1. Ana 2. Bia" : `1. Ana 2. Bia\n${BILATERAL_NOTICE}`, legacy ? null : BILATERAL_NOTICE_VERSION]);
   await query(`INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id)
     VALUES ($1, $2), ($1, $3)`, [presentation.rows[0].id, firstMatchId, secondMatchId]);
@@ -114,9 +114,11 @@ test("selectShownMatch serializes concurrent selections in PostgreSQL", { concur
   const fixture = await createFixture();
   const repository = new PostgresSelectionMatchRepository();
   try {
+    const firstKey = await fixture.inboundKey("quero o primeiro");
+    const secondKey = await fixture.inboundKey("quero o segundo");
     const outcomes = await Promise.all([
-      repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "quero o primeiro", selectionKey: await fixture.inboundKey("quero o primeiro") }),
-      repository.selectShownMatch({ ...fixture, position: 2, lastMessageText: "quero o segundo", selectionKey: await fixture.inboundKey("quero o segundo") }),
+      repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "quero o primeiro", selectionKey: firstKey }),
+      repository.selectShownMatch({ ...fixture, position: 2, lastMessageText: "quero o segundo", selectionKey: secondKey }),
     ]);
     assert.equal(outcomes.filter((outcome) => outcome.kind === "selected").length, 1);
     assert.equal(outcomes.filter((outcome) => outcome.kind === "conversation_not_active").length, 1);
@@ -303,6 +305,9 @@ test("channel inbox selects by professional name and replays the same inbound sa
     );
     assert.equal(Number(state.rows[0]!.contacts), 1);
     assert.equal(Number(state.rows[0]!.outbounds), 1);
+    assert.equal((await bilateralCounts(fixture)).notifications, 1);
+    const recoveredAgain = await selectionRepository.findSelectedByCustomerAndSelectionKey(fixture.customerId, first.response.message_id);
+    assert.equal(recoveredAgain?.replayed, true);
     assert.equal(state.rows[0]!.status, "processed");
     assert.equal(state.rows[0]!.purpose, "customer_reply");
   } finally {

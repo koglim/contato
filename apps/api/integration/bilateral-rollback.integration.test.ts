@@ -16,6 +16,8 @@ async function databaseFingerprint() {
     (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM channel_outbound_messages t) outbound,
     (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM channel_inbound_messages t) inbound,
     (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM search_conversations t) conversations,
+    (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM search_requests t) searches,
+    (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM matches t) matches,
     (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM pgmigrations t) migrations,
     (SELECT jsonb_agg(to_jsonb(t) ORDER BY table_name, ordinal_position)
       FROM information_schema.columns t WHERE table_schema = 'public') columns,

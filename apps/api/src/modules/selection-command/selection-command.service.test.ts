@@ -15,7 +15,8 @@ const input: SelectionCommandInput = {
 };
 
 class FakeSelectionMatchRepository implements SelectionMatchRepository {
-  async getPendingConfirmation() { return null; }
+  pending: { position: number; professionalDisplayName: string } | null = null;
+  async getPendingConfirmation() { return this.pending; }
   async recoverConsentResponse() { return null; }
   async declinePendingConfirmation() { return { kind: "consent_declined" as const }; }
   state: SelectionMatchState = { totalMatchCount: 3, shownMatchCount: 2, hasMore: true };
@@ -217,4 +218,26 @@ test("selection command service waits for a reserved page and caps the next page
   await current.service.process({ ...input, rawText: "mostrar mais", limit: 10 });
   assert.equal(calls, 1);
   assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
+});
+
+test("pending bilateral consent consumes confirmations without parsing them as another choice or page", async () => {
+  for (const rawText of ["sim", "confirmo", "pode compartilhar"]) {
+    const current = context();
+    current.selectionMatchRepository.pending = { position: 2, professionalDisplayName: "Ana" };
+    assert.equal((await current.service.process({ ...input, rawText, lastMessageText: rawText })).kind, "selected");
+    assert.equal(current.selectionMatchRepository.selectCalls[0].confirmBilateral, true);
+    assert.equal(current.selectionMatchRepository.selectCalls[0].selectionKey, input.selectionKey);
+    assert.equal(current.selectionMatchRepository.getStateCalls, 0);
+  }
+});
+
+test("pending bilateral consent rejects questions and refuses without selecting", async () => {
+  const current = context();
+  current.selectionMatchRepository.pending = { position: 2, professionalDisplayName: "Ana" };
+  for (const rawText of ["sim?", "talvez", "mostrar mais", "se puder", "quero saber mais"]) {
+    assert.deepEqual(await current.service.process({ ...input, rawText }), { kind: "consent_required", professionalDisplayName: "Ana" });
+  }
+  assert.deepEqual(await current.service.process({ ...input, rawText: "não quero" }), { kind: "consent_declined" });
+  assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
+  assert.equal(current.selectionMatchRepository.getStateCalls, 0);
 });

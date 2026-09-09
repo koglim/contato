@@ -184,6 +184,12 @@ jobs:
           INSERT INTO search_requests (id, raw_text)
           VALUES ('00000000-0000-0000-0000-000000000001', 'eletricista');
 
+          -- Scenario B retains genuine compatible legacy data through all downs.
+          INSERT INTO professionals (id, display_name, slug, phone_e164)
+          VALUES ('00000000-0000-0000-0000-000000000004', 'Legacy rollback fixture', 'legacy-rollback-fixture', '+5566900000000');
+          INSERT INTO contacts (id, search_request_id, professional_id)
+          VALUES ('00000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004');
+
           INSERT INTO search_conversations (
             id,
             status,
@@ -339,6 +345,13 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$
           BEGIN
+            IF NOT EXISTS (SELECT 1 FROM contacts
+              WHERE id = '00000000-0000-0000-0000-000000000005'
+                AND search_request_id = '00000000-0000-0000-0000-000000000001'
+                AND professional_id = '00000000-0000-0000-0000-000000000004'
+                AND status = 'requested') THEN
+              RAISE EXCEPTION 'compatible legacy contact was not preserved';
+            END IF;
             IF EXISTS (
               SELECT 1
                 FROM search_conversations

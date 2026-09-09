@@ -1,5 +1,6 @@
 import type { SelectionMessageContract } from "@contatocerto/shared";
 import type { SelectionCommandOutcome } from "../selection-command/selection-command.types.js";
+import { safeOpportunityText } from "../bilateral-contact/bilateral-contact.policy.js";
 
 function assertNever(value: never): never {
   throw new Error(`Unsupported selection command outcome: ${String(value)}`);
@@ -30,7 +31,7 @@ export function mapSelectionCommandOutcome(outcome: SelectionCommandOutcome): Se
         kind: "ambiguous_selection",
         options: outcome.options.map((option) => ({
           position: option.position,
-          professional_name: option.professionalDisplayName,
+          professional_name: safeOpportunityText(option.professionalDisplayName, 120) || "Profissional",
         })),
       };
     case "not_command":
@@ -39,8 +40,8 @@ export function mapSelectionCommandOutcome(outcome: SelectionCommandOutcome): Se
       return outcome.hasMore && (outcome.matches?.length ?? 0) > 0
         ? { kind: "show_more_requested", shown_match_count: outcome.shownMatchCount, matches: (outcome.matches ?? []).map((match) => ({
           position: match.rankPosition!,
-          professional_name: match.displayName,
-          service_name: match.serviceName,
+          professional_name: safeOpportunityText(match.displayName, 120) || "Profissional",
+          service_name: safeOpportunityText(match.serviceName, 120) || "Serviço solicitado",
           distance_meters: match.distanceMeters,
           price_mode: match.priceMode,
           price_from_cents: match.priceFromCents,
