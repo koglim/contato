@@ -6,18 +6,29 @@ import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel
 
 after(async () => closeDatabaseConnection());
 
-async function insertIndependent(status: "pending" | "processing" = "pending", processingStartedAt: Date | null = null) {
+async function insertIndependent(status: "pending" | "processing" = "pending", processingStartedAt: Date | null = null, nextAttemptAt: Date | null = null, purpose: "professional_contact_notification" | "customer_reply" = "professional_contact_notification") {
+  const outboundId = randomUUID();
+  const inboundId = purpose === "customer_reply" ? randomUUID() : null;
+  if (inboundId !== null) {
+    await query(`INSERT INTO channel_inbound_messages
+      (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value)
+      VALUES ($1, 'dispatcher-test', $2, '+5566999999999', 'dispatcher fixture', 'BR', 3)`, [inboundId, outboundId]);
+  }
   const result = await query<{ id: string }>(
     `INSERT INTO channel_outbound_messages (
-       purpose, provider, recipient_phone_e164, text_content, status, processing_token, processing_started_at, attempt_count
-     ) VALUES ('professional_contact_notification', 'test', $1, 'Mensagem de teste', $2, $3, $4, $5)
+       id, purpose, channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, processing_token, processing_started_at, attempt_count, next_attempt_at
+     ) VALUES ($1, $2, $3, 'test', $4, 'Mensagem de teste', $5, $6, $7, $8, $9)
      RETURNING id`,
     [
+      outboundId,
+      purpose,
+      inboundId,
       `+5566${Math.floor(100000000 + Math.random() * 899999999)}`,
       status,
       status === "processing" ? randomUUID() : null,
       processingStartedAt,
       status === "processing" ? 1 : 0,
+      nextAttemptAt,
     ],
   );
   return result.rows[0]!.id;
@@ -52,6 +63,70 @@ test("dispatcher recovers an abandoned processing lease", { concurrency: false }
     assert.equal(claimed?.attemptCount, 2);
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE id = $1`, [staleId]);
+  }
+});
+
+test("dispatcher skips a future retry and claims it after the scheduled time", { concurrency: false }, async () => {
+  const futureId = await insertIndependent("pending", null, new Date(Date.now() + 120_000));
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    assert.equal(await repository.claimNextPending(randomUUID(), 60), null);
+    await query("UPDATE channel_outbound_messages SET next_attempt_at = NOW() - INTERVAL '1 second' WHERE id = $1", [futureId]);
+    const claimed = await repository.claimNextPending(randomUUID(), 60);
+    assert.equal(claimed?.id, futureId);
+    assert.equal(claimed?.nextAttemptAt, null);
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE id = $1`, [futureId]);
+  }
+});
+
+test("dispatcher applies the exponential retry schedule and dead-letters on the fifth attempt", { concurrency: false }, async () => {
+  const id = await insertIndependent();
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const claimed = await repository.claimNextPending(randomUUID(), 60);
+      assert.equal(claimed?.id, id);
+      const token = claimed!.processingToken!;
+      assert.equal(await repository.markFailed(id, { processing_token: token, error_code: "transport_timeout" }), true);
+      const current = await repository.findById(id);
+      assert.equal(current?.attemptCount, attempt);
+      if (attempt < 5) {
+        assert.equal(current?.status, "pending");
+        assert.ok(current?.nextAttemptAt);
+        assert.ok(current.nextAttemptAt.getTime() >= Date.now() + [25_000, 55_000, 115_000, 235_000][attempt - 1]!);
+        await query("UPDATE channel_outbound_messages SET next_attempt_at = NOW() - INTERVAL '1 second' WHERE id = $1", [id]);
+      } else {
+        assert.equal(current?.status, "failed");
+        assert.equal(current?.nextAttemptAt, null);
+        assert.equal(await repository.claimNextPending(randomUUID(), 60), null);
+      }
+    }
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE id = $1`, [id]);
+  }
+});
+
+test("dispatcher uses the same claim contract for customer replies and professional notifications", { concurrency: false }, async () => {
+  const customerId = await insertIndependent("pending", null, null, "customer_reply");
+  const professionalId = await insertIndependent();
+  const linkage = await query<{ inbound_id: string | null }>(
+    "SELECT channel_inbound_message_id AS inbound_id FROM channel_outbound_messages WHERE id = $1", [customerId],
+  );
+  const independent = await query<{ inbound_id: string | null }>(
+    "SELECT channel_inbound_message_id AS inbound_id FROM channel_outbound_messages WHERE id = $1", [professionalId],
+  );
+  assert.ok(linkage.rows[0]?.inbound_id);
+  assert.equal(independent.rows[0]?.inbound_id, null);
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    const first = await repository.claimNextPending(randomUUID(), 60);
+    const second = await repository.claimNextPending(randomUUID(), 60);
+    assert.deepEqual(new Set([first?.id, second?.id]), new Set([customerId, professionalId]));
+    assert.deepEqual(new Set([first?.purpose, second?.purpose]), new Set(["customer_reply", "professional_contact_notification"]));
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE id = ANY($1::uuid[])`, [[customerId, professionalId] as unknown as string]);
+    await query("DELETE FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[])", [[customerId] as unknown as string]);
   }
 });
 

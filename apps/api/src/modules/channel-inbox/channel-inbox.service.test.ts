@@ -87,7 +87,7 @@ class FakeRepository implements ChannelInboundMessageRepository {
   outbound: ChannelOutboundMessageRecord = {
     id: "55555555-5555-4555-8555-555555555555", channelInboundMessageId: messageId, purpose: "customer_reply", provider: input.provider,
     recipientPhoneE164: input.phone_e164, messageType: "text", textContent: "", status: "pending",
-    processingToken: null, processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null,
+    processingToken: null, processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, nextAttemptAt: null,
   };
   markedFailed: string | undefined;
   reservationConflict = false;
@@ -122,7 +122,7 @@ class FakeOutboundRepository implements ChannelOutboundMessageRepository {
       purpose: "customer_reply",
       provider: inputValue.provider, recipientPhoneE164: inputValue.recipientPhoneE164, messageType: "text",
       textContent: inputValue.textContent, status: "pending", processingToken: null, processingStartedAt: null,
-      providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null,
+      providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, nextAttemptAt: null,
     };
     return this.current;
   }
@@ -268,7 +268,7 @@ test("processed replay keeps the same sent outbound without calling the router",
   const current = context();
   current.repository.created = false;
   current.repository.current = record({ status: "processed", result: routerResponse() });
-  current.outbox.current = { ...current.repository.outbound, status: "sent", providerMessageId: "evolution-001", sentAt: new Date() };
+  current.outbox.current = { ...current.repository.outbound, status: "sent", providerMessageId: "evolution-001", sentAt: new Date(), nextAttemptAt: null };
   const outcome = await current.service.receive(input);
   assert.equal(outcome.kind, "response");
   if (outcome.kind === "response") {

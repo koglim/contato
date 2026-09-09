@@ -21,6 +21,7 @@ export type ChannelOutboundMessageRecord = {
   attemptCount: number;
   lastErrorCode: string | null;
   sentAt: Date | null;
+  nextAttemptAt: Date | null;
 };
 
 export type CreateChannelOutboundMessage = {
@@ -58,7 +59,7 @@ export type ChannelOutboundClaimOutcome =
   | { kind: "outbound_message_processing" };
 
 export type ChannelOutboundMutationOutcome =
-  | { kind: "response"; response: { id: string; status: "sent" | "failed" } }
+  | { kind: "response"; response: { id: string; status: "sent" | "pending" | "failed" } }
   | { kind: "outbound_message_not_found" }
   | { kind: "outbound_message_claim_invalid" };
 

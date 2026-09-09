@@ -77,12 +77,17 @@ async function fixture(count: number) {
     if (failFirst) {
       const failed = await app.inject({ method: "POST", url: `/internal/channel/outbound/${outboundId}/failed`, headers, payload: { processing_token: token, error_code: "transport_timeout" } });
       assert.equal(failed.statusCode, 200, failed.body);
+      assert.equal(failed.json<{ id: string; status: string }>().status, "pending");
       const unshown = await query<{ count: number }>(
         `SELECT COUNT(*)::integer AS count FROM matches m
          JOIN channel_outbound_message_matches r ON r.match_id = m.id
          WHERE r.channel_outbound_message_id = $1 AND m.shown_at IS NOT NULL`, [outboundId],
       );
       assert.equal(unshown.rows[0].count, 0);
+      // Retry backoff is intentionally real in production. Move this fixture
+      // past its schedule so the test can exercise the second delivery
+      // without sleeping for 30 seconds.
+      await query("UPDATE channel_outbound_messages SET next_attempt_at = NOW() - INTERVAL '1 second' WHERE id = $1", [outboundId]);
       token = await claim();
     }
     const sent = await app.inject({ method: "POST", url: `/internal/channel/outbound/${outboundId}/sent`, headers, payload: { processing_token: token, provider_message_id: randomUUID() } });

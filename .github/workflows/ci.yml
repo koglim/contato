@@ -81,6 +81,28 @@ jobs:
           $$;
           SQL
 
+      - name: Verify migration 016 before PostgreSQL integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'channel_outbound_messages' AND column_name = 'next_attempt_at'
+            ) THEN
+              RAISE EXCEPTION 'channel_outbound_messages next_attempt_at is missing before integration tests';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE tablename = 'channel_outbound_messages'
+                 AND indexname = 'channel_outbound_messages_pending_next_attempt_idx'
+            ) THEN
+              RAISE EXCEPTION 'pending retry index is missing before integration tests';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 
@@ -178,6 +200,24 @@ jobs:
           $$;
           SQL
 
+      - name: Verify migration 016 protected rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          INSERT INTO channel_outbound_messages
+            (id, purpose, provider, recipient_phone_e164, text_content, next_attempt_at)
+          VALUES
+            ('00000000-0000-0000-0000-000000000016', 'professional_contact_notification', 'test', '+5566900000016', 'retry rollback fixture', NOW() + INTERVAL '1 minute');
+          SQL
+          set +e
+          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down 2>&1)
+          rollback_status=$?
+          set -e
+          echo "$rollback_output"
+          test "$rollback_status" -ne 0
+          echo "$rollback_output" | grep -q 'OUTBOUND_RETRY_ROLLBACK_BLOCKED'
+          echo "$rollback_output" | grep -q 'P0016'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DELETE FROM channel_outbound_messages WHERE id = '00000000-0000-0000-0000-000000000016'"
+
       - name: Create rollback regression fixture
         run: |
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
@@ -231,6 +271,21 @@ jobs:
              SET status = 'cancelled',
                  pending_slot = NULL
            WHERE id = '00000000-0000-0000-0000-000000000002';
+          SQL
+
+      - name: Roll back migration 016 with compatible data
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
+      - name: Verify migration 016 rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'channel_outbound_messages' AND column_name = 'next_attempt_at')
+              OR to_regclass('channel_outbound_messages_pending_next_attempt_idx') IS NOT NULL THEN
+              RAISE EXCEPTION 'migration 016 schema remained after rollback';
+            END IF;
+          END $$;
           SQL
 
       - name: Roll back migration 015 with compatible data
@@ -376,7 +431,7 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 015
+      - name: Reapply migrations 008 through 016
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
       - name: Test PostgreSQL integrations after reapply

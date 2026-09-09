@@ -7,6 +7,7 @@ const internalApiKey = "test-internal-key";
 const outboundId = "11111111-1111-4111-8111-111111111111";
 
 class FakeOutbox implements ChannelOutboundService {
+  next = false;
   async claim() {
     return {
       kind: "response" as const,
@@ -19,7 +20,10 @@ class FakeOutbox implements ChannelOutboundService {
   }
   async markSent() { return { kind: "response" as const, response: { id: outboundId, status: "sent" as const } }; }
   async markFailed() { return { kind: "response" as const, response: { id: outboundId, status: "failed" as const } }; }
-  async claimNextPending() { return { kind: "outbound_queue_empty" as const }; }
+  async claimNextPending() {
+    if (!this.next) return { kind: "outbound_queue_empty" as const };
+    return this.claim();
+  }
 }
 
 test("outbox routes require auth, validate input and expose recipient only on a claim", async () => {
@@ -45,9 +49,16 @@ test("outbox routes require auth, validate input and expose recipient only on a 
 });
 
 test("outbox route can claim the next pending message without an outbound id", async () => {
-  const app = buildApp({ channelOutboundService: new FakeOutbox(), internalApiKey });
+  const fake = new FakeOutbox();
+  const app = buildApp({ channelOutboundService: fake, internalApiKey });
   const response = await app.inject({ method: "POST", url: "/internal/channel/outbound/next/claim", headers: { "x-internal-key": internalApiKey } });
   assert.equal(response.statusCode, 204);
   assert.equal(response.body, "");
+  fake.next = true;
+  const claim = await app.inject({ method: "POST", url: "/internal/channel/outbound/next/claim", headers: { "x-internal-key": internalApiKey } });
+  assert.equal(claim.statusCode, 200);
+  assert.equal(claim.json().id, outboundId);
+  assert.equal(claim.json().purpose, "customer_reply");
+  assert.equal(claim.json().recipient_phone_e164, "+5566999999999");
   await app.close();
 });

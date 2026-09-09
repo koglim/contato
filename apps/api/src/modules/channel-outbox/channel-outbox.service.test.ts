@@ -2,16 +2,25 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { DefaultChannelOutboundService } from "./channel-outbox.service.js";
+import { OUTBOX_MAX_ATTEMPTS, outboxAttemptIsDeadLetter, outboxRetryBackoffSeconds } from "./channel-outbox.retry.js";
 import type { ChannelOutboundMessageRecord, ChannelOutboundMessageRepository } from "./channel-outbox.types.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const inboundId = "22222222-2222-4222-8222-222222222222";
 
+test("outbox retry policy uses the bounded exponential schedule", () => {
+  assert.deepEqual([1, 2, 3, 4, 5].map(outboxRetryBackoffSeconds), [30, 60, 120, 240, 480]);
+  assert.equal(outboxRetryBackoffSeconds(0), 30);
+  assert.equal(outboxRetryBackoffSeconds(99), 480);
+  assert.equal(outboxAttemptIsDeadLetter(4), false);
+  assert.equal(outboxAttemptIsDeadLetter(5), true);
+});
+
 function record(overrides: Partial<ChannelOutboundMessageRecord> = {}): ChannelOutboundMessageRecord {
   return {
     id, channelInboundMessageId: inboundId, purpose: "customer_reply", provider: "test", recipientPhoneE164: "+5566999999999", messageType: "text",
     textContent: "Em qual cidade você precisa do atendimento?", status: "pending", processingToken: null,
-    processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, ...overrides,
+    processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, nextAttemptAt: null, ...overrides,
   };
 }
 
@@ -29,12 +38,20 @@ class FakeRepository implements ChannelOutboundMessageRepository {
   async claimNextPending(token: string) { return this.claim(id, token); }
   async markSent(_id: string, input: { processing_token: string; provider_message_id: string }) {
     if (!this.current || this.current.status !== "processing" || this.current.processingToken !== input.processing_token) return false;
-    this.current = { ...this.current, status: "sent", processingToken: null, processingStartedAt: null, providerMessageId: input.provider_message_id, lastErrorCode: null, sentAt: new Date() };
+    this.current = { ...this.current, status: "sent", processingToken: null, processingStartedAt: null, providerMessageId: input.provider_message_id, lastErrorCode: null, sentAt: new Date(), nextAttemptAt: null };
     return true;
   }
   async markFailed(_id: string, input: { processing_token: string; error_code: string }) {
     if (!this.current || this.current.status !== "processing" || this.current.processingToken !== input.processing_token) return false;
-    this.current = { ...this.current, status: "failed", processingToken: null, processingStartedAt: null, lastErrorCode: input.error_code };
+    const deadLetter = this.current.attemptCount >= OUTBOX_MAX_ATTEMPTS;
+    this.current = {
+      ...this.current,
+      status: deadLetter ? "failed" : "pending",
+      processingToken: null,
+      processingStartedAt: null,
+      lastErrorCode: input.error_code,
+      nextAttemptAt: deadLetter ? null : new Date(Date.now() + outboxRetryBackoffSeconds(this.current.attemptCount) * 1000),
+    };
     return true;
   }
 }
@@ -91,4 +108,19 @@ test("claiming the next message treats an empty queue as a normal state", async 
   const current = context();
   current.repository.current = null;
   assert.deepEqual(await current.service.claimNextPending(), { kind: "outbound_queue_empty" });
+});
+
+test("transient failure can report pending and the fifth failure remains dead-lettered", async () => {
+  const current = context();
+  await current.service.claim(id);
+  const token = current.repository.current?.processingToken;
+  assert.ok(token);
+  assert.deepEqual(await current.service.markFailed(id, { processing_token: token!, error_code: "temporary_failure" }), {
+    kind: "response", response: { id, status: "pending" },
+  });
+  assert.ok(current.repository.current?.nextAttemptAt);
+  current.repository.current = { ...current.repository.current!, status: "processing", processingToken: "retry-token", attemptCount: OUTBOX_MAX_ATTEMPTS };
+  assert.deepEqual(await current.service.markFailed(id, { processing_token: "retry-token", error_code: "permanent_failure" }), {
+    kind: "response", response: { id, status: "failed" },
+  });
 });

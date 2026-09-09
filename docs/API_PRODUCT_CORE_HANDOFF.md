@@ -24,6 +24,12 @@ Essa é a estratégia de **rollback protegido**, não uma deficiência. Em ambie
 
 CI distingue cenário A (erro específico esperado, rollback real bloqueado com fingerprints iguais antes/depois e fixtures vivas) e cenário B (dados legados compatíveis mantidos durante down 014 → 008, verificações, reaplicação e todas as integrações novamente). Qualquer erro diferente do esperado reprova A. Limpeza dos fixtures de A acontece somente depois da prova, não para viabilizar seu rollback.
 
+### Dispatcher Outbox e retry (migration 016)
+
+O Inbox continua processando respostas síncronas e criando uma Outbox `customer_reply` na mesma transação. Mensagens independentes, como `professional_contact_notification`, usam a mesma fila e o mesmo contrato de entrega, mas não exigem inbound. O consumidor separado chama `POST /internal/channel/outbound/next/claim` com `X-Internal-Key`; `200` contém somente o id da Outbox, destinatário, texto, `processing_token`, `purpose` e provider, enquanto `204` significa fila vazia. A claim usa `FOR UPDATE SKIP LOCKED`, lease recuperável e nunca mantém transação aberta durante o envio. Depois do transporte, o consumidor chama `/sent` ou `/failed` com o token correto.
+
+A migration 016 adiciona `next_attempt_at` e o índice parcial de pendências. Falhas transitórias deixam a mensagem `pending` com backoff central de 30/60/120/240/480 segundos; a quinta falha vira dead-letter. Mensagens `sent` não retornam à fila. O rollback é protegido por `P0016 / OUTBOUND_RETRY_ROLLBACK_BLOCKED` quando existem agendas preenchidas. Não há variável nova, chamada à Evolution pela API ou alteração n8n nesta etapa.
+
 ### Compatibilidade e operação
 
 Migration não inventa consentimento/snapshot/código para legado. Contatos antigos continuam sem notificação retroativa. Campos novos nulos significam ausência de evidência. Pool 20, página 3, teto 6, ranking fair-v1, comandos globais e endpoints atuais permanecem. Contrato compartilhado adiciona `consent_required`, `consent_declined` e código opcional no `selected`.
@@ -189,7 +195,7 @@ As variáveis existentes mantêm seus contratos e valores; `.env.example` não f
 
 Após revisão e autorização futura, executar migrations pendentes em ambiente de homologação com backup/plano de rollback. A 013 cria índices normais dentro da transação: em tabelas grandes, medir duração/locks e planejar janela ou migração operacional concorrente antes de produção. Não aplicar nada no EasyPanel apenas por causa deste handoff.
 
-Nenhuma ação n8n é necessária para o que foi implementado. O dispatcher geral ainda demandará um consumidor separado em etapa futura; manter o workflow atual por ID até essa integração ser autorizada. Gateway de pagamento, entrega efetiva de OTP e requisitos jurídicos de consentimento/retenção continuam decisões e integrações futuras.
+Nenhuma ação n8n é necessária para o que foi implementado. A API agora oferece o claim-next e o retry persistido para um consumidor separado; o workflow atual por ID permanece compatível e não foi alterado. A conexão desse consumidor ao n8n, gateway de pagamento, entrega efetiva de OTP e requisitos jurídicos de consentimento/retenção continuam integrações futuras.
 
 ## Backlog exato para continuação
 
@@ -221,7 +227,7 @@ OTP com hash, validade, consumo único, tentativas/cooldown/rate limit e proteç
 
 ### Etapa 8 — operação e privacidade
 
-`next_attempt_at`, backoff limitado, máximo de tentativas, dead-letter, recuperação individual interna e unicidade de negócio. Preservar endpoints por ID/n8n atual, claim estável com `SKIP LOCKED`, sem transação durante envio. Listagens paginadas/limitadas e métricas agregadas; rever logs de exceções PostgreSQL para impedir detalhes com PII. Retenção de mensagens, anonimização com integridade, moderação lógica e revogação de sessões. Validar com jurídico consentimento/retenção; não declarar conformidade LGPD absoluta. Sem Redis ou serviço externo desnecessário.
+Listagens paginadas/limitadas e métricas agregadas; rever logs de exceções PostgreSQL para impedir detalhes com PII. Retenção de mensagens, anonimização com integridade, moderação lógica e revogação de sessões. Validar com jurídico consentimento/retenção; não declarar conformidade LGPD absoluta. Sem Redis ou serviço externo desnecessário.
 
 ### Riscos adicionais a validar
 

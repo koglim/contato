@@ -18,6 +18,7 @@ function outboundRow(overrides: Record<string, unknown> = {}) {
     message_type: "text", text_content: "Em qual cidade você precisa do atendimento?", status: "pending",
     processing_token: null, processing_started_at: null, provider_message_id: null, attempt_count: 0,
     last_error_code: null, sent_at: null, ...overrides,
+    next_attempt_at: null,
   };
 }
 function fake(results: QueryResultRow[][]) {

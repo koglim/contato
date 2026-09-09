@@ -44,5 +44,5 @@ export const markChannelOutboundMessageFailedSchema = z.object({
 
 export const channelOutboundMessageMutationResponseSchema = z.object({
   id: z.string().uuid(),
-  status: z.enum(["sent", "failed"]),
+  status: z.enum(["sent", "pending", "failed"]),
 }).strict();

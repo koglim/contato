@@ -55,7 +55,10 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
   }
 
   async markFailed(id: string, input: MarkChannelOutboundMessageFailedInput): Promise<ChannelOutboundMutationOutcome> {
-    if (await this.repository.markFailed(id, input)) return { kind: "response", response: { id, status: "failed" } };
+    if (await this.repository.markFailed(id, input)) {
+      const current = await this.repository.findById(id);
+      return { kind: "response", response: { id, status: current?.status === "pending" ? "pending" : "failed" } };
+    }
     return this.mutationFailure(id);
   }
 

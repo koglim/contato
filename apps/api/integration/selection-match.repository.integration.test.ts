@@ -17,6 +17,9 @@ import { BILATERAL_NOTICE, BILATERAL_NOTICE_VERSION } from "../src/modules/bilat
 
 type Fixture = {
   customerId: string;
+  customerPhone: string;
+  firstProfessionalPhone: string;
+  secondProfessionalPhone: string;
   conversationId: string;
   searchRequestId: string;
   matchIds: [string, string];
@@ -24,6 +27,12 @@ type Fixture = {
   inboundKey: (text: string) => Promise<string>;
   cleanup: () => Promise<void>;
 };
+
+function phoneFromId(id: string) {
+  const value = BigInt(`0x${id.replaceAll("-", "").slice(0, 12)}`);
+  const subscriber = ((value % 900_000_000n) + 100_000_000n).toString();
+  return `+5566${subscriber}`;
+}
 
 async function createFixture(legacy = false): Promise<Fixture> {
   const customerId = randomUUID();
@@ -37,16 +46,19 @@ async function createFixture(legacy = false): Promise<Fixture> {
   const secondMatchId = randomUUID();
   const firstProfessionalServiceId = randomUUID();
   const secondProfessionalServiceId = randomUUID();
+  const customerPhone = phoneFromId(customerId);
+  const firstProfessionalPhone = phoneFromId(firstProfessionalId);
+  const secondProfessionalPhone = phoneFromId(secondProfessionalId);
 
-  await query(`INSERT INTO customers (id, phone_e164) VALUES ($1, $2)`, [customerId, "+5566999999999"]);
+  await query(`INSERT INTO customers (id, phone_e164) VALUES ($1, $2)`, [customerId, customerPhone]);
   await query(`INSERT INTO service_categories (id, name, slug) VALUES ($1, $2, $3)`, [categoryId, "Teste", `teste-${categoryId}`]);
   await query(`INSERT INTO services (id, category_id, name, slug) VALUES ($1, $2, $3, $4)`, [serviceId, categoryId, "Eletricista", `eletricista-${serviceId}`]);
   await query(
     `INSERT INTO professionals (id, display_name, slug, phone_e164)
      VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)`,
     [
-      firstProfessionalId, "Ana Eletricista", `ana-${firstProfessionalId}`, "+5566988888888",
-      secondProfessionalId, "Bia Eletricista", `bia-${secondProfessionalId}`, "+5566977777777",
+      firstProfessionalId, "Ana Eletricista", `ana-${firstProfessionalId}`, firstProfessionalPhone,
+      secondProfessionalId, "Bia Eletricista", `bia-${secondProfessionalId}`, secondProfessionalPhone,
     ],
   );
   await query(
@@ -73,30 +85,33 @@ async function createFixture(legacy = false): Promise<Fixture> {
     [firstMatchId, searchRequestId, firstProfessionalId, secondMatchId, secondProfessionalId],
   );
   const presentationInbound = await new PostgresChannelInboundMessageRepository().createOrFind({
-    provider: "bilateral-fixture", provider_message_id: randomUUID(), phone_e164: "+5566999999999",
+    provider: "bilateral-fixture", provider_message_id: randomUUID(), phone_e164: customerPhone,
     raw_text: "preciso de eletricista", country_code: "BR", limit: 2,
   });
   await query("UPDATE channel_inbound_messages SET customer_id = $2, conversation_id = $3, search_request_id = $4 WHERE id = $1",
     [presentationInbound.record.id, customerId, conversationId, searchRequestId]);
   const presentation = await query<{ id: string }>(`INSERT INTO channel_outbound_messages
     (channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id)
-    VALUES ($1, 'bilateral-fixture', '+5566999999999', $2, 'sent', NOW(), $3, 'fixture-sent') RETURNING id`,
-  [presentationInbound.record.id, legacy ? "1. Ana 2. Bia" : `1. Ana 2. Bia\n${BILATERAL_NOTICE}`, legacy ? null : BILATERAL_NOTICE_VERSION]);
+    VALUES ($1, 'bilateral-fixture', $4, $2, 'sent', NOW(), $3, 'fixture-sent') RETURNING id`,
+  [presentationInbound.record.id, legacy ? "1. Ana 2. Bia" : `1. Ana 2. Bia\n${BILATERAL_NOTICE}`, legacy ? null : BILATERAL_NOTICE_VERSION, customerPhone]);
   await query(`INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id)
     VALUES ($1, $2), ($1, $3)`, [presentation.rows[0].id, firstMatchId, secondMatchId]);
 
   return {
     customerId,
+    customerPhone,
+    firstProfessionalPhone,
+    secondProfessionalPhone,
     conversationId,
     searchRequestId,
     matchIds: [firstMatchId, secondMatchId],
     shownAt: [matches.rows[0]!.shown_at, matches.rows[1]!.shown_at],
     inboundKey: async (text) => (await new PostgresChannelInboundMessageRepository().createOrFind({ provider: "bilateral-fixture",
-      provider_message_id: randomUUID(), phone_e164: "+5566999999999", raw_text: text, country_code: "BR", limit: 2 })).record.id,
+      provider_message_id: randomUUID(), phone_e164: customerPhone, raw_text: text, country_code: "BR", limit: 2 })).record.id,
     cleanup: async () => {
       await query(`DELETE FROM channel_outbound_messages WHERE business_key IN
         (SELECT 'contact:' || id || ':initial' FROM contacts WHERE search_request_id = $1)`, [searchRequestId]);
-      await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = '+5566999999999'");
+      await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [customerPhone]);
       await query(`DELETE FROM contacts WHERE search_request_id = $1`, [searchRequestId]);
       await query(`DELETE FROM matches WHERE search_request_id = $1`, [searchRequestId]);
       await query(`DELETE FROM search_conversations WHERE id = $1`, [conversationId]);
@@ -281,12 +296,12 @@ test("channel inbox selects by professional name and replays the same inbound sa
     new DefaultMessagePresenter(), new PostgresChannelOutboundMessageRepository(),
   );
   const providerMessageId = `selection-${randomUUID()}`;
-  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: "+5566999999999", raw_text: "Ana Eletricista", country_code: "BR", limit: 2 };
+  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: fixture.customerPhone, raw_text: "Ana Eletricista", country_code: "BR", limit: 2 };
   try {
     const first = await inbox.receive(input);
     assert.equal(first.kind, "response");
     if (first.kind !== "response") return;
-    assert.match(first.response.reply_text, /\+5566988888888/u);
+    assert.match(first.response.reply_text, new RegExp(fixture.firstProfessionalPhone.replace("+", "\\+"), "u"));
     assert.equal(first.response.reply_text.includes(input.phone_e164), false);
     assert.equal(first.response.reply_text.includes(fixture.matchIds[0]), false);
     const duplicate = await inbox.receive(input);
@@ -333,7 +348,7 @@ test("channel inbox keeps questions active, then selects by name idempotently", 
   );
   const questionProviderMessageId = `selection-question-${randomUUID()}`;
   const selectionProviderMessageId = `selection-affirmative-${randomUUID()}`;
-  const question = { provider: "test", provider_message_id: questionProviderMessageId, phone_e164: "+5566999999999", raw_text: "A Ana atende domingo?", country_code: "BR", limit: 2 };
+  const question = { provider: "test", provider_message_id: questionProviderMessageId, phone_e164: fixture.customerPhone, raw_text: "A Ana atende domingo?", country_code: "BR", limit: 2 };
   const selection = { ...question, provider_message_id: selectionProviderMessageId, raw_text: "Ana" };
   try {
     const questionResult = await inbox.receive(question);
@@ -377,7 +392,7 @@ test("channel inbox keeps an inconsistent name and position from creating a cont
   );
   const inconsistentId = `selection-inconsistent-${randomUUID()}`;
   const validId = `selection-consistent-${randomUUID()}`;
-  const inconsistent = { provider: "test", provider_message_id: inconsistentId, phone_e164: "+5566999999999", raw_text: "Ana opção 2", country_code: "BR", limit: 2 };
+  const inconsistent = { provider: "test", provider_message_id: inconsistentId, phone_e164: fixture.customerPhone, raw_text: "Ana opção 2", country_code: "BR", limit: 2 };
   const valid = { ...inconsistent, provider_message_id: validId, raw_text: "Ana opção 1" };
   try {
     const rejected = await inbox.receive(inconsistent);
@@ -410,7 +425,7 @@ test("channel inbox recovers a completed selection after a crash before inbound 
   const selectionRepository = new PostgresSelectionMatchRepository();
   const inboundRepository = new PostgresChannelInboundMessageRepository();
   const providerMessageId = `crash-selection-${randomUUID()}`;
-  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: "+5566999999999", raw_text: "1", country_code: "BR", limit: 2 };
+  const input = { provider: "test", provider_message_id: providerMessageId, phone_e164: fixture.customerPhone, raw_text: "1", country_code: "BR", limit: 2 };
   const registered = await inboundRepository.createOrFind(input);
   const selected = await selectionRepository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "1", selectionKey: registered.record.id });
   assert.equal(selected.kind, "selected");
@@ -461,7 +476,7 @@ after(async () => {
   await closeDatabaseConnection();
 });
 
-function bilateralChannel(repository = new PostgresSelectionMatchRepository()) {
+function bilateralChannel(fixture: Pick<Fixture, "customerPhone">, repository = new PostgresSelectionMatchRepository()) {
   let searchCalls = 0;
   const router = new DefaultCustomerSearchRouter(new PostgresCustomerRepository(), new PostgresSearchConversationRepository(),
     { async start() { searchCalls += 1; throw new Error("unexpected search start"); },
@@ -471,7 +486,7 @@ function bilateralChannel(repository = new PostgresSelectionMatchRepository()) {
   const inbox = new DefaultChannelInboxService(new PostgresChannelInboundMessageRepository(), router,
     { processingLeaseSeconds: 60 }, new DefaultMessagePresenter(), new PostgresChannelOutboundMessageRepository());
   const receive = (rawText: string, providerMessageId = randomUUID()) => inbox.receive({ provider: "bilateral-test",
-    provider_message_id: providerMessageId, phone_e164: "+5566999999999", raw_text: rawText, country_code: "BR", limit: 2 });
+    provider_message_id: providerMessageId, phone_e164: fixture.customerPhone, raw_text: rawText, country_code: "BR", limit: 2 });
   return { receive, searchCalls: () => searchCalls };
 }
 
@@ -539,21 +554,21 @@ test("bilateral professional notification insert failure rolls back consent, con
 test("bilateral replay survives profile changes and sent messages never return to pending", async () => {
   const fixture = await createFixture();
   try {
-    const channel = bilateralChannel();
+    const channel = bilateralChannel(fixture);
     const messageId = randomUUID();
     const first = await channel.receive("1", messageId);
     assert.equal(first.kind, "response");
     if (first.kind !== "response") throw new Error("expected response");
     const contact = (await query<{ id: string; professional_id: string; bilateral_snapshot: Record<string, unknown> }>("SELECT id, professional_id, bilateral_snapshot FROM contacts WHERE search_request_id = $1", [fixture.searchRequestId])).rows[0];
     const notification = (await query<{ id: string; text_content: string }>("SELECT id, text_content FROM channel_outbound_messages WHERE business_key = $1", [`contact:${contact.id}:initial`])).rows[0];
-    assert.match(notification.text_content, /\+5566999999999/u);
-    assert.doesNotMatch(notification.text_content, /\+5566988888888|[0-9a-f]{8}-[0-9a-f-]{27}|score|ranking/iu);
+    assert.match(notification.text_content, new RegExp(fixture.customerPhone.replace("+", "\\+"), "u"));
+    assert.doesNotMatch(notification.text_content, new RegExp(`${fixture.firstProfessionalPhone.replace("+", "\\+")}|[0-9a-f]{8}-[0-9a-f-]{27}|score|ranking`, "iu"));
     await markFixtureMessageSent(first.response.outbound.id);
     await markFixtureMessageSent(notification.id);
-    await query("UPDATE professionals SET display_name = 'Nome alterado', phone_e164 = '+5566966666666' WHERE id = $1", [contact.professional_id]);
+    await query("UPDATE professionals SET display_name = 'Nome alterado', phone_e164 = $2 WHERE id = $1", [contact.professional_id, phoneFromId(randomUUID())]);
     const recovered = await new PostgresSelectionMatchRepository().findSelectedByCustomerAndSelectionKey(fixture.customerId, first.response.message_id);
     assert.equal(recovered?.professionalDisplayName, "Ana Eletricista");
-    assert.equal(recovered?.professionalPhoneE164, "+5566988888888");
+    assert.equal(recovered?.professionalPhoneE164, fixture.firstProfessionalPhone);
     const replay = await channel.receive("1", messageId);
     if (replay.kind !== "response") throw new Error("expected replay");
     assert.equal(replay.response.reply_text, first.response.reply_text);
@@ -570,26 +585,26 @@ test("bilateral replay survives profile changes and sent messages never return t
 test("legacy selection requires delivered consent prompt, survives restart and confirms exactly once", async () => {
   const fixture = await createFixture(true);
   try {
-    const first = await bilateralChannel().receive("Ana");
+    const first = await bilateralChannel(fixture).receive("Ana");
     if (first.kind !== "response") throw new Error("expected consent prompt");
     assert.equal(first.response.result.route, "selection");
     assert.ok(first.response.reply_text.includes(BILATERAL_NOTICE));
     assert.doesNotMatch(first.response.reply_text, /\+5566/u);
     assert.equal((await bilateralCounts(fixture)).contacts, 0);
-    const premature = await bilateralChannel().receive("sim");
+    const premature = await bilateralChannel(fixture).receive("sim");
     if (premature.kind !== "response") throw new Error("expected pending consent");
     assert.doesNotMatch(premature.response.reply_text, /\+5566/u);
     assert.equal((await bilateralCounts(fixture)).contacts, 0);
     // Original prompt stays unsent; a delivered retry for the same choice must work.
     await markFixtureMessageSent(premature.response.outbound.id);
-    const ambiguous = await bilateralChannel().receive("sim?");
+    const ambiguous = await bilateralChannel(fixture).receive("sim?");
     if (ambiguous.kind !== "response") throw new Error("expected clarification");
     assert.equal((await bilateralCounts(fixture)).contacts, 0);
     const confirmationId = randomUUID();
-    const confirmed = await bilateralChannel().receive("pode compartilhar", confirmationId);
+    const confirmed = await bilateralChannel(fixture).receive("pode compartilhar", confirmationId);
     if (confirmed.kind !== "response") throw new Error("expected selection");
-    assert.match(confirmed.response.reply_text, /\+5566988888888/u);
-    const replay = await bilateralChannel().receive("pode compartilhar", confirmationId);
+    assert.match(confirmed.response.reply_text, new RegExp(fixture.firstProfessionalPhone.replace("+", "\\+"), "u"));
+    const replay = await bilateralChannel(fixture).receive("pode compartilhar", confirmationId);
     if (replay.kind !== "response") throw new Error("expected replay");
     assert.equal(replay.response.outbound.id, confirmed.response.outbound.id);
     assert.equal(replay.response.reply_text, confirmed.response.reply_text);
@@ -603,7 +618,7 @@ test("legacy selection requires delivered consent prompt, survives restart and c
 test("legacy refusal and wrong-customer confirmation never share phones or create a contact", async () => {
   const fixture = await createFixture(true);
   try {
-    const channel = bilateralChannel();
+    const channel = bilateralChannel(fixture);
     const prompt = await channel.receive("1");
     if (prompt.kind !== "response") throw new Error("expected prompt");
     await markFixtureMessageSent(prompt.response.outbound.id);
@@ -615,7 +630,7 @@ test("legacy refusal and wrong-customer confirmation never share phones or creat
     if (refused.kind !== "response") throw new Error("expected refusal");
     assert.match(refused.response.reply_text, /não foram compartilhados/u);
     assert.equal(await repo.getPendingConfirmation(fixture.customerId, fixture.conversationId), null);
-    const replay = await bilateralChannel().receive("não quero", refusalId);
+    const replay = await bilateralChannel(fixture).receive("não quero", refusalId);
     if (replay.kind !== "response") throw new Error("expected refusal replay");
     assert.equal(replay.response.outbound.id, refused.response.outbound.id);
     assert.deepEqual(await bilateralCounts(fixture), { contacts: 0, notifications: 0, selected: 0, status: "active", pending_slot: "selection" });
@@ -669,13 +684,13 @@ test("legacy consent prompt recovers after crash before inbound completion witho
   try {
     const messageId = randomUUID();
     const inbound = await new PostgresChannelInboundMessageRepository().createOrFind({ provider: "bilateral-test",
-      provider_message_id: messageId, phone_e164: "+5566999999999", raw_text: "1", country_code: "BR", limit: 2 });
+      provider_message_id: messageId, phone_e164: fixture.customerPhone, raw_text: "1", country_code: "BR", limit: 2 });
     const repository = new PostgresSelectionMatchRepository();
     assert.equal((await repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "1", selectionKey: inbound.record.id })).kind, "consent_required");
     const before = await new PostgresChannelOutboundMessageRepository().findByInboundMessageId(inbound.record.id);
     assert.ok(before);
     assert.equal((await new PostgresChannelInboundMessageRepository().findById(inbound.record.id))?.status, "received");
-    const channel = bilateralChannel();
+    const channel = bilateralChannel(fixture);
     const recovered = await channel.receive("1", messageId);
     if (recovered.kind !== "response") throw new Error("expected recovered prompt");
     assert.equal(recovered.response.outbound.id, before.id);
