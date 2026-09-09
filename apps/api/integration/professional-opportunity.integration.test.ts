@@ -7,7 +7,7 @@ import { after, test } from "node:test";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
 import { buildApp } from "../src/app.js";
 import { closeDatabaseConnection, query, withTransaction } from "../src/database/connection.js";
-import { createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
+import { BILATERAL_NOTICE, BILATERAL_NOTICE_VERSION, createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
 import { PostgresSearchConversationRepository } from "../src/modules/search-conversations/search-conversation.repository.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
 import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel-outbox/channel-outbox.repository.js";
@@ -77,7 +77,7 @@ async function fixture(other = false) {
       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)`, [professionalId,customerId,search,selectionKey,publicCode,JSON.stringify({...snapshot,public_code:publicCode,choice_inbound_id:selectionKey}),conversation]);
     return { conversation, publicCode };
   }
-  return { app, customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, conversations, countEvents, cleanup, addOpportunity };
+  return { app, choiceId, customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, conversations, countEvents, cleanup, addOpportunity };
 }
 
 test("decline reopens without another active search; events, replies and replay are atomic", async () => {
@@ -291,3 +291,53 @@ test("migration 015 refuses destructive rollback and events cannot be overwritte
     assert.deepEqual(await f.conversations(),before);
   } finally { await f.cleanup(); }
 });
+
+for (const page of [false, true]) {
+  test(`decline permits ${page ? "show-more and selection after delivery" : "an eligible already shown alternative"} through Inbox`, async () => {
+    const f = await fixture();
+    const category = randomUUID(), service = randomUUID(), alternative = randomUUID(), matchId = randomUUID(), noticeId = randomUUID();
+    const alternativePhone = phone();
+    try {
+      await query("INSERT INTO service_categories (id,name,slug) VALUES ($1::uuid,'Teste',$1::text)",[category]);
+      await query("INSERT INTO services (id,category_id,name,slug) VALUES ($1::uuid,$2,'Eletricista',$1::text)",[service,category]);
+      await query("UPDATE search_requests SET service_id=$2, location=ST_SetSRID(ST_MakePoint(-55.5,-11.86),4326)::geography,city='Sinop',state='MT' WHERE id=$1",[f.searchId,service]);
+      await query("INSERT INTO professionals (id,display_name,slug,phone_e164,status) VALUES ($1::uuid,'Bia',$1::text,$2,'active')",[alternative,alternativePhone]);
+      await query("INSERT INTO professional_services (professional_id,service_id) VALUES ($1,$2)",[alternative,service]);
+      await query(`INSERT INTO professional_service_areas (professional_id,city,state,country_code,center,radius_meters)
+        VALUES ($1,'Sinop','MT','BR',ST_SetSRID(ST_MakePoint(-55.5,-11.86),4326)::geography,40000)`,[alternative]);
+      await query("INSERT INTO matches (id,search_request_id,professional_id,rank_position,shown_at) VALUES ($1,$2,$3,$4,$5)",
+        [matchId,f.searchId,alternative,page ? 4 : 2,page ? null : new Date()]);
+      if (!page) {
+        await query("UPDATE channel_inbound_messages SET customer_id=$2,conversation_id=$3,search_request_id=$4 WHERE id=$1",[f.choiceId,f.customerId,f.conversationId,f.searchId]);
+        await query(`INSERT INTO channel_outbound_messages (id,channel_inbound_message_id,provider,recipient_phone_e164,text_content,status,sent_at,provider_message_id,bilateral_notice_version)
+          VALUES ($1,$2,'test',$3,$4,'sent',NOW(),'fixture-sent',$5)`,[noticeId,f.choiceId,f.customerPhone,BILATERAL_NOTICE,BILATERAL_NOTICE_VERSION]);
+        await query("INSERT INTO channel_outbound_message_matches (channel_outbound_message_id,match_id) VALUES ($1,$2)",[noticeId,matchId]);
+      }
+      await f.send(`recuso ${f.code}`);
+      if (page) {
+        const next = await f.send("mostrar mais",f.customerPhone);
+        assert.match(next.reply_text,/4\./);
+        assert.equal((await query("SELECT shown_at FROM matches WHERE id=$1",[matchId])).rows[0].shown_at,null);
+        const invisible = await f.send("Bia",f.customerPhone);
+        assert.equal(invisible.result.route === "selection" && invisible.result.result.kind === "selected",false);
+        const repo = new PostgresChannelOutboundMessageRepository(), token = randomUUID();
+        assert.ok(await repo.claim(next.outbound.id,token,60));
+        assert.equal(await repo.markSent(next.outbound.id,{processing_token:token,provider_message_id:randomUUID()}),true);
+      }
+      const selected = await f.send("Bia",f.customerPhone);
+      assert.equal(selected.result.route === "selection" && selected.result.result.kind,"selected");
+      const contacts = (await query("SELECT status FROM contacts WHERE search_request_id=$1 ORDER BY status::text",[f.searchId])).rows;
+      assert.deepEqual(contacts.map((c)=>c.status),["declined","requested"]);
+      assert.equal(await f.countEvents(),1);
+      assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE purpose='professional_contact_notification' AND recipient_phone_e164=$1",[alternativePhone])).rows.length,1);
+    } finally {
+      await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164=$1",[alternativePhone]);
+      await f.cleanup();
+      await query("DELETE FROM professional_service_areas WHERE professional_id=$1",[alternative]);
+      await query("DELETE FROM professional_services WHERE professional_id=$1",[alternative]);
+      await query("DELETE FROM professionals WHERE id=$1",[alternative]);
+      await query("DELETE FROM services WHERE id=$1",[service]);
+      await query("DELETE FROM service_categories WHERE id=$1",[category]);
+    }
+  });
+}
