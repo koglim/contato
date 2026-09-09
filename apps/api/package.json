@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src",
     "test": "tsx --test src/**/*.test.ts",
-    "test:integration": "tsx --test integration/**/*.test.ts",
+    "test:integration": "tsx --test --test-concurrency=1 integration/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

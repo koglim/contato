@@ -111,7 +111,7 @@ test("selection match repository returns an empty state when the search has no m
   });
   assert.match(context.calls[0]!.text, /FILTER \(WHERE rank_position IS NOT NULL\).*total_match_count/us);
   assert.match(context.calls[0]!.text, /rank_position IS NOT NULL AND shown_at IS NOT NULL/u);
-  assert.deepEqual(context.calls[0]!.values, [searchRequestId]);
+  assert.deepEqual(context.calls[0]!.values, [searchRequestId, 6]);
   assert.doesNotMatch(context.calls[0]!.text, /UPDATE|INSERT|DELETE|shown_at\s*=|selected_at\s*=/u);
 });
 
@@ -217,7 +217,8 @@ test("selection match repository lists ordered unshown matches within the reques
   assert.match(context.calls[0]!.text, /matches.rank_position IS NOT NULL/u);
   assert.match(context.calls[0]!.text, /ORDER BY matches.rank_position ASC/u);
   assert.match(context.calls[0]!.text, /LIMIT \$2/u);
-  assert.deepEqual(context.calls[0]!.values, [searchRequestId, 2]);
+  assert.match(context.calls[0]!.text, /matches.rank_position <= \$3/u);
+  assert.deepEqual(context.calls[0]!.values, [searchRequestId, 2, 6]);
   assert.doesNotMatch(context.calls[0]!.text, /UPDATE|INSERT|DELETE|shown_at\s*=|selected_at\s*=/u);
 });
 

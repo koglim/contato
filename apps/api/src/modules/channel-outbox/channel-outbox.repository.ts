@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { MAX_PRESENTED_PER_SEARCH, PRESENTATION_PAGE_SIZE } from "../matching/matching-policy.js";
 import { query, withTransaction, type DatabaseClient, type SqlValue } from "../../database/connection.js";
 import type {
   ChannelOutboundMessageRecord,
@@ -77,17 +78,29 @@ export async function associateOutboundMessageMatches(
   const matchIds = [...new Set(input.matchIds)];
   if (matchIds.length === 0) return;
   if (!input.searchRequestId) throw new Error("A search request is required when associating outbound matches");
+  if (matchIds.length > PRESENTATION_PAGE_SIZE) throw new MatchReservationConflictError();
+
+  // Serialize reservations for this search, including disjoint pages computed
+  // from stale reads. Sending happens outside this short transaction.
+  await client.query("SELECT id FROM search_requests WHERE id = $1 FOR UPDATE", [input.searchRequestId]);
 
   const valid = await client.query<{ id: string }>(
     `SELECT id
        FROM matches
       WHERE search_request_id = $1
         AND rank_position IS NOT NULL
-        AND id = ANY($2::uuid[])`,
-    [input.searchRequestId, matchIds],
+        AND rank_position <= $3
+        AND shown_at IS NULL
+        AND id = ANY($2::uuid[])
+        AND NOT EXISTS (
+          SELECT 1 FROM matches pending
+          JOIN channel_outbound_message_matches reservation ON reservation.match_id = pending.id
+          WHERE pending.search_request_id = $1 AND pending.shown_at IS NULL
+        )`,
+    [input.searchRequestId, matchIds, MAX_PRESENTED_PER_SEARCH],
   );
   if (valid.rows.length !== matchIds.length) {
-    throw new Error("Outbound matches must belong to the ranked search request");
+    throw new MatchReservationConflictError();
   }
 
   try {

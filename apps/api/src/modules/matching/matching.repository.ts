@@ -1,5 +1,6 @@
 import type { MatchingSearchInput, MatchingSearchResponse } from "@contatocerto/shared";
 import { withTransaction } from "../../database/connection.js";
+import { CANDIDATE_POOL_SIZE, presentationPageSize } from "./matching-policy.js";
 import { MATCHING_AVAILABILITY_FRESHNESS_MINUTES, type MatchingRepository, type MatchingSearchOutcome, type SearchExecutionContext } from "./matching.types.js";
 
 type ServiceRow = { id: string; name: string; slug: string; is_active: boolean };
@@ -22,7 +23,7 @@ function responseFor(input: MatchingSearchInput, service: ServiceRow, searchRequ
   return {
     search_request_id: searchRequestId, status: matches.length ? "matched" : "ready", service: { id: service.id, name: service.name, slug: service.slug },
     location: { latitude: input.latitude, longitude: input.longitude, city: input.city ?? null, state: input.state ?? null, neighborhood: input.neighborhood ?? null },
-    matches, meta: { count: matches.length, limit: input.limit, availability_freshness_minutes: MATCHING_AVAILABILITY_FRESHNESS_MINUTES },
+    matches, meta: { count: matches.length, limit: presentationPageSize(input.limit), availability_freshness_minutes: MATCHING_AVAILABILITY_FRESHNESS_MINUTES },
   };
 }
 
@@ -52,7 +53,7 @@ export class PostgresMatchingRepository implements MatchingRepository {
              professional_service_areas.city AS service_area_city, professional_service_areas.state AS service_area_state,
              professional_service_areas.radius_meters,
              ROUND(ST_Distance(professional_service_areas.center, requested_location.point))::integer AS distance_meters,
-             (professionals.is_available_now = TRUE AND professionals.available_now_updated_at >= NOW() - ($4 * INTERVAL '1 minute')) AS effective_available_now,
+             COALESCE(professionals.is_available_now = TRUE AND professionals.available_now_updated_at >= NOW() - ($4 * INTERVAL '1 minute'), FALSE) AS effective_available_now,
              ROW_NUMBER() OVER (PARTITION BY professionals.id ORDER BY ST_Distance(professional_service_areas.center, requested_location.point) ASC, professional_service_areas.id ASC) AS area_position
            FROM professionals
            JOIN professional_services ON professional_services.professional_id = professionals.id
@@ -68,7 +69,7 @@ export class PostgresMatchingRepository implements MatchingRepository {
          SELECT * FROM candidate_areas WHERE area_position = 1
          ORDER BY effective_available_now DESC, distance_meters ASC, is_verified DESC, professional_id ASC
          LIMIT $5`,
-        [input.latitude, input.longitude, input.service_id, MATCHING_AVAILABILITY_FRESHNESS_MINUTES, input.limit],
+        [input.latitude, input.longitude, input.service_id, MATCHING_AVAILABILITY_FRESHNESS_MINUTES, CANDIDATE_POOL_SIZE],
       );
       const candidates = candidatesResult.rows;
       const matchIds: string[] = [];
@@ -82,7 +83,8 @@ export class PostgresMatchingRepository implements MatchingRepository {
         matchIds.push(result.rows[0].id);
       }
       if (candidates.length) await client.query("UPDATE search_requests SET status = 'matched' WHERE id = $1", [searchRequestId]);
-      return { kind: "success", response: responseFor(input, service, searchRequestId, candidates, matchIds) };
+      const pageSize = presentationPageSize(input.limit);
+      return { kind: "success", response: responseFor(input, service, searchRequestId, candidates.slice(0, pageSize), matchIds.slice(0, pageSize)) };
     });
   }
 }

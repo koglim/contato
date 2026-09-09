@@ -218,7 +218,9 @@ Rota interna protegida por `X-Internal-Key` para executar o matching quando o se
 }
 ```
 
-`raw_text`, `service_id`, `latitude` e `longitude` são obrigatórios. O texto aceita até 2.000 caracteres; latitude e longitude precisam estar nas faixas geográficas válidas. Os metadados de localização são opcionais e `limit` é opcional, com padrão `3` e intervalo de `1` a `10`.
+`raw_text`, `service_id`, `latitude` e `longitude` são obrigatórios. O texto aceita até 2.000 caracteres; latitude e longitude precisam estar nas faixas geográficas válidas. Os metadados de localização são opcionais e `limit` é opcional, com padrão `3` e intervalo aceito de `1` a `10`. Por política de apresentação, a resposta limita a página a `min(limit, 3)` e informa esse valor em `meta.limit`; valores 1 e 2 continuam funcionando. O matching persiste até 20 candidatos independentemente de `limit`, sem expor o pool completo na resposta. Esta é uma limitação intencional de quantidade para clientes legados que pediam 4–10 resultados, sem mudança de formato.
+
+No canal, “mostrar mais” usa a mesma busca e apresenta no máximo seis profissionais ao todo. Uma página pendente retorna `409 selection_show_more_pending`, sem outra Outbox; pode ser tentada novamente após envio. Ao esgotar as posições apresentáveis, retorna seleção `no_more_options`, mesmo que o pool auditável contenha mais candidatos. Mensagens de um único dígito são aceitas pela Inbox e pelo Customer Search; executar seleção ainda exige chave idempotente interna.
 
 Em uma única transação, a API valida que o serviço existe e está ativo, registra um `search_request` com o ponto PostGIS, identifica os profissionais elegíveis e persiste um `match` para cada resultado. Um profissional só entra se estiver ativo, oferecer o serviço de forma ativa e possuir uma área ativa cujo raio contenha o ponto consultado. Quando possui várias áreas elegíveis, somente a mais próxima é considerada.
 

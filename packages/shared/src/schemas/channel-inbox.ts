@@ -15,7 +15,7 @@ export const channelInboundMessageRequestSchema = z.object({
   provider: z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9_-]{0,62}$/u),
   provider_message_id: z.string().trim().min(1).max(255),
   phone_e164: phoneE164Schema,
-  raw_text: z.string().trim().min(2).max(500),
+  raw_text: z.string().trim().min(1).max(500),
   country_code: z.string().trim().length(2).transform((value) => value.toUpperCase()).default("BR"),
   limit: z.number().int().min(1).max(10).default(3),
 }).strict();

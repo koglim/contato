@@ -1,6 +1,6 @@
 # Modelo de dados
 
-Esta primeira versão representa o núcleo persistente do marketplace, sem implementar busca, ranking, autenticação ou canais de comunicação.
+O modelo sustenta busca, matching, conversas, Inbox/Outbox e seleção idempotente. Assinaturas, autenticação profissional e o ciclo completo de atendimento ainda exigem implementação.
 
 ## Entidades
 
@@ -33,7 +33,9 @@ Os pedidos podem continuar existindo sem cliente ou serviço associado, usando `
 
 ## Seleção pendente
 
-`search_conversations` pode aguardar `location`, `service` ou `selection`. Uma conversa ativa em `selection` referencia obrigatoriamente o `search_request` que originou sua lista de `matches`; as demais conversas ativas ainda não têm esse vínculo. A operação interna de seleção aceita somente um match exibido, com posição válida e ainda não selecionado, e conclui atomicamente a conversa, o match, a busca e o `contact` solicitado. O fluxo público da API ainda não chama essa operação.
+`search_conversations` pode aguardar `location`, `service` ou `selection`. Uma conversa ativa em `selection` referencia obrigatoriamente o `search_request` que originou sua lista de `matches`; as demais conversas ativas ainda não têm esse vínculo. O fluxo da Inbox seleciona somente um match exibido, com posição válida e ainda não selecionado, concluindo atomicamente conversa, match, busca e `contact`.
+
+O matching persiste um pool de até 20 `matches` por busca, com rank absoluto. A primeira resposta contém até 3; novas apresentações só podem reservar ranks até 6. Candidatos 7–20 ficam para auditoria, não entram em `hasMore` e não podem ser escolhidos sem `shown_at`. Contagem do pool não significa exposição. A reserva de página serializa pela linha de `search_requests` e pelo índice único de `channel_outbound_message_matches.match_id`; não há nova migration nesta etapa.
 
 ## Localização e busca futura
 
