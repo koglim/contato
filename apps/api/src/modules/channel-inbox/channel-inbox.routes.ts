@@ -45,7 +45,7 @@ export const channelInboxRoutes: FastifyPluginAsync<ChannelInboxRoutesOptions> =
         const mapped = geocodingError(error);
         return reply.code(mapped.status).send({ error: mapped.code });
       }
-      app.log.error(error, "Failed to process channel inbound message");
+      app.log.error({ code: "internal_error" }, "Failed to process channel inbound message");
       return reply.code(500).send({ error: "internal_error" });
     }
   });

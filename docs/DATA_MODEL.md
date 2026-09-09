@@ -1,5 +1,19 @@
 # Modelo de dados
 
+## Evolução 014 — oportunidade bilateral e rollback protegido
+
+- `contacts.public_code`: código canônico `CC-` + oito caracteres aleatórios, único por `lower(public_code)`. Sem sequência, UUID ou PII. Novos contatos bilaterais têm uma única oportunidade por busca, protegida por índice parcial.
+- `contacts.bilateral_snapshot`: JSONB mínimo, validado por schema estrito antes da escrita. Serviço, local disponível, bairro explicitamente informado, resumo sanitizado (160 caracteres), nome público, dois telefones autorizados, código, versão do aviso, Outbox do aviso, inbound da escolha e momentos de envio/escolha/consentimento. `consent_method` distingue escolha após aviso e confirmação legada.
+- `contacts.selection_conversation_id`: vínculo auditável com a conversa; `selection_key` continua identificando o inbound que efetivou a escolha/confirmou o legado. Trigger impede alteração do snapshot, código e identidade de uma oportunidade bilateral já persistida. Edição posterior de perfil não muda o replay.
+- `channel_outbound_messages.business_key`: chave única parcial de idempotência de negócio. Notificação inicial usa `contact:<UUID interno>:initial`; essa chave nunca aparece no texto público. Replay do mesmo conteúdo não escreve nem muda o estado. As finalidades da 012 permanecem intactas.
+- `channel_outbound_messages.bilateral_notice_version`: nulo em apresentações sem aviso auditável; novas apresentações/solicitações de consentimento usam `bilateral-v1`. O conteúdo permanece na própria Outbox. Consentimento exige confirmação `sent` anterior ao inbound autorizador e validação dos vínculos.
+- `search_conversations.bilateral_pending`: estado de confirmação legada dentro de `selection`, com match/posição escolhidos, nome público limitado, chave/momento da escolha e Outbox/versão do prompt. Não contém telefones. Recusa limpa a pendência; cancelamento/expiração tornam a conversa inativa. Nenhuma confirmação de contexto inativo pode criar contato.
+- `channel_inbound_messages.bilateral_response`: resultado público estrito de pedido de confirmação/recusa, para recuperação após crash antes de `processed`. Sem telefones. O resultado final selecionado vem do contato/snapshot e a resposta textual vem da Outbox já criada atomicamente.
+
+**Legados:** a migration não preenche aviso, consentimento, snapshot ou código em registros anteriores. Campos nulos representam ausência de evidência, não consentimento presumido. Contatos antigos não geram notificação bilateral retroativa. Apresentações antigas exigem confirmação explícita no próximo ato de escolha.
+
+**Barreira operacional:** antes de remover qualquer coluna, o down 014 verifica todos os dados novos e também `contacts.selection_key` e Outboxes sem inbound, incompatíveis com downs históricos 010/012. Se presentes, aborta com `P0014 / BILATERAL_ROLLBACK_BLOCKED`, sem remover/transformar nada. Sem arquivo auxiliar, shadow table, inbound fictício ou reenfileiramento. Usar roll-forward ou restauração integral de backup; não apagar dados para forçar downgrade. Somente ambientes compatíveis admitem rollback completo 014 → 008. CI prova os dois cenários separadamente e repete integrações após reaplicar.
+
 O modelo sustenta busca, matching, conversas, Inbox/Outbox e seleção idempotente. Assinaturas, autenticação profissional e o ciclo completo de atendimento ainda exigem implementação.
 
 ## Entidades

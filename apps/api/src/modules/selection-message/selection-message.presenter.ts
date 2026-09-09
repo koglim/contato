@@ -1,4 +1,5 @@
 import type { SelectionMessageContract } from "@contatocerto/shared";
+import { BILATERAL_NOTICE } from "../bilateral-contact/bilateral-contact.policy.js";
 
 export function presentSelectionMessage(contract: SelectionMessageContract): string | null {
   switch (contract.kind) {
@@ -10,8 +11,13 @@ export function presentSelectionMessage(contract: SelectionMessageContract): str
           contract.service_name,
           `📞 ${contract.professional_phone_e164}`,
         ].join("\n"),
+        ...(contract.public_code ? [`Código: ${contract.public_code}`] : []),
         "Agora você pode entrar em contato diretamente.",
       ].join("\n\n");
+    case "consent_required":
+      return `Você escolheu ${contract.professional_name}. ${BILATERAL_NOTICE}\n\nPosso compartilhar? Responda “sim” para confirmar ou “não” para voltar às opções.`;
+    case "consent_declined":
+      return "Tudo bem, os telefones não foram compartilhados. Você pode escolher outra opção ou enviar “cancelar”.";
     case "invalid_selection":
       return contract.visible_match_count > 0
         ? `Escolha um número de 1 a ${contract.visible_match_count}.`
@@ -37,7 +43,7 @@ export function presentSelectionMessage(contract: SelectionMessageContract): str
         match.distance_meters === null ? null : `📍 ${match.distance_meters >= 1000 ? `${(match.distance_meters / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km` : `${match.distance_meters} m`}`,
         `💰 ${match.price_mode === "quote" ? "Sob consulta" : money(match.price_from_cents)}`,
       ].filter((value): value is string => value !== null).join("\n"));
-      return ["Mais opções para você 👇", ...entries, "Responda com o número ou com o nome do profissional que você quer escolher."].join("\n\n");
+      return ["Mais opções para você 👇", ...entries, BILATERAL_NOTICE, "Responda com o número ou com o nome do profissional que você quer escolher."].join("\n\n");
     }
     case "global_command":
       return null;

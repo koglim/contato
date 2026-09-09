@@ -35,7 +35,7 @@ test("outbox repository recovers one legacy outbound, associates ranked matches,
   assert.equal(recovered.id, id);
   assert.match(current.calls[1]!.text, /INSERT INTO channel_outbound_messages/u);
   assert.match(current.calls[1]!.text, /ON CONFLICT \(channel_inbound_message_id\)/u);
-  assert.deepEqual(current.calls[1]!.values, [inboundId, "customer_reply", "test", "+5566999999999", "Olá"]);
+  assert.deepEqual(current.calls[1]!.values, [inboundId, "customer_reply", "test", "+5566999999999", "Olá", null]);
   assert.match(current.calls[2]!.text, /search_requests.*FOR NO KEY UPDATE/u);
   assert.match(current.calls[3]!.text, /search_request_id = \$1/u);
   assert.match(current.calls[3]!.text, /rank_position IS NOT NULL/u);
@@ -76,6 +76,7 @@ test("outbox repository creates an independent purpose and atomically claims the
     [row({ id: randomUUID(), status: "processing", processing_token: token, processing_started_at: new Date(), attempt_count: 3 })],
   ]);
   const independent = await current.repository.createIndependent({
+    businessKey: `contact:${id}:initial`,
     purpose: "professional_contact_notification",
     provider: "test",
     recipientPhoneE164: "+5566999999999",
@@ -84,7 +85,7 @@ test("outbox repository creates an independent purpose and atomically claims the
   assert.equal(independent.purpose, "professional_contact_notification");
   assert.equal(independent.channelInboundMessageId, null);
   assert.match(current.calls[0]!.text, /purpose/u);
-  assert.match(current.calls[0]!.text, /VALUES \(NULL, \$1, \$2, \$3, \$4\)/u);
+  assert.match(current.calls[0]!.text, /VALUES \(NULL, \$1, \$2, \$3, \$4, \$5\)/u);
 
   const claimed = await current.repository.claimNextPending(token, 60);
   assert.equal(claimed?.status, "processing");

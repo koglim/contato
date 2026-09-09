@@ -48,7 +48,7 @@ export const customerSearchRoutes: FastifyPluginAsync<CustomerSearchRoutesOption
         const mapped = geocodingError(error);
         return reply.code(mapped.status).send({ error: mapped.code });
       }
-      app.log.error(error, "Failed to route customer search message");
+      app.log.error({ code: "internal_error" }, "Failed to route customer search message");
       return reply.code(500).send({ error: "internal_error" });
     }
   });

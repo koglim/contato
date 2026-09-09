@@ -54,3 +54,23 @@ test("dispatcher recovers an abandoned processing lease", { concurrency: false }
     await query(`DELETE FROM channel_outbound_messages WHERE id = $1`, [staleId]);
   }
 });
+
+test("independent business key serializes creation and replay preserves an already-sent message", async () => {
+  const repository = new PostgresChannelOutboundMessageRepository();
+  const businessKey = `contact:${randomUUID()}:initial`;
+  const input = { businessKey, purpose: "professional_contact_notification" as const, provider: "test",
+    recipientPhoneE164: "+5566988888888", textContent: "Oportunidade de teste" };
+  try {
+    const [first, second] = await Promise.all([repository.createIndependent(input), repository.createIndependent(input)]);
+    assert.equal(first.id, second.id);
+    const token = randomUUID();
+    await repository.claim(first.id, token, 60);
+    assert.equal(await repository.markSent(first.id, { processing_token: token, provider_message_id: "sent-once" }), true);
+    const before = await repository.findById(first.id);
+    assert.equal((await repository.createIndependent(input)).status, "sent");
+    assert.deepEqual(await repository.findById(first.id), before);
+    await assert.rejects(repository.createIndependent({ ...input, recipientPhoneE164: "+5566977777777" }), /idempotency conflict/u);
+    assert.deepEqual(await repository.findById(first.id), before);
+    assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE business_key = $1", [businessKey])).rows.length, 1);
+  } finally { await query("DELETE FROM channel_outbound_messages WHERE business_key = $1", [businessKey]); }
+});

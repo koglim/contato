@@ -248,13 +248,14 @@ test("new Inbox responses are validated before persistence", async () => {
 
 test("processed duplicate replays only a schema-validated stored result", async () => {
   const current = context();
+  current.outbox.current!.textContent = "Resposta original persistida";
   current.repository.created = false;
   current.repository.current = record({ status: "processed", result: routerResponse() });
   const outcome = await current.service.receive(input);
   assert.equal(outcome.kind, "response");
   if (outcome.kind === "response") {
     assert.equal(outcome.response.duplicate, true);
-    assert.equal(outcome.response.reply_text.startsWith("Não encontrei profissionais"), true);
+    assert.equal(outcome.response.reply_text, "Resposta original persistida");
     assert.equal(outcome.response.outbound.id, current.repository.outbound.id);
   }
   assert.equal(current.router.calls, 0);

@@ -1,4 +1,94 @@
-# API Product Core — checkpoint de 8 de setembro de 2026
+# API Product Core — contato bilateral
+
+## Rodada atual: `feat/bilateral-contact`
+
+Base exata: `a3135a7f2b6543ce069c1b0b65b0bf428272bbd6`. Sem merge, frontend, n8n, gateway, IA ou variável de ambiente nova. Esta rodada implementa somente a etapa 3; aceite/recusa profissional, avaliações, assinaturas e autenticação permanecem fora do escopo.
+
+### Jornada e decisões
+
+1. Cliente recebe página numerada com aviso curto `bilateral-v1`. Versão e conteúdo ficam na Outbox real; reserva não é exposição. `shown_at` só muda após `sent`.
+2. Escolha por número/nome após envio do aviso é consentimento suficiente, sem segunda pergunta. A transação valida ownership entre cliente, conversa, busca, match e apresentação.
+3. Em apresentação legada sem essa evidência, a escolha cria somente uma pendência e um prompt sem telefone. Estado persiste em `search_conversations.bilateral_pending`. Confirmação afirmativa após envio do prompt efetiva a oportunidade; recusa volta às opções. Perguntas/hipóteses não consentem. Cancelar/recomeçar mantêm prioridade e TTL não é renovado implicitamente.
+4. Contato, snapshot, código público, escolha, conclusão e as duas mensagens são atômicos. Cliente recebe dados do profissional e código; profissional recebe código, serviço/local disponíveis, resumo limitado e telefone do cliente. Sem IDs/ranking/PII desnecessária. Ainda não há comandos profissionais de aceite/recusa.
+5. UUID do inbound continua chave idempotente. Replay após crash encontra contato/snapshot mesmo com conversa concluída; resposta ao cliente já está na Outbox. Confirmação/recusa legada também possui recuperação persistida. Replays não criam outro contato nem notificação e preservam mensagens `sent`.
+
+Código: oito caracteres aleatórios seguros após `CC-`, índice único case-insensitive e retry limitado para colisões reais. Snapshot contém apenas dados autorizados/limitados e evidência versionada da escolha. Trigger impede sua alteração; edição de perfil não muda o resultado escolhido. `createIndependent` exige chave única de negócio, compara destinatário/finalidade/conteúdo e não executa UPDATE no replay.
+
+### Migration 014 e barreira operacional aprovada
+
+Não modificar o histórico aplicado 010/012. Não arquivar PII em tabelas auxiliares/shadow, não criar inbound fictício e não apagar dados para permitir downgrade.
+
+O down 014 adquire locks e faz preflight **antes de qualquer alteração destrutiva**. Se houver notificações independentes, chaves de idempotência, snapshots, códigos, consentimentos, pendências ou avisos auditáveis, aborta integralmente com `P0014 / BILATERAL_ROLLBACK_BLOCKED`. Dados, schema, histórico de migrations e estados de envio permanecem iguais; mensagens enviadas não voltam a pending.
+
+Essa é a estratégia de **rollback protegido**, não uma deficiência. Em ambiente com dados incompatíveis, usar correção evolutiva/roll-forward; quando realmente necessário, restauração integral de backup verificado e reconciliação dos envios externos. Não existe caminho parcial que esconda ou transforme PII.
+
+CI distingue cenário A (erro específico esperado, rollback real bloqueado com fingerprints iguais antes/depois e fixtures vivas) e cenário B (dados legados compatíveis mantidos durante down 014 → 008, verificações, reaplicação e todas as integrações novamente). Qualquer erro diferente do esperado reprova A. Limpeza dos fixtures de A acontece somente depois da prova, não para viabilizar seu rollback.
+
+### Compatibilidade e operação
+
+Migration não inventa consentimento/snapshot/código para legado. Contatos antigos continuam sem notificação retroativa. Campos novos nulos significam ausência de evidência. Pool 20, página 3, teto 6, ranking fair-v1, comandos globais e endpoints atuais permanecem. Contrato compartilhado adiciona `consent_required`, `consent_declined` e código opcional no `selected`.
+
+Aplicar migration 014 em homologação antes desta API, com backup verificado. Nenhuma alteração automática no EasyPanel foi feita. O consumidor por ID segue intacto; a fila profissional usa o dispatcher existente, mas conectar um consumidor n8n para notificações independentes continua uma ação separada. Não foi prometido envio externo nesta etapa.
+
+### Privacidade e riscos restantes
+
+Confirmar juridicamente a redação/base legal, finalidade e retenção do aviso, consentimento, snapshots, Outbox e backups; não se declara conformidade LGPD absoluta. Há minimização/sanitização de texto e isolamento por identidade, não detecção semântica infalível de toda PII em texto livre. Revisar configuração e acesso aos logs do próprio PostgreSQL. Erros das rotas afetadas não serializam exceções SQL com dados sensíveis.
+
+Um transportador pode aceitar o envio antes de uma queda impedir `/sent`; exactly-once externo continua dependendo de idempotência/reconciliação do transportador. Códigos aleatórios têm retry limitado, não espaço infinito. Política de expiração da conversa permanece; uma confirmação recebida antes de `sent` não autoriza compartilhamento.
+
+### Evidências da rodada
+
+- `59496835fd1aa2da9bdea5bc57dd920ed683a5ae`: migration/rollback protegido. [CI aprovado](https://github.com/koglim/contato/actions/runs/34303492772), com sete provas de bloqueio em PostgreSQL.
+- `2ff53a8b138bed6d43dec45bbc3eaea3b1fdd126`: integração bilateral; 235 API + 6 web passaram localmente. O [CI](https://github.com/koglim/contato/actions/runs/34304629613) identificou fixture `sent` sem `provider_message_id`, corrigida no checkpoint seguinte; esse run não é aprovação da etapa.
+- `ba75d1730e0d1176a40f7a5648360b75cf6a8b66`: [CI aprovado](https://github.com/koglim/contato/actions/runs/34304900527): 237 API, 6 web e 43 integrações antes e depois da reaplicação, nenhuma ignorada.
+- `9bad5ef72f3107ae7fa0570bd031739640ee17f6`: preservação dos vínculos de conversa/busca no replay após crash, timestamps comparados diretamente no PostgreSQL e confirmação por prompt repetido efetivamente enviado. Adicionada recuperação real do prompt legado antes de `processed`. [CI aprovado](https://github.com/koglim/contato/actions/runs/34305532350): 237 API + 6 web; 44 integrações em sete arquivos, antes e depois da reaplicação; sete cenários de bloqueio protegido e rollback compatível 014 → 008 aprovados, sem testes ignorados.
+- Validações locais da revisão: `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test` (237 API + 6 web), lint explícito da migration 014, `git diff --check` e 39 testes direcionados aprovados. Logs completos locais ficaram no diretório temporário da máquina, fora do repositório.
+- Os resultados finais, contagens e link do SHA final devem ser conferidos na entrega desta rodada. PostgreSQL/PostGIS e Docker não estão disponíveis localmente; provas reais usam somente o banco descartável do GitHub Actions, nunca o banco do EasyPanel.
+
+### Arquivos desta rodada
+
+```text
+.github/workflows/ci.yml
+database/migrations/014_add_bilateral_contact.js
+apps/api/integration/bilateral-rollback.integration.test.ts
+apps/api/integration/channel-outbox.dispatcher.integration.test.ts
+apps/api/integration/matching-pagination.integration.test.ts
+apps/api/integration/selection-match.repository.integration.test.ts
+apps/api/src/modules/bilateral-contact/bilateral-contact.policy.ts
+apps/api/src/modules/bilateral-contact/bilateral-contact.policy.test.ts
+apps/api/src/modules/bilateral-contact/bilateral-contact.transaction.ts
+apps/api/src/modules/channel-inbox/channel-inbox.repository.ts
+apps/api/src/modules/channel-inbox/channel-inbox.routes.ts
+apps/api/src/modules/channel-inbox/channel-inbox.service.ts
+apps/api/src/modules/channel-inbox/channel-inbox.service.test.ts
+apps/api/src/modules/channel-outbox/channel-outbox.repository.ts
+apps/api/src/modules/channel-outbox/channel-outbox.repository.test.ts
+apps/api/src/modules/channel-outbox/channel-outbox.routes.ts
+apps/api/src/modules/channel-outbox/channel-outbox.types.ts
+apps/api/src/modules/customer-search/customer-search.routes.ts
+apps/api/src/modules/customer-search/customer-search.service.ts
+apps/api/src/modules/match-selection/match-selection.repository.ts
+apps/api/src/modules/match-selection/match-selection.repository.test.ts
+apps/api/src/modules/match-selection/match-selection.types.ts
+apps/api/src/modules/message-presentation/message-presentation.service.ts
+apps/api/src/modules/message-presentation/message-presentation.service.test.ts
+apps/api/src/modules/selection-command/selection-command.service.ts
+apps/api/src/modules/selection-command/selection-command.service.test.ts
+apps/api/src/modules/selection-command/selection-command.types.ts
+apps/api/src/modules/selection-message/selection-message.mapper.ts
+apps/api/src/modules/selection-message/selection-message.presenter.ts
+packages/shared/src/schemas/selection-message.ts
+docs/ARCHITECTURE.md
+docs/DATA_MODEL.md
+docs/API.md
+docs/API_PRODUCT_CORE_HANDOFF.md
+```
+
+---
+
+## Checkpoint histórico — etapas 0–2 (8 de setembro de 2026)
+
+O conteúdo abaixo registra a base anterior. As observações antigas sobre etapa 3 pendente ou migration 012 ainda não integrada foram superadas pela rodada descrita acima; não são instruções para reescrever migrations aplicadas ou iniciar etapas 4–8.
 
 ## Escopo entregue e limites
 

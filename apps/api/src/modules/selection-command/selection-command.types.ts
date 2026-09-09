@@ -1,5 +1,5 @@
 import type { GlobalConversationCommand } from "../conversation-commands/conversation-command.types.js";
-import type { SelectShownMatchOutcome, SelectedMatchOutcome, SelectionMatchRecord, SelectionMatchRepository } from "../match-selection/match-selection.types.js";
+import type { SelectShownMatchOutcome, SelectedMatchOutcome, ConsentOutcome, SelectionMatchRecord, SelectionMatchRepository } from "../match-selection/match-selection.types.js";
 
 export type SelectionCommandInput = {
   conversationId: string;
@@ -26,7 +26,7 @@ export type SelectionCommandOutcome =
 
 export interface SelectionCommandService {
   process(input: SelectionCommandInput): Promise<SelectionCommandOutcome>;
-  recoverSelection(customerId: string, selectionKey: string): Promise<SelectedMatchOutcome | null>;
+  recoverSelection(customerId: string, selectionKey: string): Promise<SelectedMatchOutcome | ConsentOutcome | null>;
 }
 
 export type SelectionCommandDependencies = {

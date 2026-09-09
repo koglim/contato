@@ -35,6 +35,7 @@ export type SelectShownMatchInput = {
   position: number;
   lastMessageText: string;
   selectionKey: string;
+  confirmBilateral?: boolean;
 };
 
 export type SelectShownMatchOutcome =
@@ -48,7 +49,12 @@ export type SelectShownMatchOutcome =
     serviceName: string;
     selectedAt: Date;
     replayed: boolean;
+    publicCode?: string;
+    conversationId?: string;
+    searchRequestId?: string;
   }
+  | { kind: "consent_required"; professionalDisplayName: string; conversationId?: string; searchRequestId?: string }
+  | { kind: "consent_declined"; conversationId?: string; searchRequestId?: string }
   | { kind: "conversation_not_found" }
   | { kind: "conversation_not_active" }
   | { kind: "conversation_expired" }
@@ -58,8 +64,13 @@ export type SelectShownMatchOutcome =
   | { kind: "idempotency_conflict" };
 
 export type SelectedMatchOutcome = Extract<SelectShownMatchOutcome, { kind: "selected" }>;
+export type ConsentOutcome = Extract<SelectShownMatchOutcome, { kind: "consent_required" | "consent_declined" }>;
+export type PendingBilateralConfirmation = { position: number; professionalDisplayName: string };
 
 export interface SelectionMatchRepository {
+  getPendingConfirmation(customerId: string, conversationId: string): Promise<PendingBilateralConfirmation | null>;
+  declinePendingConfirmation(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome>;
+  recoverConsentResponse(customerId: string, selectionKey: string): Promise<ConsentOutcome | null>;
   getState(searchRequestId: string): Promise<SelectionMatchState>;
   findShownByPosition(searchRequestId: string, position: number): Promise<SelectionMatchRecord | null>;
   listShown(searchRequestId: string): Promise<SelectionMatchRecord[]>;

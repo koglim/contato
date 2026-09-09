@@ -18,6 +18,11 @@ function routeError(reply: { code(status: number): { send(payload: unknown): unk
 }
 
 export const channelOutboundRoutes: FastifyPluginAsync<ChannelOutboundRoutesOptions> = async (app, options) => {
+  // Never serialize PostgreSQL detail/context or validation input containing PII.
+  app.setErrorHandler((_error, _request, reply) => {
+    app.log.error({ code: "internal_error" }, "Outbound operation failed");
+    return reply.code(500).send({ error: "internal_error" });
+  });
   const requireInternalKey = createInternalKeyGuard(options.internalApiKey ?? process.env.INTERNAL_API_KEY);
 
   app.post("/next/claim", { preHandler: requireInternalKey }, async (_request, reply) => {
