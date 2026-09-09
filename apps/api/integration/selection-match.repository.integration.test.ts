@@ -29,8 +29,9 @@ type Fixture = {
 };
 
 function phoneFromId(id: string) {
-  const digits = BigInt(`0x${id.replaceAll("-", "").slice(0, 12)}`).toString().padStart(12, "0");
-  return `+55${digits[0] === "0" ? `1${digits.slice(1)}` : digits}`;
+  const value = BigInt(`0x${id.replaceAll("-", "").slice(0, 12)}`);
+  const subscriber = ((value % 900_000_000n) + 100_000_000n).toString();
+  return `+5566${subscriber}`;
 }
 
 async function createFixture(legacy = false): Promise<Fixture> {
