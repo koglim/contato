@@ -8,23 +8,43 @@ Este documento acompanha o plano fornecido por Ricardo em
 `ContatoCerto_Plano_Completo_e_Prompt_Astra.md`. Documentos e checkpoints antigos
 são histórico; código, contratos e migrations atuais prevalecem.
 
-## Inventário da base
+## Inventário após este checkpoint
 
 | Domínio | Estado verificado | Evidência / pendência |
 | --- | --- | --- |
 | Busca, resolução e ranking | Implementado | API + PostGIS, fair-v1, pool 20 / página 3 / teto 6 |
 | Escolha e contato bilateral | Implementado | Transação, consentimento, snapshots, selectionKey |
 | Resposta profissional e retomada | Implementado | Migration 015, recusa preserva outra busca |
-| Inbox / Outbox | Parcial | Retry 016; confirmar envio repetido e abandono ainda precisam correção |
-| Revalidação da primeira escolha | Risco confirmado no código (F04) | Predicado atual dispensa elegibilidade quando não há recusa |
-| Entrega n8n | Parcial / homologação pendente | Exports usados em produção não estão no repositório |
+| Inbox / Outbox | Parcial, estabilizada | Recibo/retenção 017, limite de abandono, FIFO independente e diagnóstico; recuperação Inbox/admin ainda pendentes |
+| Revalidação da primeira escolha | Corrigida (F04) | Status, serviço/catálogo, contato canônico e cobertura obrigatórios em nova seleção/apresentação |
+| Entrega n8n | Parcial / homologação pendente | Dois exports inativos testados; gateway de produção/versões ainda não fornecidos |
 | Conversa contextual híbrida | Parcial | Parser e fallback de localização; sem B2 completa |
 | Identidade e onboarding | Ausente | Acesso demonstrativo com profissional fixo |
-| Painel | Parcial | Perfil, serviços, cobertura e disponibilidade; falta ownership |
+| Painel | Parcial | Allowlist no BFF fecha F02; status/telefone somente leitura; falta ownership individual |
 | Conclusão / avaliações | Ausente como jornada | Tabelas existem; estados e interfaces não |
 | Assinatura / cobrança | Ausente | Gateway, preço e políticas ainda pendentes de decisão |
-| Administração / operação | Parcial | Chave interna; falta administração por papéis e recuperação auditada |
-| QA | Parcial | Baseline: 270 API, 6 web, 66 integrações; falta browser e transporte real |
+| Administração / operação | Parcial | Diagnóstico sem PII, logs sanitizados e runbook; papéis/alertas/recuperação auditada pendentes |
+| QA | Parcial | 276 API, 12 web, 7 workflows e 80 integrações; falta browser, carga e transporte real |
+
+## Entregas publicadas e evidência
+
+| Commit | Entrega | CI aprovado |
+| --- | --- | --- |
+| `e7c0767` | Baseline e inventário | Incluído nos checkpoints seguintes |
+| `60d55ab` | Elegibilidade obrigatória antes de nova seleção | [34401153725](https://github.com/koglim/contato/actions/runs/34401153725) |
+| `0a44902` | Recibo idempotente, hold, limite de leases e migration 017 | [34401960396](https://github.com/koglim/contato/actions/runs/34401960396) |
+| `ac74cc2` | Consumidor compartilhado e dispatcher inativos + bilateral PostgreSQL | [34403284985](https://github.com/koglim/contato/actions/runs/34403284985) |
+| `41cea96` | Limite de autosserviço no servidor e formulário | [34403801659](https://github.com/koglim/contato/actions/runs/34403801659) |
+| `209bda7` | Diagnóstico agregado da fila | [34404276101](https://github.com/koglim/contato/actions/runs/34404276101) |
+| `1cd80a6` | Sanitização de logs e runbook operacional | [34404857753](https://github.com/koglim/contato/actions/runs/34404857753) |
+
+Último checkpoint de código acima: `1cd80a6e699dbabdc64199a7b62026e72062e60a`.
+Lint, typecheck, build, 276 testes API + 12 web + 7 workflows passaram localmente
+e no CI. As 80 integrações PostgreSQL/PostGIS passaram duas vezes no CI: antes e
+depois de down compatível 017–008 e reaplicação 008–017. Rollbacks protegidos
+014/015/016/017 verificam preservação e falha esperada, não limpeza de evidências.
+Nenhuma migration foi executada em produção. O relatório da execução informa o
+SHA/CI final do HEAD, incluindo a consolidação documental posterior.
 
 ## Checkpoints e ordem
 
@@ -46,27 +66,30 @@ execução. Publicar commits para revisão/CI na branch de execução.
 
 ## Matriz de aceite do plano
 
-Os IDs correspondem à seção 15 do plano. Baseline não equivale a revalidação de
-todos os critérios; quando o cenário do plano exige mais, fica parcial.
+[V1_ACCEPTANCE.md](V1_ACCEPTANCE.md) registra cada cenário T01–T60 com estado e
+evidência/pendência. A fase A foi concluída; B/C e a proteção F02 avançaram, mas
+essas fases não estão integralmente homologadas. B2 e D–I não foram concluídas.
 
-| IDs | Situação inicial | Trabalho necessário |
-| --- | --- | --- |
-| T01–T02 | Parcial | Fluxos atuais testados; linguagem contextual em B2 |
-| T03–T07 | Não executado | Contratos, autenticidade e mídia no gateway real |
-| T08–T09 | Baseline aprovada | Replay e conflito de payload existentes |
-| T10–T13 | Parcial | API testada; falta consumidor de transporte integrado |
-| T14–T16 | Riscos F06/F07 confirmados | Limite de abandono e recibo idempotente |
-| T17–T18 | Não implementado | Ordenação relevante e obsolescência por finalidade |
-| T19 | Baseline aprovada | Pool, teto, páginas e concorrência PostgreSQL |
-| T20 | Parcial | Reserva preservada; recuperação terminal administrativa pendente |
-| T21–T22 | Baseline aprovada | Aviso enviado e seleção concorrente |
-| T23–T24 | Risco F04 confirmado | Elegibilidade obrigatória na primeira escolha; entitlement futuro |
-| T25–T29 | Parcial | Domínio testado; falta entrega bilateral real e homologação |
-| T30–T33 | Não implementado | Identidade, sessões e autosserviço seguro |
-| T34–T38 | Não implementado | Atendimento, avaliação, assinatura e cobrança |
-| T39–T43 | Não executado | Browser, canal, retenção, restore e carga |
-| T44 | Baseline aprovada até 016 | Ampliar a cada migration nova |
-| T45–T60 | Não implementado como B2 | Dataset, controlador e avaliação contextual |
+## Onde continuar
+
+1. Obter versões de n8n/Evolution e export sanitizado do gateway atual. Conectar
+   em homologação o transporte compartilhado, autenticação, texto/áudio e entrada
+   durável sem duplicar o envio imediato. Não reescrever a API bilateral pronta.
+2. Completar recuperação de Inbox/admin e política de obsolescência por finalidade;
+   uma retenção não pode ser liberada apagando evidência. Instrumentar alertas.
+3. Iniciar B2 conforme o plano: memória confirmada separada de inferência, proposta
+   estruturada validada por controlador e candidatos reais, resposta persistida,
+   dataset de 300 casos com divisão reservada e avaliação autorizada. Nenhuma nova
+   chamada de IA nem seleção automática foi ativada neste checkpoint.
+4. Identidade/onboarding: decidir canal e proteção de transporte OTP, então contas,
+   sessões e ownership. O profissional fixo continua impedindo uso multiusuário.
+5. Prosseguir E–I: atendimento/avaliação, entitlement, gateway aprovado, painéis,
+   retenção, restore, carga, revisão humana e release. São trabalho remanescente,
+   não itens que um CI verde da Outbox resolve.
+
+Release manual, configuração n8n, incidente/rollback e ensaio de backup estão em
+[OPERATIONS.md](OPERATIONS.md) e [workflows/n8n/README.md](../workflows/n8n/README.md).
+Não há nova variável API/web; migration 017 deve preceder a API deste checkpoint.
 
 ## Decisões e dependências externas
 

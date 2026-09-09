@@ -620,17 +620,17 @@ Inbox → outbound.id → POST /internal/channel/outbound/:id/claim
       → POST /internal/channel/outbound/:id/sent
 ```
 
-Em erro de transporte, o n8n chama `POST /internal/channel/outbound/:id/failed`. Todas as rotas exigem `X-Internal-Key`.
+Em rejeição comprovada do transporte, o n8n chama `POST /internal/channel/outbound/:id/failed`. Resultado incerto exige `/hold`, conforme 017. Todas as rotas exigem `X-Internal-Key`.
 
 `POST /internal/channel/outbound/:outboundId/claim` reserva uma mensagem `pending`, `failed` ou uma lease `processing` vencida. A resposta `processing` contém o `processing_token`, `recipient_phone_e164` e `text_content` que o transporte necessita; o telefone é PII e só é retornado nessa rota interna autenticada. Cada claim incrementa `attempt_count`. Se a mensagem já estiver `sent`, a rota responde apenas com seu estado e não fornece conteúdo para novo envio. Uma lease ativa retorna `409 outbound_message_processing`.
 
-Após a Evolution aceitar a mensagem, `POST /internal/channel/outbound/:outboundId/sent` recebe `processing_token` e `provider_message_id`; somente o claim atual pode marcar `sent`. Em falha, `POST /internal/channel/outbound/:outboundId/failed` recebe o token e um `error_code` controlado. Ambos retornam somente `{ id, status }`; token inválido, expirado ou já concluído retorna `409 outbound_message_claim_invalid`.
+Após aceitação comprovada, `POST /internal/channel/outbound/:outboundId/sent` recebe `processing_token` e `provider_message_id`; somente o claim atual pode marcar `sent`. A repetição idêntica comprovada pelo recibo 017 também retorna 200, sem alterar timestamps. `/failed` exige token atual e erro controlado, sem retenção. Ambos retornam somente `{ id, status }`; tokens alheios/substituídos e confirmação conflitante retornam `409 outbound_message_claim_invalid`. A expiração permite nova reserva, mas não troca o token até ela ocorrer.
 
 `CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem elegível; considera `pending` sem agendamento, `next_attempt_at <= NOW()` e leases `processing` vencidas. A fila vazia retorna `204 No Content`; o claim individual existente continua retornando `404` para um ID inexistente. A transação termina antes do envio externo.
 
 ### Retry da Outbox (migration 016)
 
-Uma mensagem nova começa com `attempt_count = 0` e `next_attempt_at = NULL`. Cada claim incrementa o contador e cria uma lease. O consumidor confirma sucesso com `/sent` ou informa falha transitória com `/failed`; nesse segundo caso a mensagem volta a `pending`, preserva `last_error_code` e recebe backoff determinístico de 30, 60, 120, 240 e 480 segundos para as tentativas 1 a 5. Antes de `next_attempt_at` a mensagem não é elegível. A quinta falha marca a mensagem `failed` (dead-letter), limpa a agenda e impede novas claims. `sent` nunca volta a `pending`.
+Uma mensagem nova começa com `attempt_count = 0` e `next_attempt_at = NULL`. Cada claim incrementa o contador e cria uma lease. O consumidor confirma sucesso com `/sent` ou informa rejeição transitória com `/failed`; falhas 1–4 voltam a `pending` com `last_error_code` e backoff de 30, 60, 120 e 240 segundos. O array da política também contém 480s, mas a quinta falha já é terminal e não agenda sexta tentativa. Antes de `next_attempt_at` a mensagem não é elegível. `sent` nunca volta a `pending`; 017 também limita leases abandonadas.
 
 O `markFailed` exige o `processing_token` da lease atual, é idempotente para tokens inválidos e retorna `{ id, status: "pending" }` quando uma nova tentativa foi agendada ou `{ id, status: "failed" }` ao atingir o limite. A política é centralizada em código, sem variável de ambiente nesta etapa. A migration 016 cria o índice parcial de pendências elegíveis; seu `down` bloqueia com `P0016 / OUTBOUND_RETRY_ROLLBACK_BLOCKED` se houver `next_attempt_at` preenchido, sem apagar ou transformar dados.
 
