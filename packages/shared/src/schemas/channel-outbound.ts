@@ -57,3 +57,18 @@ export const channelOutboundMessageMutationResponseSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(["sent", "pending", "failed"]),
 }).strict();
+
+const queueCount = z.number().int().nonnegative();
+export const channelOutboundQueueStatusSchema = z.object({
+  items: z.array(z.object({
+    purpose: channelOutboundMessagePurposeSchema,
+    pending: queueCount,
+    scheduled_retry: queueCount,
+    processing: queueCount,
+    expired_lease: queueCount,
+    reconciliation_required: queueCount,
+    failed: queueCount,
+    dead_letter: queueCount,
+    oldest_unfinished_at: z.string().datetime({ offset: true }),
+  }).strict()).max(4),
+}).strict();

@@ -4,6 +4,7 @@ import type {
   ChannelOutboundMessageStatus,
   MarkChannelOutboundMessageFailedInput,
   MarkChannelOutboundMessageSentInput,
+  ChannelOutboundQueueStatus,
 } from "@contatocerto/shared";
 
 export type ChannelOutboundMessageRecord = {
@@ -42,6 +43,7 @@ export type CreateIndependentChannelOutboundMessage = {
 };
 
 export interface ChannelOutboundMessageRepository {
+  queueStatus(processingLeaseSeconds: number): Promise<ChannelOutboundQueueStatus>;
   holdDelivery(id: string, input: HoldOutboundInput): Promise<boolean>;
   findById(id: string): Promise<ChannelOutboundMessageRecord | null>;
   findByInboundMessageId(channelInboundMessageId: string): Promise<ChannelOutboundMessageRecord | null>;
@@ -65,6 +67,7 @@ export type ChannelOutboundMutationOutcome =
   | { kind: "outbound_message_claim_invalid" };
 
 export interface ChannelOutboundService {
+  queueStatus(): Promise<ChannelOutboundQueueStatus>;
   holdDelivery(id: string, input: HoldOutboundInput): Promise<ChannelOutboundHoldOutcome>;
   claim(id: string): Promise<ChannelOutboundClaimOutcome>;
   claimNextPending(): Promise<ChannelOutboundClaimOutcome>;

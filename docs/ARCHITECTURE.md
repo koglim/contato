@@ -1,5 +1,10 @@
 # Arquitetura atual
 
+A operação dispõe de `GET /internal/channel/outbound/queue-status`: agregado
+somente leitura por finalidade, protegido pela chave interna e contrato estrito
+sem PII. Usa o prazo de lease do dispatcher, sem reclamar/terminalizar mensagens.
+Não substitui alertas nem a recuperação administrativa auditada ainda pendentes.
+
 O BFF do painel aplica uma allowlist de autosserviço no servidor antes do proxy
 interno. Status administrativo, verificação e identidade não podem ser alterados
 pela sessão demonstrativa. Ela continua vinculada ao profissional configurado;

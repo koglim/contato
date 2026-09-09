@@ -25,6 +25,8 @@ function record(overrides: Partial<ChannelOutboundMessageRecord> = {}): ChannelO
 }
 
 class FakeRepository implements ChannelOutboundMessageRepository {
+  statusLease: number | undefined;
+  async queueStatus(lease: number) { this.statusLease = lease; return { items: [] }; }
   async holdDelivery() { return false; }
   current: ChannelOutboundMessageRecord | null = record();
   async findById() { return this.current; }
@@ -61,6 +63,14 @@ function context() {
   const repository = new FakeRepository();
   return { repository, service: new DefaultChannelOutboundService(repository, { processingLeaseSeconds: 60 }) };
 }
+
+test("queue diagnostics uses the configured lease without claiming a message", async () => {
+  const { repository, service } = context();
+  const before = structuredClone(repository.current);
+  assert.deepEqual(await service.queueStatus(), { items: [] });
+  assert.equal(repository.statusLease, 60);
+  assert.deepEqual(repository.current, before);
+});
 
 test("claim reserves pending and failed messages and increments attempts", async () => {
   const current = context();

@@ -35,6 +35,10 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
     private readonly config: ChannelOutboundConfig,
   ) {}
 
+  async queueStatus() {
+    return this.repository.queueStatus(this.config.processingLeaseSeconds);
+  }
+
   async claim(id: string): Promise<ChannelOutboundClaimOutcome> {
     const claimed = await this.repository.claim(id, randomUUID(), this.config.processingLeaseSeconds);
     if (claimed) return { kind: "response", response: claimResponse(claimed) };

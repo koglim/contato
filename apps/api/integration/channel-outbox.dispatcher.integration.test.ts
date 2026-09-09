@@ -4,8 +4,52 @@ import { after, test } from "node:test";
 import { closeDatabaseConnection, query } from "../src/database/connection.js";
 import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel-outbox/channel-outbox.repository.js";
 import { rollbackThrough } from "./rollback-helper.js";
+import { buildApp } from "../src/app.js";
+import { channelOutboundQueueStatusSchema } from "@contatocerto/shared";
 
 after(async () => closeDatabaseConnection());
+
+test("queue diagnostics reports pending, scheduled, held, expired and dead-letter without mutating or exposing messages", async () => {
+  const ids: string[] = [];
+  const app = buildApp({ internalApiKey: "queue-diagnostics" });
+  const repo = new PostgresChannelOutboundMessageRepository();
+  try {
+    assert.deepEqual(await repo.queueStatus(60), { items: [] });
+    ids.push(await insertIndependent());
+    ids.push(await insertIndependent("pending", null, new Date(Date.now() + 120_000)));
+    ids.push(await insertIndependent("processing", new Date()));
+    ids.push(await insertIndependent("processing", new Date(Date.now() - 120_000)));
+    ids.push(await insertIndependent("processing", new Date(Date.now() - 120_000)));
+    await query("UPDATE channel_outbound_messages SET delivery_hold_reason = 'transport_outcome_unknown' WHERE id = $1", [ids[4]]);
+    ids.push(await insertIndependent());
+    await query("UPDATE channel_outbound_messages SET status = 'failed', attempt_count = 5 WHERE id = $1", [ids[5]]);
+    ids.push(await insertIndependent());
+    const token = randomUUID();
+    await repo.claim(ids[6], token, 60);
+    assert.equal(await repo.markSent(ids[6], { processing_token: token, provider_message_id: "diagnostic-test" }), true);
+    ids.push(await insertIndependent("pending", null, null, "customer_reply"));
+    const fingerprint = async () => (await query<{ fingerprint: string }>(
+      "SELECT md5(string_agg(to_jsonb(o)::text, '' ORDER BY id)) AS fingerprint FROM channel_outbound_messages o WHERE id = ANY($1::uuid[])", [`{${ids.join(",")}}`],
+    )).rows[0].fingerprint;
+    const before = await fingerprint();
+    const response = await app.inject({ method: "GET", url: "/internal/channel/outbound/queue-status", headers: { "x-internal-key": "queue-diagnostics" } });
+    assert.equal(response.statusCode, 200);
+    const status = channelOutboundQueueStatusSchema.parse(response.json());
+    assert.equal(status.items.length, 2);
+    const professional = status.items.find((item) => item.purpose === "professional_contact_notification")!;
+    assert.deepEqual({ ...professional, oldest_unfinished_at: undefined }, {
+      purpose: "professional_contact_notification", pending: 2, scheduled_retry: 1, processing: 3,
+      expired_lease: 1, reconciliation_required: 1, failed: 1, dead_letter: 1, oldest_unfinished_at: undefined,
+    });
+    assert.equal(status.items.find((item) => item.purpose === "customer_reply")?.pending, 1);
+    assert.doesNotMatch(response.body, /phone|text_content|processing_token|Mensagem|[0-9a-f]{8}-[0-9a-f-]{27}/u);
+    assert.equal(await fingerprint(), before);
+  } finally {
+    await app.close();
+    await query("DELETE FROM channel_outbound_messages WHERE id = ANY($1::uuid[])", [`{${ids.join(",")}}`]);
+    await query("DELETE FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[])", [`{${ids.join(",")}}`]);
+  }
+});
 
 async function insertIndependent(status: "pending" | "processing" = "pending", processingStartedAt: Date | null = null, nextAttemptAt: Date | null = null, purpose: "professional_contact_notification" | "customer_reply" = "professional_contact_notification") {
   const outboundId = randomUUID();

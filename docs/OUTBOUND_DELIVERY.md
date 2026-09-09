@@ -70,5 +70,14 @@ limpar evidências de produção para liberar rollback.
 4. A interface administrativa para autorizar nova tentativa com motivo/auditoria
    ainda está pendente. Não usar SQL ad hoc que apague histórico.
 
-Métricas, obsolescência, recuperação de Inbox e homologação n8n continuam sendo
-checkpoints separados na matriz [V1_EXECUTION.md](V1_EXECUTION.md).
+## Diagnóstico sem dados pessoais
+
+`GET /internal/channel/outbound/queue-status`, com chave interna, retorna contagens
+por finalidade, retenções, leases expiradas, falhas terminais e criação mais antiga
+não enviada. Não altera a fila nem expõe destinatários, conteúdo ou tokens.
+Consultar a semântica dos contadores em [API.md](API.md). Começar a investigação
+quando houver retenção/dead-letter ou crescimento persistente da idade/pendências;
+não disparar um novo envio apenas com base nessas contagens.
+
+Alertas, dashboard operacional, obsolescência, recuperação de Inbox e homologação
+n8n continuam pendentes na matriz [V1_EXECUTION.md](V1_EXECUTION.md).

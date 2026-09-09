@@ -7,6 +7,7 @@ const internalApiKey = "test-internal-key";
 const outboundId = "11111111-1111-4111-8111-111111111111";
 
 class FakeOutbox implements ChannelOutboundService {
+  async queueStatus() { return { items: [] }; }
   async holdDelivery() { return { kind: "response" as const, response: { id: outboundId, status: "processing" as const, delivery_status: "reconciliation_required" as const } }; }
   next = false;
   async claim() {
@@ -26,6 +27,26 @@ class FakeOutbox implements ChannelOutboundService {
     return this.claim();
   }
 }
+
+test("queue diagnostics authenticates, disables caching and rejects accidental private fields", async () => {
+  const fake = new FakeOutbox();
+  let calls = 0;
+  fake.queueStatus = async () => { calls += 1; return { items: [] }; };
+  const app = buildApp({ channelOutboundService: fake, internalApiKey });
+  const url = "/internal/channel/outbound/queue-status";
+  try {
+    assert.equal((await app.inject({ method: "GET", url })).statusCode, 401);
+    assert.equal(calls, 0);
+    const result = await app.inject({ method: "GET", url, headers: { "x-internal-key": internalApiKey } });
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.headers["cache-control"], "no-store");
+    assert.deepEqual(result.json(), { items: [] });
+    fake.queueStatus = async () => ({ items: [], recipient_phone_e164: "+5566999999999" });
+    const invalid = await app.inject({ method: "GET", url, headers: { "x-internal-key": internalApiKey } });
+    assert.equal(invalid.statusCode, 500);
+    assert.deepEqual(invalid.json(), { error: "internal_error" });
+  } finally { await app.close(); }
+});
 
 test("outbox routes require auth, validate input and expose recipient only on a claim", async () => {
   const app = buildApp({ channelOutboundService: new FakeOutbox(), internalApiKey });

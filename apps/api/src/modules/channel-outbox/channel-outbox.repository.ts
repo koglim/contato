@@ -9,7 +9,7 @@ import type {
   CreateChannelOutboundMessage,
   CreateIndependentChannelOutboundMessage,
 } from "./channel-outbox.types.js";
-import type { ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
+import type { ChannelOutboundQueueStatus, ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 import { OUTBOX_MAX_ATTEMPTS, OUTBOX_RETRY_BACKOFF_SECONDS } from "./channel-outbox.retry.js";
 
 const retryBackoffSql = OUTBOX_RETRY_BACKOFF_SECONDS
@@ -188,6 +188,26 @@ export async function associateOutboundMessageMatches(
 }
 
 export class PostgresChannelOutboundMessageRepository implements ChannelOutboundMessageRepository {
+  async queueStatus(processingLeaseSeconds: number): Promise<ChannelOutboundQueueStatus> {
+    type Row = Omit<ChannelOutboundQueueStatus["items"][number], "oldest_unfinished_at"> & { oldest_unfinished_at: Date };
+    const result = await this.execute<Row>(
+      `SELECT purpose,
+        COUNT(*) FILTER (WHERE status = 'pending')::float8 AS pending,
+        COUNT(*) FILTER (WHERE status = 'pending' AND next_attempt_at > NOW())::float8 AS scheduled_retry,
+        COUNT(*) FILTER (WHERE status = 'processing')::float8 AS processing,
+        COUNT(*) FILTER (WHERE status = 'processing' AND delivery_hold_reason IS NULL
+          AND processing_started_at <= NOW() - ($1 * INTERVAL '1 second'))::float8 AS expired_lease,
+        COUNT(*) FILTER (WHERE delivery_hold_reason IS NOT NULL)::float8 AS reconciliation_required,
+        COUNT(*) FILTER (WHERE status = 'failed')::float8 AS failed,
+        COUNT(*) FILTER (WHERE status = 'failed' AND attempt_count >= $2)::float8 AS dead_letter,
+        MIN(created_at) AS oldest_unfinished_at
+      FROM channel_outbound_messages WHERE status <> 'sent'
+      GROUP BY purpose ORDER BY purpose`,
+      [processingLeaseSeconds, OUTBOX_MAX_ATTEMPTS],
+    );
+    return { items: result.rows.map((row) => ({ ...row, oldest_unfinished_at: row.oldest_unfinished_at.toISOString() })) };
+  }
+
   constructor(
     private readonly execute: ChannelOutboxQuery = defaultQuery,
     private readonly transaction: ChannelOutboxTransaction = withTransaction,

@@ -137,3 +137,5 @@ export type { SelectionMessageContract } from "./types/selection-message.js";
 export type { GlobalConversationMessageContract } from "./types/global-conversation-message.js";
 export { opportunityMessageSchema } from "./schemas/opportunity-message.js";
 export { dashboardMutationSchema, updateSelfServiceProfileSchema } from "./schemas/dashboard-mutation.js";
+export { channelOutboundQueueStatusSchema } from "./schemas/channel-outbound.js";
+export type { ChannelOutboundQueueStatus } from "./types/channel-outbound.js";

@@ -1,5 +1,22 @@
 # API interna
 
+## Diagnóstico de entrega
+
+`GET /internal/channel/outbound/queue-status` exige `X-Internal-Key`, é somente
+leitura e retorna 200 com `{ items: [...] }` e `Cache-Control: no-store`. Fila sem
+pendências retorna `items: []`. Cada item contém uma finalidade e somente:
+`pending`, `scheduled_retry`, `processing`, `expired_lease`,
+`reconciliation_required`, `failed`, `dead_letter`, `oldest_unfinished_at`.
+Finalidades sem mensagens não enviadas são omitidas. Não retorna telefone,
+conteúdo, IDs de mensagem, tokens ou erros livres do provider.
+
+Os contadores se sobrepõem: retry agendado está em pending; retenção está em
+processing; dead-letter está em failed. Lease expirada exclui retenções e usa a
+mesma duração configurada do consumidor. A leitura não reclama nem terminaliza
+mensagens. Pending não significa imediatamente enviável: agenda e ordem por
+destinatário ainda são verificadas pelo claim. Registros sent ficam fora do
+agregado; o timestamp mais antigo inclui falhas terminais para operação.
+
 ## Limite de autosserviço do painel
 
 O BFF `PATCH /api/dashboard` autentica a sessão demonstrativa e valida método,
