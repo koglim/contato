@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
+import { buildApp } from "../src/app.js";
+import { deliverClaim } from "./delivery-helper.js";
 import { closeDatabaseConnection, query } from "../src/database/connection.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
 import { PostgresCustomerRepository } from "../src/modules/customers/customer.repository.js";
@@ -728,4 +730,28 @@ test("legacy consent prompt recovers after crash before inbound completion witho
     assert.equal((await bilateralCounts(fixture)).contacts, 0);
     assert.equal(await repository.recoverConsentResponse(randomUUID(), inbound.record.id), null);
   } finally { await fixture.cleanup(); }
+});
+
+test("bilateral choice delivers customer reply and independent professional notification without a professional webhook", async () => {
+  const fixture = await createFixture();
+  const app = buildApp({ internalApiKey: "delivery-integration" });
+  try {
+    const choiceId = randomUUID();
+    const choice = await bilateralChannel(fixture).receive("Ana", choiceId);
+    if (choice.kind !== "response") throw new Error("expected choice response");
+    const customer = await deliverClaim(app, "delivery-integration", "bilateral-test", choice.response.outbound.id);
+    assert.equal(customer.recipient_phone_e164, fixture.customerPhone);
+    const professional = await deliverClaim(app, "delivery-integration", "bilateral-test");
+    assert.equal(professional.purpose, "professional_contact_notification");
+    assert.equal(professional.recipient_phone_e164, fixture.firstProfessionalPhone);
+    assert.ok(professional.text_content.includes(fixture.customerPhone));
+    assert.doesNotMatch(professional.text_content, /[0-9a-f]{8}-[0-9a-f-]{27}|score_breakdown/u);
+    const replay = await bilateralChannel(fixture).receive("Ana", choiceId);
+    if (replay.kind !== "response") throw new Error("expected replay");
+    assert.equal(replay.response.outbound.id, customer.id);
+    assert.equal(replay.response.outbound.status, "sent");
+    assert.equal((await query("SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1", [fixture.firstProfessionalPhone])).rows.length, 0);
+    assert.equal((await new PostgresChannelOutboundMessageRepository().claimNextPending(randomUUID(), 60)), null);
+    assert.equal((await bilateralCounts(fixture)).contacts, 1);
+  } finally { await app.close(); await fixture.cleanup(); }
 });

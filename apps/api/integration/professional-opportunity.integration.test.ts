@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { rollbackThrough } from "./rollback-helper.js";
+import { deliverClaim } from "./delivery-helper.js";
 import { after, test } from "node:test";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
 import { buildApp } from "../src/app.js";
@@ -13,6 +14,26 @@ import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel
 after(closeDatabaseConnection);
 const key = "opportunity-integration";
 const phone = () => `+5566${Math.floor(100000000 + Math.random() * 899999999)}`;
+
+test("professional acceptance delivers an independent update without a new customer webhook", async () => {
+  const f = await fixture();
+  try {
+    const decisionId = randomUUID();
+    const accepted = await f.send(`aceito ${f.code}`, f.professionalPhone, decisionId);
+    const reply = await deliverClaim(f.app, key, "test", accepted.outbound.id);
+    assert.equal(reply.purpose, "professional_reply");
+    assert.equal(reply.recipient_phone_e164, f.professionalPhone);
+    const notification = await deliverClaim(f.app, key, "test");
+    assert.equal(notification.purpose, "customer_contact_update");
+    assert.equal(notification.recipient_phone_e164, f.customerPhone);
+    assert.ok(notification.text_content.includes(f.code));
+    const repeat = await f.send(`aceito ${f.code}`, f.professionalPhone, decisionId);
+    assert.equal(repeat.outbound.id, reply.id);
+    assert.equal(repeat.outbound.status, "sent");
+    assert.equal(await f.countEvents(), 1);
+    assert.equal((await new PostgresChannelOutboundMessageRepository().claimNextPending(randomUUID(), 60)), null);
+  } finally { await f.cleanup(); }
+});
 
 async function fixture(other = false) {
   const customerId = randomUUID(), professionalId = randomUUID(), searchId = randomUUID(), conversationId = randomUUID();

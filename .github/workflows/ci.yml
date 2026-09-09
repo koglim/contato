@@ -54,6 +54,11 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Verify generated n8n exports
+        run: |
+          pnpm build:workflows
+          git diff --exit-code -- workflows/n8n/shared-delivery.json workflows/n8n/outbox-dispatcher.json
+
       - name: Apply all migrations
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
