@@ -54,8 +54,8 @@ async function createFixture(legacy = false): Promise<Fixture> {
   await query(`INSERT INTO service_categories (id, name, slug) VALUES ($1, $2, $3)`, [categoryId, "Teste", `teste-${categoryId}`]);
   await query(`INSERT INTO services (id, category_id, name, slug) VALUES ($1, $2, $3, $4)`, [serviceId, categoryId, "Eletricista", `eletricista-${serviceId}`]);
   await query(
-    `INSERT INTO professionals (id, display_name, slug, phone_e164)
-     VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)`,
+    `INSERT INTO professionals (id, display_name, slug, phone_e164, status)
+     VALUES ($1, $2, $3, $4, 'active'), ($5, $6, $7, $8, 'active')`,
     [
       firstProfessionalId, "Ana Eletricista", `ana-${firstProfessionalId}`, firstProfessionalPhone,
       secondProfessionalId, "Bia Eletricista", `bia-${secondProfessionalId}`, secondProfessionalPhone,
@@ -67,10 +67,13 @@ async function createFixture(legacy = false): Promise<Fixture> {
     [firstProfessionalServiceId, firstProfessionalId, serviceId, secondProfessionalServiceId, secondProfessionalId],
   );
   await query(
-    `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status)
-     VALUES ($1, $2, $3, $4, 'matched')`,
+    `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status, location)
+     VALUES ($1, $2, $3, $4, 'matched', ST_SetSRID(ST_MakePoint(-55.5, -11.86), 4326)::geography)`,
     [searchRequestId, customerId, "preciso de eletricista", serviceId],
   );
+  await query(`INSERT INTO professional_service_areas (professional_id, city, state, country_code, center, radius_meters)
+    SELECT id, 'Sinop', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.5, -11.86), 4326)::geography, 40000
+    FROM professionals WHERE id IN ($1, $2)`, [firstProfessionalId, secondProfessionalId]);
   await query(
     `INSERT INTO search_conversations (
        id, customer_id, status, pending_slot, original_raw_text, service_text,
@@ -117,12 +120,34 @@ async function createFixture(legacy = false): Promise<Fixture> {
       await query(`DELETE FROM search_conversations WHERE id = $1`, [conversationId]);
       await query(`DELETE FROM search_requests WHERE id = $1`, [searchRequestId]);
       await query(`DELETE FROM professional_services WHERE id = $1 OR id = $2`, [firstProfessionalServiceId, secondProfessionalServiceId]);
+      await query(`DELETE FROM professional_service_areas WHERE professional_id IN ($1, $2)`, [firstProfessionalId, secondProfessionalId]);
       await query(`DELETE FROM professionals WHERE id = $1 OR id = $2`, [firstProfessionalId, secondProfessionalId]);
       await query(`DELETE FROM services WHERE id = $1`, [serviceId]);
       await query(`DELETE FROM service_categories WHERE id = $1`, [categoryId]);
       await query(`DELETE FROM customers WHERE id = $1`, [customerId]);
     },
   };
+}
+
+for (const change of ["suspended", "inactive_service", "inactive_catalog", "removed_coverage"] as const) {
+  test(`first selection revalidates ${change} after presentation without changing history`, async () => {
+    const fixture = await createFixture();
+    try {
+      const professionalId = (await query<{ professional_id: string }>("SELECT professional_id FROM matches WHERE id = $1", [fixture.matchIds[0]])).rows[0].professional_id;
+      if (change === "suspended") await query("UPDATE professionals SET status = 'suspended' WHERE id = $1", [professionalId]);
+      if (change === "inactive_service") await query("UPDATE professional_services SET is_active = false WHERE professional_id = $1", [professionalId]);
+      if (change === "inactive_catalog") await query("UPDATE services SET is_active = false WHERE id = (SELECT service_id FROM search_requests WHERE id = $1)", [fixture.searchRequestId]);
+      if (change === "removed_coverage") await query("DELETE FROM professional_service_areas WHERE professional_id = $1", [professionalId]);
+      const repo = new PostgresSelectionMatchRepository();
+      assert.equal(await repo.findShownByPosition(fixture.searchRequestId, 1), null);
+      const selected = await repo.selectShownMatch({ ...fixture, position: 1, lastMessageText: "1", selectionKey: await fixture.inboundKey("1") });
+      assert.equal(selected.kind, "match_not_available");
+      assert.deepEqual(await bilateralCounts(fixture), { contacts: 0, notifications: 0, selected: 0, status: "active", pending_slot: "selection" });
+      const match = (await query<{ rank_position: number; shown_at: Date }>("SELECT rank_position, shown_at FROM matches WHERE id = $1", [fixture.matchIds[0]])).rows[0];
+      assert.equal(match.rank_position, 1);
+      assert.equal(match.shown_at.getTime(), fixture.shownAt[0].getTime());
+    } finally { await fixture.cleanup(); }
+  });
 }
 
 test("selectShownMatch serializes concurrent selections in PostgreSQL", { concurrency: false }, async () => {

@@ -1,10 +1,6 @@
-// Historical matches retain their ranks and delivery evidence. After a refusal,
-// eligibility is read again, never inferred from the original score snapshot.
+// Historical ranks and delivery evidence never authorize a new contact by
+// themselves. Revalidate every presentation/selection, including the first one.
 export const resumedMatchEligibilitySql = `(
-  NOT EXISTS (SELECT 1 FROM contacts declined
-    WHERE declined.search_request_id = matches.search_request_id AND declined.status = 'declined'
-      AND declined.bilateral_snapshot IS NOT NULL)
-  OR (
     matches.selected_at IS NULL
     AND EXISTS (
       SELECT 1 FROM professionals current_professional
@@ -13,9 +9,11 @@ export const resumedMatchEligibilitySql = `(
       JOIN search_requests request ON request.id = matches.search_request_id AND request.service_id = catalog.id
       WHERE current_professional.id = matches.professional_id
         AND current_professional.status = 'active' AND current_service.is_active AND catalog.is_active
+        AND length(trim(current_professional.display_name)) >= 2
+        AND length(trim(current_professional.slug)) > 0
+        AND current_professional.phone_e164 ~ '^[+][1-9][0-9]{7,14}$'
         AND EXISTS (SELECT 1 FROM professional_service_areas area
           WHERE area.professional_id = current_professional.id
             AND ST_DWithin(area.center, request.location, area.radius_meters))
     )
-  )
 )`;

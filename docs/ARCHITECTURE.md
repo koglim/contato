@@ -1,5 +1,11 @@
 # Arquitetura atual
 
+Estado canônico e checkpoints: [V1_EXECUTION.md](V1_EXECUTION.md). Seções de etapas
+anteriores permanecem como histórico. A elegibilidade de status, serviço, contato
+canônico e cobertura é agora obrigatória também na primeira escolha/apresentação,
+sem depender de recusa anterior. Ranks, snapshots e `shown_at` são preservados;
+replay de contato já efetivado continua usando o snapshot, não o perfil mutável.
+
 ## Contato bilateral — etapa 3
 
 Esta seção atualiza os limites históricos descritos abaixo. A Inbox agora pode concluir uma oportunidade bilateral; não há envio externo dentro da transação, alteração do n8n ou implementação de aceite/recusa profissional.

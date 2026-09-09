@@ -32,8 +32,8 @@ async function createFixture(): Promise<Fixture> {
   await query(`INSERT INTO service_categories (id, name, slug) VALUES ($1, $2, $3)`, [categoryId, "Teste", `teste-${categoryId}`]);
   await query(`INSERT INTO services (id, category_id, name, slug) VALUES ($1, $2, $3, $4)`, [serviceId, categoryId, "Eletricista", `eletricista-${serviceId}`]);
   await query(
-    `INSERT INTO professionals (id, display_name, slug, phone_e164)
-     SELECT value::uuid, 'Profissional ' || row_number() OVER (), 'profissional-' || value, '+5566' || lpad(row_number() OVER ()::text, 9, '0')
+    `INSERT INTO professionals (id, display_name, slug, phone_e164, status)
+     SELECT value::uuid, 'Profissional ' || row_number() OVER (), 'profissional-' || value, '+5566' || lpad(row_number() OVER ()::text, 9, '0'), 'active'::professional_status
        FROM unnest($1::uuid[]) AS input_ids(value)`,
     [professionalIds as unknown as string],
   );
@@ -46,10 +46,13 @@ async function createFixture(): Promise<Fixture> {
     [professionalServiceIds as unknown as string, serviceId, professionalIds as unknown as string],
   );
   await query(
-    `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status)
-     VALUES ($1, $2, 'preciso de eletricista', $3, 'matched')`,
+    `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status, location)
+     VALUES ($1, $2, 'preciso de eletricista', $3, 'matched', ST_SetSRID(ST_MakePoint(-55.5, -11.86), 4326)::geography)`,
     [searchRequestId, customerId, serviceId],
   );
+  await query(`INSERT INTO professional_service_areas (professional_id, city, state, country_code, center, radius_meters)
+    SELECT id, 'Sinop', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.5, -11.86), 4326)::geography, 40000
+    FROM professionals WHERE id = ANY($1::uuid[])`, [professionalIds as unknown as string]);
   await query(
     `INSERT INTO search_conversations (
        id, customer_id, status, pending_slot, original_raw_text, service_text,
@@ -85,6 +88,7 @@ async function createFixture(): Promise<Fixture> {
       await query(`DELETE FROM search_conversations WHERE id = $1`, [conversationId]);
       await query(`DELETE FROM search_requests WHERE id = $1`, [searchRequestId]);
       await query(`DELETE FROM professional_services WHERE professional_id = ANY($1::uuid[])`, [professionalIds as unknown as string]);
+      await query(`DELETE FROM professional_service_areas WHERE professional_id = ANY($1::uuid[])`, [professionalIds as unknown as string]);
       await query(`DELETE FROM professionals WHERE id = ANY($1::uuid[])`, [professionalIds as unknown as string]);
       await query(`DELETE FROM services WHERE id = $1`, [serviceId]);
       await query(`DELETE FROM service_categories WHERE id = $1`, [categoryId]);

@@ -1,5 +1,9 @@
 # API Product Core — contato bilateral
 
+> Estado atual: [V1_EXECUTION.md](V1_EXECUTION.md). As rodadas abaixo são histórico,
+> não instruções para reconstruir módulos ou modificar migrations já aplicadas.
+> A base atual inclui resposta profissional/retomada (015) e retry (016).
+
 ## Rodada atual: `feat/bilateral-contact`
 
 Base exata: `a3135a7f2b6543ce069c1b0b65b0bf428272bbd6`. Sem merge, frontend, n8n, gateway, IA ou variável de ambiente nova. Esta rodada implementa somente a etapa 3; aceite/recusa profissional, avaliações, assinaturas e autenticação permanecem fora do escopo.
