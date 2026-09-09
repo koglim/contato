@@ -15,6 +15,9 @@ const input: SelectionCommandInput = {
 };
 
 class FakeSelectionMatchRepository implements SelectionMatchRepository {
+  async getPendingConfirmation() { return null; }
+  async recoverConsentResponse() { return null; }
+  async declinePendingConfirmation() { return { kind: "consent_declined" as const }; }
   state: SelectionMatchState = { totalMatchCount: 3, shownMatchCount: 2, hasMore: true };
   selected = {
     kind: "selected" as const,

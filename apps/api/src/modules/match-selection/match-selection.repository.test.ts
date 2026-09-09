@@ -42,6 +42,12 @@ function fakeDatabase(results: QueryResultRow[][]) {
   const calls: Array<{ text: string; values: unknown[] }> = [];
   const execute: SelectionMatchQuery = async <T extends QueryResultRow>(text: string, values = []) => {
     calls.push({ text, values });
+    let bilateralRows: QueryResultRow[] | undefined;
+    if (text.includes("FROM channel_inbound_messages inbound")) bilateralRows = [{ id: selectInput.selectionKey, provider: "test", phone_e164: "+5566977777777", raw_text: selectInput.lastMessageText, created_at: selectedAtForTest, decision_at: selectedAtForTest }];
+    if (text.includes("FROM channel_outbound_message_matches presentation")) bilateralRows = [{ id: conversationId, sent_at: shownAt }];
+    if (text.includes("SELECT city, state, neighborhood, raw_text")) bilateralRows = [{ city: "Sinop", state: "MT", neighborhood: null, raw_text: "preciso de eletricista" }];
+    if (text.includes("INSERT INTO channel_outbound_messages")) bilateralRows = [{ id: randomUUID() }];
+    if (bilateralRows) return { rows: bilateralRows as T[] };
     return { rows: (results.shift() ?? []) as T[] };
   };
   let committed = 0;
@@ -59,7 +65,7 @@ function fakeDatabase(results: QueryResultRow[][]) {
   return {
     calls,
     transactionState: () => ({ committed, rolledBack }),
-    repository: new PostgresSelectionMatchRepository(execute, transaction),
+    repository: new PostgresSelectionMatchRepository(execute, transaction, () => "CC-23456789"),
   };
 }
 
@@ -258,20 +264,24 @@ test("selection match repository selects a shown match atomically and completes 
     serviceName: "Eletricista",
     selectedAt: selectedAtForTest,
     replayed: false,
+    publicCode: "CC-23456789",
   });
   assert.equal(context.transactionState().committed, 1);
-  assert.match(context.calls[1]!.text, /search_conversations[\s\S]*FOR UPDATE/u);
+  assert.match(context.calls[1]!.text, /search_conversations[\s\S]*FOR NO KEY UPDATE/u);
   assert.match(context.calls[1]!.text, /expires_at > NOW\(\) AS is_current/u);
-  assert.match(context.calls[3]!.text, /search_requests[\s\S]*FOR UPDATE/u);
+  assert.match(context.calls[3]!.text, /search_requests[\s\S]*FOR NO KEY UPDATE/u);
   assert.match(context.calls[4]!.text, /shown_at IS NOT NULL/u);
   assert.match(context.calls[4]!.text, /selected_at IS NULL/u);
   assert.match(context.calls[4]!.text, /FOR UPDATE OF matches/u);
-  assert.match(context.calls[5]!.text, /SET selected_at = NOW\(\)/u);
-  assert.match(context.calls[6]!.text, /status = 'selected'/u);
-  assert.match(context.calls[7]!.text, /INSERT INTO contacts/u);
-  assert.match(context.calls[8]!.text, /status = 'completed'/u);
-  assert.match(context.calls[8]!.text, /processing_token = NULL/u);
-  assert.match(context.calls[8]!.text, /processing_started_at = NULL/u);
+  const sql = context.calls.map((call) => call.text).join("\n");
+  assert.match(sql, /SET selected_at = NOW\(\)/u);
+  assert.match(sql, /status = 'selected'/u);
+  assert.match(sql, /INSERT INTO contacts/u);
+  assert.match(sql, /status = 'completed'/u);
+  assert.match(sql, /processing_token = NULL/u);
+  assert.match(sql, /processing_started_at = NULL/u);
+  assert.match(sql, /bilateral_snapshot/u);
+  assert.equal(context.calls.filter((call) => /INSERT INTO channel_outbound_messages/u.test(call.text)).length, 2);
   assert.doesNotMatch(context.calls.map((call) => call.text).join("\n"), /shown_at\s*=/u);
 });
 
@@ -402,7 +412,7 @@ test("selection match repository serializes competing selections through row loc
   assert.equal((await first.repository.selectShownMatch(selectInput)).kind, "selected");
   const second = fakeDatabase([[], [activeConversation({ status: "completed", pending_slot: null })], []]);
   assert.equal((await second.repository.selectShownMatch({ ...selectInput, position: 1 })).kind, "conversation_not_active");
-  assert.match(first.calls[1]!.text, /search_conversations[\s\S]*FOR UPDATE/u);
-  assert.match(first.calls[3]!.text, /search_requests[\s\S]*FOR UPDATE/u);
+  assert.match(first.calls[1]!.text, /search_conversations[\s\S]*FOR NO KEY UPDATE/u);
+  assert.match(first.calls[3]!.text, /search_requests[\s\S]*FOR NO KEY UPDATE/u);
   assert.match(first.calls[4]!.text, /FOR UPDATE OF matches/u);
 });

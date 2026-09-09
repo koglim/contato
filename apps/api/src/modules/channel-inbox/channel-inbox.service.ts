@@ -136,7 +136,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         response: {
           message_id: claimed.id,
           duplicate: false,
-          reply_text: replyText,
+          reply_text: outbound.textContent,
           outbound: { id: outbound.id, status: outbound.status },
           result: publicResult(result),
         },
@@ -170,7 +170,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       response: {
         message_id: record.id,
         duplicate: true,
-        reply_text: replyText,
+        reply_text: outbound.textContent,
         outbound: { id: outbound.id, status: outbound.status },
         result: publicResult(result),
       },

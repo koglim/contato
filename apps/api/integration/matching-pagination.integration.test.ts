@@ -19,6 +19,8 @@ async function fixture(count: number) {
   const professionals = Array.from({ length: count }, () => randomUUID());
   const cleanup = async () => {
     await withTransaction(async (client) => {
+      await client.query(`DELETE FROM channel_outbound_messages WHERE business_key IN
+        (SELECT 'contact:' || contacts.id || ':initial' FROM contacts JOIN search_requests ON search_requests.id = contacts.search_request_id WHERE service_id = $1)`, [serviceId]);
       await client.query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [phone]);
       await client.query("DELETE FROM contacts WHERE search_request_id IN (SELECT id FROM search_requests WHERE service_id = $1)", [serviceId]);
       await client.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE service_id = $1)", [serviceId]);

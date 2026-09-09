@@ -1,4 +1,5 @@
 import type { MatchingSearchResponse } from "@contatocerto/shared";
+import { BILATERAL_NOTICE } from "../bilateral-contact/bilateral-contact.policy.js";
 import type { MessagePresenter, SearchRouteMessageResponse } from "./message-presentation.types.js";
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -43,7 +44,7 @@ function presentMatches(matching: MatchingSearchResponse) {
       `💰 ${formatPrice(match.service)}`,
     ].join("\n");
   });
-  return [title, ...entries, "Responda com o número ou com o nome do profissional que você quer escolher."].join("\n\n");
+  return [title, ...entries, BILATERAL_NOTICE, "Responda com o número ou com o nome do profissional que você quer escolher."].join("\n\n");
 }
 
 function assertNever(value: never): never {

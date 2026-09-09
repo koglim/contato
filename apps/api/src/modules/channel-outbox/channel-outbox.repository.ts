@@ -1,10 +1,12 @@
 import type { QueryResultRow } from "pg";
+import { BILATERAL_NOTICE, BILATERAL_NOTICE_VERSION } from "../bilateral-contact/bilateral-contact.policy.js";
 import { MAX_PRESENTED_PER_SEARCH, PRESENTATION_PAGE_SIZE } from "../matching/matching-policy.js";
 import { query, withTransaction, type DatabaseClient, type SqlValue } from "../../database/connection.js";
 import type {
   ChannelOutboundMessageRecord,
   ChannelOutboundMessageRepository,
   CreateChannelOutboundMessage,
+  CreateIndependentChannelOutboundMessage,
 } from "./channel-outbox.types.js";
 import type { ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 
@@ -70,6 +72,31 @@ export function toChannelOutboundMessageRecord(row: ChannelOutboundMessageRow): 
 
 const defaultQuery: ChannelOutboxQuery = (text, values = []) => query(text, values as SqlValue[]);
 
+export async function createIndependentOutbound(client: DatabaseClient, input: CreateIndependentChannelOutboundMessage) {
+  if (!input.businessKey.trim() || !input.textContent.trim() || !/^\+[1-9]\d{7,14}$/u.test(input.recipientPhoneE164)) {
+    throw new Error("Invalid independent outbound context");
+  }
+  const inserted = await client.query<ChannelOutboundMessageRow>(
+    `INSERT INTO channel_outbound_messages (
+       channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, business_key
+     ) VALUES (NULL, $1, $2, $3, $4, $5)
+     ON CONFLICT (business_key) WHERE business_key IS NOT NULL DO NOTHING
+     RETURNING ${channelOutboundMessageColumns}`,
+    [input.purpose, input.provider, input.recipientPhoneE164, input.textContent, input.businessKey],
+  );
+  if (inserted.rows[0]) return toChannelOutboundMessageRecord(inserted.rows[0]);
+  const existing = await client.query<ChannelOutboundMessageRow>(
+    `SELECT ${channelOutboundMessageColumns} FROM channel_outbound_messages WHERE business_key = $1`, [input.businessKey],
+  );
+  const row = existing.rows[0];
+  if (!row || row.purpose !== input.purpose || row.provider !== input.provider
+    || row.recipient_phone_e164 !== input.recipientPhoneE164 || row.text_content !== input.textContent) {
+    throw new Error("Independent outbound idempotency conflict");
+  }
+  // No UPDATE: replay cannot reset sent, lease, attempts, timestamps or content.
+  return toChannelOutboundMessageRecord(row);
+}
+
 export async function associateOutboundMessageMatches(
   client: DatabaseClient,
   outboundMessageId: string,
@@ -94,6 +121,7 @@ export async function associateOutboundMessageMatches(
         AND rank_position <= $3
         AND shown_at IS NULL
         AND id = ANY($2::uuid[])
+        AND EXISTS (SELECT 1 FROM search_requests WHERE id = $1 AND status = 'matched')
         AND NOT EXISTS (
           SELECT 1 FROM matches pending
           JOIN channel_outbound_message_matches reservation ON reservation.match_id = pending.id
@@ -149,29 +177,21 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
     return this.transaction(async (client) => {
       const result = await client.query<ChannelOutboundMessageRow>(
       `INSERT INTO channel_outbound_messages (
-         channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content
-       ) VALUES ($1, $2, $3, $4, $5)
+         channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, bilateral_notice_version
+       ) VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (channel_inbound_message_id) WHERE channel_inbound_message_id IS NOT NULL DO UPDATE
          SET channel_inbound_message_id = EXCLUDED.channel_inbound_message_id
        RETURNING ${channelOutboundMessageColumns}`,
-        [input.channelInboundMessageId, "customer_reply", input.provider, input.recipientPhoneE164, input.textContent],
+        [input.channelInboundMessageId, "customer_reply", input.provider, input.recipientPhoneE164, input.textContent,
+          input.matchIds.length && input.textContent.includes(BILATERAL_NOTICE) ? BILATERAL_NOTICE_VERSION : null],
       );
       await associateOutboundMessageMatches(client, result.rows[0].id, input);
       return toChannelOutboundMessageRecord(result.rows[0]);
     });
   }
 
-  async createIndependent(input: { purpose: "professional_contact_notification"; provider: string; recipientPhoneE164: string; textContent: string }) {
-    return this.transaction(async (client) => {
-      const result = await client.query<ChannelOutboundMessageRow>(
-        `INSERT INTO channel_outbound_messages (
-           channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content
-         ) VALUES (NULL, $1, $2, $3, $4)
-         RETURNING ${channelOutboundMessageColumns}`,
-        [input.purpose, input.provider, input.recipientPhoneE164, input.textContent],
-      );
-      return toChannelOutboundMessageRecord(result.rows[0]!);
-    });
+  async createIndependent(input: CreateIndependentChannelOutboundMessage) {
+    return this.transaction((client) => createIndependentOutbound(client, input));
   }
 
   async claim(id: string, processingToken: string, processingLeaseSeconds: number) {

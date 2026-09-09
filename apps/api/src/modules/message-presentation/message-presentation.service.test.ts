@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { CustomerSearchMessageResponse } from "@contatocerto/shared";
 import { DefaultMessagePresenter } from "./message-presentation.service.js";
+import { BILATERAL_NOTICE } from "../bilateral-contact/bilateral-contact.policy.js";
 
 const customerId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
@@ -52,7 +53,7 @@ test("presents concise prompts for pending location and service", () => {
 });
 
 test("presents one matched professional using public fields only", () => {
-  assert.equal(presenter.present(response("matched") as never), "Encontrei um profissional para você 👇\n\n1. *Ricardo Santos*\nEletricista\n📍 2,5 km\n💰 A partir de R$ 150,00\n\nResponda com o número ou com o nome do profissional que você quer escolher.");
+  assert.equal(presenter.present(response("matched") as never), `Encontrei um profissional para você 👇\n\n1. *Ricardo Santos*\nEletricista\n📍 2,5 km\n💰 A partir de R$\u00a0150,00\n\n${BILATERAL_NOTICE}\n\nResponda com o número ou com o nome do profissional que você quer escolher.`);
 });
 
 test("presents matches in their received order", () => {

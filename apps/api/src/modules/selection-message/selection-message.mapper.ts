@@ -13,7 +13,12 @@ export function mapSelectionCommandOutcome(outcome: SelectionCommandOutcome): Se
         professional_name: outcome.professionalDisplayName,
         service_name: outcome.serviceName,
         professional_phone_e164: outcome.professionalPhoneE164,
+        ...(outcome.publicCode ? { public_code: outcome.publicCode } : {}),
       };
+    case "consent_required":
+      return { kind: "consent_required", professional_name: outcome.professionalDisplayName };
+    case "consent_declined":
+      return { kind: "consent_declined" };
     case "invalid_selection":
       return {
         kind: "invalid_selection",

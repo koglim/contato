@@ -6,10 +6,13 @@ const selectedSelectionMessageSchema = z.object({
   professional_name: z.string().trim().min(1).max(255),
   service_name: z.string().trim().min(1).max(120),
   professional_phone_e164: phoneE164Schema,
+  public_code: z.string().regex(/^CC-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/u).optional(),
 }).strict();
 
 export const selectionMessageContractSchema = z.discriminatedUnion("kind", [
   selectedSelectionMessageSchema,
+  z.object({ kind: z.literal("consent_required"), professional_name: z.string().min(1).max(120) }).strict(),
+  z.object({ kind: z.literal("consent_declined") }).strict(),
   z.object({
     kind: z.literal("invalid_selection"),
     requested_position: z.number().int().positive(),

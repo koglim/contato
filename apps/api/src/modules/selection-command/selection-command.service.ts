@@ -1,4 +1,5 @@
 import { routeConversationCommand } from "../conversation-commands/conversation-command.router.js";
+import { parseBilateralConfirmation } from "../bilateral-contact/bilateral-contact.policy.js";
 import { resolveProfessionalSelection } from "./professional-selection.resolver.js";
 import { presentationPageSize } from "../matching/matching-policy.js";
 import type {
@@ -22,6 +23,17 @@ export class DefaultSelectionCommandService implements SelectionCommandService {
   async process(input: SelectionCommandInput): Promise<SelectionCommandOutcome> {
     const contextError = invalidContext(input);
     if (contextError) return contextError;
+
+    const pending = await this.dependencies.selectionMatchRepository.getPendingConfirmation(input.customerId!, input.conversationId);
+    if (pending) {
+      const answer = parseBilateralConfirmation(input.rawText);
+      const choice = { conversationId: input.conversationId, customerId: input.customerId!,
+        searchRequestId: input.searchRequestId!, position: pending.position,
+        selectionKey: input.selectionKey, lastMessageText: input.lastMessageText };
+      if (answer === "decline") return this.dependencies.selectionMatchRepository.declinePendingConfirmation(choice);
+      if (answer === "confirm") return this.dependencies.selectionMatchRepository.selectShownMatch({ ...choice, confirmBilateral: true });
+      return { kind: "consent_required", professionalDisplayName: pending.professionalDisplayName };
+    }
 
     const state = await this.dependencies.selectionMatchRepository.getState(input.searchRequestId!);
     const routed = routeConversationCommand(input.rawText, {
@@ -78,6 +90,7 @@ export class DefaultSelectionCommandService implements SelectionCommandService {
   }
 
   async recoverSelection(customerId: string, selectionKey: string) {
-    return this.dependencies.selectionMatchRepository.findSelectedByCustomerAndSelectionKey(customerId, selectionKey);
+    return await this.dependencies.selectionMatchRepository.findSelectedByCustomerAndSelectionKey(customerId, selectionKey)
+      ?? this.dependencies.selectionMatchRepository.recoverConsentResponse(customerId, selectionKey);
   }
 }

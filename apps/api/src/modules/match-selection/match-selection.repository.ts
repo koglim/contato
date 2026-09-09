@@ -1,4 +1,7 @@
 import type { QueryResultRow } from "pg";
+import { selectionMessageContractSchema } from "@contatocerto/shared";
+import { createOpportunityCode, parseBilateralConfirmation } from "../bilateral-contact/bilateral-contact.policy.js";
+import { createBilateralContact, prepareBilateralSelection, pendingConsentSchema, persistConsentResponse, selectionInbound } from "../bilateral-contact/bilateral-contact.transaction.js";
 import { MAX_PRESENTED_PER_SEARCH, presentationPageSize } from "../matching/matching-policy.js";
 import { query, withTransaction, type DatabaseClient, type SqlValue } from "../../database/connection.js";
 import type {
@@ -8,6 +11,7 @@ import type {
   SelectShownMatchInput,
   SelectShownMatchOutcome,
   SelectedMatchOutcome,
+  ConsentOutcome,
 } from "./match-selection.types.js";
 
 type SelectionMatchRow = {
@@ -50,6 +54,7 @@ type SelectionConversationRow = {
   pending_slot: string | null;
   search_request_id: string | null;
   is_current: boolean;
+  bilateral_pending?: unknown;
 };
 
 type SelectionSearchRequestRow = { customer_id: string | null; status: string };
@@ -63,7 +68,6 @@ type SelectableMatchRow = {
 };
 
 type SelectedMatchRow = { selected_at: Date };
-type ContactRow = { id: string };
 type ExistingSelectionRow = {
   contact_id: string;
   customer_id: string | null;
@@ -74,6 +78,8 @@ type ExistingSelectionRow = {
   phone_e164: string | null;
   service_name: string | null;
   selected_at: Date | null;
+  public_code?: string | null;
+  selection_conversation_id?: string | null;
 };
 
 const selectionMatchColumns = `
@@ -123,6 +129,7 @@ function toSelectionMatchRecord(row: SelectionMatchRow): SelectionMatchRecord {
 function existingSelectionOutcome(row: ExistingSelectionRow, input: SelectShownMatchInput): SelectShownMatchOutcome {
   if (
     row.customer_id !== input.customerId
+    || (row.selection_conversation_id != null && row.selection_conversation_id !== input.conversationId)
     || row.search_request_id !== input.searchRequestId
     || !row.match_id
     || !row.display_name
@@ -140,6 +147,7 @@ function existingSelectionOutcome(row: ExistingSelectionRow, input: SelectShownM
     serviceName: row.service_name,
     selectedAt: row.selected_at,
     replayed: true,
+    ...(row.public_code ? { publicCode: row.public_code } : {}),
   };
 }
 
@@ -155,6 +163,7 @@ function replayedSelectionOutcome(row: ExistingSelectionRow): SelectedMatchOutco
     serviceName: row.service_name,
     selectedAt: row.selected_at,
     replayed: true,
+    ...(row.public_code ? { publicCode: row.public_code } : {}),
   };
 }
 
@@ -165,9 +174,11 @@ async function findSelectionByKey(client: DatabaseClient, selectionKey: string) 
             contacts.search_request_id,
             matches.id AS match_id,
             contacts.professional_id,
-            professionals.display_name,
-            professionals.phone_e164,
-            services.name AS service_name,
+            COALESCE(contacts.bilateral_snapshot ->> 'professional_name', professionals.display_name) AS display_name,
+            COALESCE(contacts.bilateral_snapshot ->> 'professional_phone_e164', professionals.phone_e164) AS phone_e164,
+            COALESCE(contacts.bilateral_snapshot ->> 'service_name', services.name) AS service_name,
+            contacts.public_code,
+            contacts.selection_conversation_id,
             matches.selected_at
        FROM contacts
        LEFT JOIN matches
@@ -177,8 +188,7 @@ async function findSelectionByKey(client: DatabaseClient, selectionKey: string) 
        LEFT JOIN professionals ON professionals.id = contacts.professional_id
        LEFT JOIN search_requests ON search_requests.id = contacts.search_request_id
        LEFT JOIN services ON services.id = search_requests.service_id
-      WHERE contacts.selection_key = $1
-      FOR UPDATE OF contacts`,
+      WHERE contacts.selection_key = $1`,
     [selectionKey],
   );
   return result.rows[0] ?? null;
@@ -196,7 +206,42 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
   constructor(
     private readonly execute: SelectionMatchQuery = query,
     private readonly transaction: SelectionMatchTransaction = withTransaction,
+    private readonly generateCode: () => string = createOpportunityCode,
   ) {}
+
+  async getPendingConfirmation(customerId: string, conversationId: string) {
+    const result = await this.execute<{ bilateral_pending: unknown }>(`SELECT bilateral_pending FROM search_conversations
+      WHERE id = $1 AND customer_id = $2 AND status = 'active' AND pending_slot = 'selection'
+        AND expires_at > NOW() AND bilateral_pending IS NOT NULL`, [conversationId, customerId]);
+    if (!result.rows[0]) return null;
+    const pending = pendingConsentSchema.parse(result.rows[0].bilateral_pending);
+    return { position: pending.position, professionalDisplayName: pending.professionalDisplayName };
+  }
+
+  async recoverConsentResponse(customerId: string, selectionKey: string): Promise<ConsentOutcome | null> {
+    const result = await this.execute<{ bilateral_response: unknown }>(`SELECT bilateral_response FROM channel_inbound_messages
+      WHERE id = $1 AND customer_id = $2 AND bilateral_response IS NOT NULL`, [selectionKey, customerId]);
+    if (!result.rows[0]) return null;
+    const contract = selectionMessageContractSchema.parse(result.rows[0].bilateral_response);
+    if (contract.kind === "consent_required") return { kind: "consent_required", professionalDisplayName: contract.professional_name };
+    if (contract.kind === "consent_declined") return { kind: "consent_declined" };
+    throw new Error("Unexpected consent response kind");
+  }
+
+  async declinePendingConfirmation(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome> {
+    return this.transaction(async (client) => {
+      const found = await client.query<{ bilateral_pending: unknown }>(`SELECT bilateral_pending FROM search_conversations
+        WHERE id = $1 AND customer_id = $2 AND search_request_id = $3 AND status = 'active'
+          AND pending_slot = 'selection' AND expires_at > NOW() FOR NO KEY UPDATE`,
+      [input.conversationId, input.customerId, input.searchRequestId]);
+      if (!found.rows[0]?.bilateral_pending) return { kind: "conversation_not_active" };
+      const inbound = await selectionInbound(client, input);
+      if (!inbound || parseBilateralConfirmation(inbound.raw_text) !== "decline") return { kind: "idempotency_conflict" };
+      await client.query("UPDATE search_conversations SET bilateral_pending = NULL WHERE id = $1", [input.conversationId]);
+      await persistConsentResponse(client, input, inbound, { kind: "consent_declined" });
+      return { kind: "consent_declined" };
+    });
+  }
 
   async getState(searchRequestId: string): Promise<SelectionMatchState> {
     const result = await this.execute<SelectionMatchStateRow>(
@@ -309,9 +354,10 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
               contacts.search_request_id,
               matches.id AS match_id,
               contacts.professional_id,
-              professionals.display_name,
-              professionals.phone_e164,
-              services.name AS service_name,
+              COALESCE(contacts.bilateral_snapshot ->> 'professional_name', professionals.display_name) AS display_name,
+              COALESCE(contacts.bilateral_snapshot ->> 'professional_phone_e164', professionals.phone_e164) AS phone_e164,
+              COALESCE(contacts.bilateral_snapshot ->> 'service_name', services.name) AS service_name,
+              contacts.public_code,
               matches.selected_at
          FROM contacts
          JOIN matches
@@ -320,7 +366,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
           AND matches.selected_at IS NOT NULL
          JOIN professionals ON professionals.id = contacts.professional_id
          JOIN search_requests ON search_requests.id = contacts.search_request_id
-         JOIN services ON services.id = search_requests.service_id
+         LEFT JOIN services ON services.id = search_requests.service_id
         WHERE contacts.customer_id = $1
           AND contacts.selection_key = $2`,
       [customerId, selectionKey],
@@ -344,10 +390,10 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
       }
 
       const conversation = await client.query<SelectionConversationRow>(
-        `SELECT customer_id, status, pending_slot, search_request_id, expires_at > NOW() AS is_current
+        `SELECT customer_id, status, pending_slot, search_request_id, bilateral_pending, expires_at > NOW() AS is_current
            FROM search_conversations
           WHERE id = $1
-          FOR UPDATE`,
+          FOR NO KEY UPDATE`,
         [input.conversationId],
       );
       const conversationRow = conversation.rows[0];
@@ -367,7 +413,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         `SELECT customer_id, status
            FROM search_requests
           WHERE id = $1
-          FOR UPDATE`,
+          FOR NO KEY UPDATE`,
         [input.searchRequestId],
       );
       const searchRequestRow = searchRequest.rows[0];
@@ -397,6 +443,9 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
       const matchRow = match.rows[0];
       if (!matchRow) return { kind: "match_not_available" };
 
+      const bilateral = await prepareBilateralSelection(client, input, matchRow, conversationRow.bilateral_pending);
+      if (bilateral.kind !== "ready") return bilateral;
+
       const selected = await client.query<SelectedMatchRow>(
         `UPDATE matches
             SET selected_at = NOW()
@@ -411,12 +460,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         `UPDATE search_requests SET status = 'selected' WHERE id = $1 AND status = 'matched'`,
         [input.searchRequestId],
       );
-      const contact = await client.query<ContactRow>(
-        `INSERT INTO contacts (search_request_id, customer_id, professional_id, status, selection_key)
-         VALUES ($1, $2, $3, 'requested', $4)
-         RETURNING id`,
-        [input.searchRequestId, input.customerId, matchRow.professional_id, input.selectionKey],
-      );
+      const contact = await createBilateralContact(client, input, matchRow, bilateral.context, selected.rows[0].selected_at, this.generateCode);
       await client.query(
         `UPDATE search_conversations
             SET status = 'completed',
@@ -424,21 +468,23 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
                 last_message_text = $2,
                 completed_at = NOW(),
                 processing_token = NULL,
-                processing_started_at = NULL
+                processing_started_at = NULL,
+                bilateral_pending = NULL
           WHERE id = $1`,
         [input.conversationId, input.lastMessageText],
       );
 
       return {
         kind: "selected",
-        contactId: contact.rows[0]!.id,
+        contactId: contact.contactId,
         matchId: matchRow.match_id,
         professionalId: matchRow.professional_id,
-        professionalDisplayName: matchRow.display_name,
-        professionalPhoneE164: matchRow.phone_e164,
-        serviceName: matchRow.service_name,
+        professionalDisplayName: contact.snapshot.professional_name,
+        professionalPhoneE164: contact.snapshot.professional_phone_e164,
+        serviceName: contact.snapshot.service_name,
         selectedAt: selected.rows[0].selected_at,
         replayed: false,
+        publicCode: contact.snapshot.public_code,
       };
       });
     } catch (error) {

@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { BILATERAL_NOTICE, BILATERAL_NOTICE_VERSION } from "../bilateral-contact/bilateral-contact.policy.js";
 import { query, withTransaction, type DatabaseClient, type SqlValue } from "../../database/connection.js";
 import type {
   ChannelInboundMessageRecord,
@@ -134,8 +135,8 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
 
       const outbound = await client.query<ChannelOutboundMessageRow>(
         `INSERT INTO channel_outbound_messages (
-           channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content
-         ) VALUES ($1, 'customer_reply', $2, $3, $4)
+           channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, bilateral_notice_version
+         ) VALUES ($1, 'customer_reply', $2, $3, $4, $5)
          ON CONFLICT (channel_inbound_message_id) WHERE channel_inbound_message_id IS NOT NULL DO UPDATE
            SET channel_inbound_message_id = EXCLUDED.channel_inbound_message_id
          RETURNING ${channelOutboundMessageColumns}`,
@@ -144,6 +145,7 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
           input.outbound.provider,
           input.outbound.recipientPhoneE164,
           input.outbound.textContent,
+          input.outbound.matchIds.length && input.outbound.textContent.includes(BILATERAL_NOTICE) ? BILATERAL_NOTICE_VERSION : null,
         ],
       );
       await associateOutboundMessageMatches(client, outbound.rows[0].id, input.outbound);

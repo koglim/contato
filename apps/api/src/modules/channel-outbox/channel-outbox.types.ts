@@ -33,6 +33,7 @@ export type CreateChannelOutboundMessage = {
 };
 
 export type CreateIndependentChannelOutboundMessage = {
+  businessKey: string;
   purpose: "professional_contact_notification";
   provider: string;
   recipientPhoneE164: string;
