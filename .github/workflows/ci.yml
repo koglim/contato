@@ -81,6 +81,28 @@ jobs:
           $$;
           SQL
 
+      - name: Verify migration 016 before PostgreSQL integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'channel_outbound_messages' AND column_name = 'next_attempt_at'
+            ) THEN
+              RAISE EXCEPTION 'channel_outbound_messages next_attempt_at is missing before integration tests';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE tablename = 'channel_outbound_messages'
+                 AND indexname = 'channel_outbound_messages_pending_next_attempt_idx'
+            ) THEN
+              RAISE EXCEPTION 'pending retry index is missing before integration tests';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 
@@ -173,28 +195,6 @@ jobs:
                  AND indexname = 'channel_outbound_messages_customer_reply_inbound_uidx'
             ) THEN
               RAISE EXCEPTION 'customer reply inbound uniqueness index is missing';
-            END IF;
-          END
-          $$;
-          SQL
-
-      - name: Verify migration 016
-        run: |
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
-          DO $$
-          BEGIN
-            IF NOT EXISTS (
-              SELECT 1 FROM information_schema.columns
-               WHERE table_name = 'channel_outbound_messages' AND column_name = 'next_attempt_at'
-            ) THEN
-              RAISE EXCEPTION 'channel_outbound_messages next_attempt_at is missing';
-            END IF;
-            IF NOT EXISTS (
-              SELECT 1 FROM pg_indexes
-               WHERE tablename = 'channel_outbound_messages'
-                 AND indexname = 'channel_outbound_messages_pending_next_attempt_idx'
-            ) THEN
-              RAISE EXCEPTION 'pending retry index is missing';
             END IF;
           END
           $$;

@@ -334,7 +334,7 @@ test("migration 015 refuses destructive rollback and events cannot be overwritte
     await f.send(`aceito ${f.code}`);
     await assert.rejects(query("UPDATE opportunity_response_events SET next_state='declined' WHERE contact_id=$1",[f.contactId]),/append-only/);
     const before = await f.conversations();
-    await assert.rejects(promisify(execFile)(process.execPath,["node_modules/node-pg-migrate/bin/node-pg-migrate.js","-m","database/migrations","--database-url-var","DATABASE_URL","down"],
+    await assert.rejects(promisify(execFile)(process.execPath,["node_modules/node-pg-migrate/bin/node-pg-migrate.js","-m","database/migrations","--database-url-var","DATABASE_URL","down","2"],
       {cwd:fileURLToPath(new URL("../../../",import.meta.url))}), (error: unknown) => {
       assert.ok(error instanceof Error && "stderr" in error);
       assert.match(String(error.stderr),/OPPORTUNITY_RESPONSE_ROLLBACK_BLOCKED/);

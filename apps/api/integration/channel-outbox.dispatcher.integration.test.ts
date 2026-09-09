@@ -8,8 +8,8 @@ after(async () => closeDatabaseConnection());
 
 async function insertIndependent(status: "pending" | "processing" = "pending", processingStartedAt: Date | null = null, nextAttemptAt: Date | null = null, purpose: "professional_contact_notification" | "customer_reply" = "professional_contact_notification") {
   const outboundId = randomUUID();
-  const inboundId = randomUUID();
-  if (purpose === "customer_reply") {
+  const inboundId = purpose === "customer_reply" ? randomUUID() : null;
+  if (inboundId !== null) {
     await query(`INSERT INTO channel_inbound_messages
       (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value)
       VALUES ($1, 'dispatcher-test', $2, '+5566999999999', 'dispatcher fixture', 'BR', 3)`, [inboundId, outboundId]);
@@ -17,7 +17,7 @@ async function insertIndependent(status: "pending" | "processing" = "pending", p
   const result = await query<{ id: string }>(
     `INSERT INTO channel_outbound_messages (
        id, purpose, channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, processing_token, processing_started_at, attempt_count, next_attempt_at
-     ) VALUES ($1, $2, CASE WHEN $2 = 'customer_reply' THEN $3 ELSE NULL END, 'test', $4, 'Mensagem de teste', $5, $6, $7, $8, $9)
+     ) VALUES ($1, $2, $3, 'test', $4, 'Mensagem de teste', $5, $6, $7, $8, $9)
      RETURNING id`,
     [
       outboundId,
@@ -110,6 +110,14 @@ test("dispatcher applies the exponential retry schedule and dead-letters on the 
 test("dispatcher uses the same claim contract for customer replies and professional notifications", { concurrency: false }, async () => {
   const customerId = await insertIndependent("pending", null, null, "customer_reply");
   const professionalId = await insertIndependent();
+  const linkage = await query<{ inbound_id: string | null }>(
+    "SELECT channel_inbound_message_id AS inbound_id FROM channel_outbound_messages WHERE id = $1", [customerId],
+  );
+  const independent = await query<{ inbound_id: string | null }>(
+    "SELECT channel_inbound_message_id AS inbound_id FROM channel_outbound_messages WHERE id = $1", [professionalId],
+  );
+  assert.ok(linkage.rows[0]?.inbound_id);
+  assert.equal(independent.rows[0]?.inbound_id, null);
   const repository = new PostgresChannelOutboundMessageRepository();
   try {
     const first = await repository.claimNextPending(randomUUID(), 60);
