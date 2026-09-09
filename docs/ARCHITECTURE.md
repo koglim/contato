@@ -1,5 +1,16 @@
 # Arquitetura atual
 
+O BFF do painel aplica uma allowlist de autosserviço no servidor antes do proxy
+interno. Status administrativo, verificação e identidade não podem ser alterados
+pela sessão demonstrativa. Ela continua vinculada ao profissional configurado;
+não confundir esse limite de segurança com a identidade individual ainda pendente.
+
+O transporte proposto tem exports inativos versionados em `workflows/n8n`.
+As funções puras dos Code nodes são também usadas pelos testes PostgreSQL de
+entrega bilateral com provider simulado. Esses testes não executam o motor n8n.
+Gateway imediato e dispatcher deverão compartilhar esse transporte na homologação,
+sem mudar a criação transacional das mensagens na API.
+
 Confirmações repetidas e retenções de entrega usam recibo persistido (017).
 Notificações independentes são ordenadas por destinatário; leases abandonadas
 têm limite terminal. O contrato e as limitações operacionais estão em

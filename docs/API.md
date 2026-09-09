@@ -1,5 +1,26 @@
 # API interna
 
+## Limite de autosserviço do painel
+
+O BFF `PATCH /api/dashboard` autentica a sessão demonstrativa e valida método,
+ação, UUIDs e payload antes de usar a chave interna. Para `action=profile`, aceita
+somente `display_name`, `email`, `bio` e `profile_image_url`. Campos administrativos
+(`status`, `is_verified`), telefone e ownership são rejeitados, não ignorados.
+Status/telefone são somente leitura na interface; a futura troca de telefone
+depende de verificação de identidade. O contrato administrativo `/internal`
+permanece restrito à chave interna, sem alteração neste checkpoint.
+
+Serviços e áreas preservam os contratos existentes; UUIDs não podem alterar o
+caminho da API. O profissional vem da configuração **servidora** atual, nunca do
+corpo do navegador. Isso fecha F02, mas não implementa contas individuais (F03):
+o acesso por senha demonstrativa não deve ser oferecido como painel multiusuário.
+O BFF aceita somente JSON, retorna 401 sem sessão e 400 para mutações inválidas.
+
+Os exports do consumidor ficam em [workflows/n8n](../workflows/n8n/README.md),
+inativos e sem credenciais. Inbox/claim por ID continuam sendo o caminho imediato;
+o dispatcher chama `next/claim` e usa o mesmo subworkflow de entrega. Homologação
+da versão instalada e autenticidade do gateway permanecem pendentes.
+
 ## Confirmação e reconciliação Outbox (017)
 
 `POST /internal/channel/outbound/:id/sent` aceita repetição idêntica com o token
