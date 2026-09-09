@@ -1,5 +1,41 @@
 # API interna
 
+## Contato bilateral — contrato atual
+
+Esta seção atualiza a jornada Inbox/Outbox descrita nas etapas históricas abaixo. Endpoints e consumidor por `outbound.id` permanecem compatíveis; nenhuma variável de ambiente nova ou alteração n8n foi introduzida. Aplicar a migration 014 antes de executar esta versão da API.
+
+Novas apresentações, inclusive “mostrar mais”, incluem o aviso versionado `bilateral-v1`: “Ao escolher, vocês receberão o telefone um do outro somente para combinar o atendimento solicitado.” Nenhum telefone é exibido antes da escolha autorizada. Somente a apresentação confirmada como enviada pode fundamentar o consentimento pela escolha.
+
+O resultado discriminado `route: selection` aceita dois novos estados estritos:
+
+```json
+{ "kind": "consent_required", "professional_name": "Ana Eletricista" }
+```
+
+```json
+{ "kind": "consent_declined" }
+```
+
+São usados para apresentações legadas sem aviso auditável. A confirmação pede compartilhamento bilateral e aceita afirmações completas como “sim”, “pode”, “quero”, “confirmo” e “pode compartilhar”; perguntas e hipóteses não autorizam. “não”/“não quero” recusam e voltam às opções sem compartilhar telefone. Os comandos globais continuam prioritários. O prompt precisa ter sido confirmado como enviado antes do inbound de confirmação. A pendência é persistida e respeita o TTL da conversa.
+
+Em contatos novos, `selected` adiciona `public_code` opcional para compatibilidade com resultados históricos:
+
+```json
+{
+  "kind": "selected",
+  "professional_name": "Ana Eletricista",
+  "service_name": "Eletricista",
+  "professional_phone_e164": "+5566988888888",
+  "public_code": "CC-7K4P9Q2M"
+}
+```
+
+Não expõe `contactId`, `matchId`, `professionalId`, `replayed` ou telefone do cliente nesse contrato. O contato, consentimento, snapshot e as intenções de resposta ao cliente e notificação profissional são confirmados na mesma transação. Se a Inbox cair antes de `processed`, recupera pelo UUID do inbound e reutiliza a resposta existente. Replay utiliza o texto persistido da Outbox, mesmo depois de edição de perfil ou evolução do presenter.
+
+A segunda intenção tem `purpose: professional_contact_notification`, sem inbound e com chave interna única por contato. Contém somente código público, serviço, cidade/UF disponíveis, bairro quando explicitamente informado, resumo sanitizado, telefone do cliente e orientação para combinar atendimento. Não inclui aceite/recusa profissional. O dispatcher `/internal/channel/outbound/next/claim` já pode reservá-la; nenhum envio externo ou consumidor n8n novo foi implementado nesta rodada. A resposta da Inbox continua apontando exclusivamente à mensagem destinada ao cliente.
+
+**Operação de banco:** o down 014 é protegido. Dados incompatíveis (consentimento, snapshots, chaves, avisos ou notificações independentes) bloqueiam a tentativa com `BILATERAL_ROLLBACK_BLOCKED`, sem alterações de schema/dados/envios. Não forçar removendo registros. Corrigir evolutivamente ou restaurar backup integral verificado. Sem esses dados, o CI executa rollback 014 → 008 e reaplicação completos.
+
 ## Proteção temporária
 
 As rotas administrativas usam a variável de ambiente `INTERNAL_API_KEY`. Envie o valor configurado no header abaixo:
@@ -518,7 +554,7 @@ O n8n não interpreta linguagem nem aplica regras de negócio: ele transporta a 
 
 ## Channel Outbox
 
-Cada registro Outbox possui uma finalidade explícita: `customer_reply` para a resposta vinculada a um inbound (mantendo uma por inbound) ou `professional_contact_notification` para uma futura mensagem independente. Nesta etapa somente a primeira finalidade é criada pelo fluxo de negócio; nenhuma notificação ao profissional é gerada.
+Cada registro Outbox possui uma finalidade explícita: `customer_reply` para a resposta vinculada a um inbound (mantendo uma por inbound) ou `professional_contact_notification` para a notificação independente criada atomicamente com um contato bilateral autorizado. A segunda usa chave única de negócio por contato, sem inbound fictício.
 
 Quando o cliente envia “mostrar mais” durante uma seleção, a API não inicia nova busca: consulta a mesma `search_request`, usa o limite original salvo na conversa e cria uma nova mensagem Outbox com a próxima página ordenada por `rank_position`. A numeração é absoluta e a resposta orienta a escolha por número ou nome. Matches já associados a outra apresentação não entram na página; a migration 011 garante essa reserva única por `match_id`. A reserva e a criação da Outbox são protegidas pela transação: uma colisão concorrente reverte o inbound e retorna `selection_show_more_pending`, sem criar uma Outbox sem associações. Enquanto uma página estiver pendente ou falha, novas solicitações não são tratadas como “não há mais opções”.
 
@@ -536,7 +572,7 @@ Em erro de transporte, o n8n chama `POST /internal/channel/outbound/:id/failed`.
 
 Após a Evolution aceitar a mensagem, `POST /internal/channel/outbound/:outboundId/sent` recebe `processing_token` e `provider_message_id`; somente o claim atual pode marcar `sent`. Em falha, `POST /internal/channel/outbound/:outboundId/failed` recebe o token e um `error_code` controlado. Ambos retornam somente `{ id, status }`; token inválido, expirado ou já concluído retorna `409 outbound_message_claim_invalid`.
 
-`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem pendente, falha ou abandonada; quando a fila está vazia, retorna `204 No Content`. O claim individual existente continua retornando `404` para um ID inexistente. Esta etapa não envia mensagens, não cria notificação ao profissional e não altera o n8n.
+`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem pendente, falha ou abandonada; quando a fila está vazia, retorna `204 No Content`. O claim individual existente continua retornando `404` para um ID inexistente. A API persiste a intenção profissional, mas não faz envio externo nem altera o n8n.
 
 Há uma janela residual inevitável: a Evolution pode aceitar a mensagem e o n8n cair antes de confirmar `/sent`; após a lease expirar, um novo claim poderá reenviá-la. A arquitetura evita perda da intenção e duplicações lógicas usuais, mas não promete exactly-once matemático.
 
