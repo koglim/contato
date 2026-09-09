@@ -265,6 +265,8 @@ test("selection match repository selects a shown match atomically and completes 
     selectedAt: selectedAtForTest,
     replayed: false,
     publicCode: "CC-23456789",
+    conversationId,
+    searchRequestId,
   });
   assert.equal(context.transactionState().committed, 1);
   assert.match(context.calls[1]!.text, /search_conversations[\s\S]*FOR NO KEY UPDATE/u);

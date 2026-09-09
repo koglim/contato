@@ -183,7 +183,7 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
          SET channel_inbound_message_id = EXCLUDED.channel_inbound_message_id
        RETURNING ${channelOutboundMessageColumns}`,
         [input.channelInboundMessageId, "customer_reply", input.provider, input.recipientPhoneE164, input.textContent,
-          input.matchIds.length && input.textContent.includes(BILATERAL_NOTICE) ? BILATERAL_NOTICE_VERSION : null],
+          input.textContent.includes(BILATERAL_NOTICE) ? BILATERAL_NOTICE_VERSION : null],
       );
       await associateOutboundMessageMatches(client, result.rows[0].id, input);
       return toChannelOutboundMessageRecord(result.rows[0]);

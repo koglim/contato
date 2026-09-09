@@ -52,13 +52,27 @@ export async function prepareBilateralSelection(client: DatabaseClient, input: S
   const pending = pendingValue ? pendingConsentSchema.parse(pendingValue) : null;
   if (input.confirmBilateral) {
     if (!pending || pending.matchId !== match.match_id || parseBilateralConfirmation(inbound.raw_text) !== "confirm") return { kind: "idempotency_conflict" };
-    const notice = await client.query<{ sent_at: Date }>(`SELECT sent_at FROM channel_outbound_messages
-      WHERE id = $1 AND status = 'sent' AND recipient_phone_e164 = $2
-        AND bilateral_notice_version = $3 AND sent_at <= $4
-        AND strpos(text_content, $5) > 0`,
-    [pending.noticeOutboundId, inbound.phone_e164, BILATERAL_NOTICE_VERSION, inbound.created_at, BILATERAL_NOTICE]);
+    // Repeated prompts for this same pending choice are valid too. The original
+    // may have failed while a subsequent clarification was actually delivered.
+    // Compare database timestamps directly (JS Date truncates microseconds).
+    const notice = await client.query<{ id: string; sent_at: Date }>(`SELECT outbound.id, outbound.sent_at
+      FROM channel_outbound_messages outbound
+      JOIN channel_inbound_messages prompt ON prompt.id = outbound.channel_inbound_message_id
+      WHERE outbound.status = 'sent' AND outbound.recipient_phone_e164 = $2
+        AND outbound.bilateral_notice_version = $3
+        AND outbound.sent_at <= (SELECT created_at FROM channel_inbound_messages WHERE id = $4)
+        AND strpos(outbound.text_content, $5) > 0
+        AND prompt.customer_id = $6 AND prompt.conversation_id = $7 AND prompt.search_request_id = $8
+        AND prompt.created_at >= (SELECT created_at FROM channel_inbound_messages WHERE id = $9)
+        AND (outbound.id = $1 OR (
+          prompt.result ->> 'route' = 'selection'
+          AND prompt.result -> 'result' ->> 'kind' = 'consent_required'
+          AND prompt.result -> 'result' ->> 'professional_name' = $10))
+      ORDER BY outbound.sent_at DESC, outbound.id LIMIT 1`,
+    [pending.noticeOutboundId, inbound.phone_e164, BILATERAL_NOTICE_VERSION, inbound.id, BILATERAL_NOTICE,
+      input.customerId, input.conversationId, input.searchRequestId, pending.choiceKey, pending.professionalDisplayName]);
     if (!notice.rows[0]) return { kind: "consent_required", professionalDisplayName: pending.professionalDisplayName };
-    return { kind: "ready", context: { inbound, noticeId: pending.noticeOutboundId, noticeSentAt: notice.rows[0].sent_at,
+    return { kind: "ready", context: { inbound, noticeId: notice.rows[0].id, noticeSentAt: notice.rows[0].sent_at,
       choiceKey: pending.choiceKey, chosenAt: pending.chosenAt, method: "legacy_confirmation" } };
   }
   if (pending) return { kind: "consent_required", professionalDisplayName: pending.professionalDisplayName };
@@ -69,9 +83,10 @@ export async function prepareBilateralSelection(client: DatabaseClient, input: S
     WHERE presentation.match_id = $1 AND original.customer_id = $2 AND original.search_request_id = $3
       AND original.conversation_id = $8
       AND outbound.recipient_phone_e164 = $4 AND outbound.status = 'sent'
-      AND outbound.bilateral_notice_version = $5 AND outbound.sent_at <= $6
+      AND outbound.bilateral_notice_version = $5
+      AND outbound.sent_at <= (SELECT created_at FROM channel_inbound_messages WHERE id = $6)
       AND strpos(outbound.text_content, $7) > 0`,
-  [match.match_id, input.customerId, input.searchRequestId, inbound.phone_e164, BILATERAL_NOTICE_VERSION, inbound.created_at, BILATERAL_NOTICE, input.conversationId]);
+  [match.match_id, input.customerId, input.searchRequestId, inbound.phone_e164, BILATERAL_NOTICE_VERSION, inbound.id, BILATERAL_NOTICE, input.conversationId]);
   if (notice.rows[0]) return { kind: "ready", context: { inbound, noticeId: notice.rows[0].id,
     noticeSentAt: notice.rows[0].sent_at, choiceKey: inbound.id, chosenAt: inbound.decision_at.toISOString(), method: "selection_after_notice" } };
   const outcome: ConsentOutcome = { kind: "consent_required", professionalDisplayName: safeOpportunityText(match.display_name, 120) || "profissional escolhido" };
@@ -85,8 +100,10 @@ export async function prepareBilateralSelection(client: DatabaseClient, input: S
 
 export async function createBilateralContact(client: DatabaseClient, input: SelectShownMatchInput,
   match: BilateralMatch & { professional_id: string }, context: BilateralReady, selectedAt: Date, generateCode: () => string) {
-  const request = await client.query<{ city: string | null; state: string | null; neighborhood: string | null; raw_text: string }>(
-    "SELECT city, state, neighborhood, raw_text FROM search_requests WHERE id = $1", [input.searchRequestId]);
+  const request = await client.query<{ city: string | null; state: string | null; neighborhood: string | null; raw_text: string; location_text: string | null }>(
+    `SELECT city, state, neighborhood, raw_text, conversation.location_text FROM search_requests
+      JOIN search_conversations conversation ON conversation.id = $2 AND conversation.search_request_id = search_requests.id
+      WHERE search_requests.id = $1`, [input.searchRequestId, input.conversationId]);
   const location = request.rows[0];
   if (!location) throw new Error("Bilateral search context unavailable");
   const textOrNull = (text: string | null) => safeOpportunityText(text, 120) || null;
@@ -97,7 +114,7 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
       professional_phone_e164: match.phone_e164, customer_phone_e164: context.inbound.phone_e164,
       city: textOrNull(location.city), state: textOrNull(location.state),
       // Only retain a neighborhood actually present in the customer's request.
-      neighborhood: location.neighborhood && location.raw_text.toLocaleLowerCase("pt-BR").includes(location.neighborhood.toLocaleLowerCase("pt-BR")) ? textOrNull(location.neighborhood) : null,
+      neighborhood: location.neighborhood && `${location.raw_text} ${location.location_text ?? ""}`.toLocaleLowerCase("pt-BR").includes(location.neighborhood.toLocaleLowerCase("pt-BR")) ? textOrNull(location.neighborhood) : null,
       summary: safeOpportunityText(location.raw_text) || safeOpportunityText(match.service_name, 120),
       notice_version: BILATERAL_NOTICE_VERSION, notice_outbound_id: context.noticeId,
       notice_sent_at: context.noticeSentAt.toISOString(), choice_inbound_id: context.choiceKey,

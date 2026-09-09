@@ -50,9 +50,11 @@ export type SelectShownMatchOutcome =
     selectedAt: Date;
     replayed: boolean;
     publicCode?: string;
+    conversationId?: string;
+    searchRequestId?: string;
   }
-  | { kind: "consent_required"; professionalDisplayName: string }
-  | { kind: "consent_declined" }
+  | { kind: "consent_required"; professionalDisplayName: string; conversationId?: string; searchRequestId?: string }
+  | { kind: "consent_declined"; conversationId?: string; searchRequestId?: string }
   | { kind: "conversation_not_found" }
   | { kind: "conversation_not_active" }
   | { kind: "conversation_expired" }

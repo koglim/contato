@@ -47,7 +47,7 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
     }
     if (input.selectionKey) {
       const recovered = await this.selectionCommandService.recoverSelection(customer.id, input.selectionKey);
-      if (recovered) return { kind: "response", response: { customer_id: customer.id, route: "selection", result: mapSelectionCommandOutcome(recovered) }, conversationId: null, searchRequestId: null, presentedMatchIds: [] };
+      if (recovered) return { kind: "response", response: { customer_id: customer.id, route: "selection", result: mapSelectionCommandOutcome(recovered) }, conversationId: recovered.conversationId ?? null, searchRequestId: recovered.searchRequestId ?? null, presentedMatchIds: [] };
     }
     await this.conversations.expireStaleForCustomer(customer.id);
     const activeConversation = await this.conversations.findActiveByCustomerId(customer.id);

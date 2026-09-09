@@ -446,6 +446,10 @@ test("channel inbox recovers a completed selection after a crash before inbound 
     assert.equal(state.rows[0]!.status, "processed");
     assert.equal(Number(state.rows[0]!.contacts), 1);
     assert.equal(Number(state.rows[0]!.outbounds), 1);
+    const linkage = (await query<{ conversation_id: string; search_request_id: string }>(
+      "SELECT conversation_id, search_request_id FROM channel_inbound_messages WHERE id = $1", [registered.record.id])).rows[0];
+    assert.deepEqual(linkage, { conversation_id: fixture.conversationId, search_request_id: fixture.searchRequestId });
+    assert.equal((await bilateralCounts(fixture)).notifications, 1);
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id = $1`, [registered.record.id]);
     await query(`DELETE FROM channel_inbound_messages WHERE id = $1`, [registered.record.id]);
@@ -576,7 +580,8 @@ test("legacy selection requires delivered consent prompt, survives restart and c
     if (premature.kind !== "response") throw new Error("expected pending consent");
     assert.doesNotMatch(premature.response.reply_text, /\+5566/u);
     assert.equal((await bilateralCounts(fixture)).contacts, 0);
-    await markFixtureMessageSent(first.response.outbound.id);
+    // Original prompt stays unsent; a delivered retry for the same choice must work.
+    await markFixtureMessageSent(premature.response.outbound.id);
     const ambiguous = await bilateralChannel().receive("sim?");
     if (ambiguous.kind !== "response") throw new Error("expected clarification");
     assert.equal((await bilateralCounts(fixture)).contacts, 0);
@@ -657,4 +662,30 @@ test("public code collision retries the real unique index without losing the tra
     await query("DELETE FROM search_requests WHERE id = $1", [occupiedSearchId]);
     await fixture.cleanup();
   }
+});
+
+test("legacy consent prompt recovers after crash before inbound completion without losing its context", async () => {
+  const fixture = await createFixture(true);
+  try {
+    const messageId = randomUUID();
+    const inbound = await new PostgresChannelInboundMessageRepository().createOrFind({ provider: "bilateral-test",
+      provider_message_id: messageId, phone_e164: "+5566999999999", raw_text: "1", country_code: "BR", limit: 2 });
+    const repository = new PostgresSelectionMatchRepository();
+    assert.equal((await repository.selectShownMatch({ ...fixture, position: 1, lastMessageText: "1", selectionKey: inbound.record.id })).kind, "consent_required");
+    const before = await new PostgresChannelOutboundMessageRepository().findByInboundMessageId(inbound.record.id);
+    assert.ok(before);
+    assert.equal((await new PostgresChannelInboundMessageRepository().findById(inbound.record.id))?.status, "received");
+    const channel = bilateralChannel();
+    const recovered = await channel.receive("1", messageId);
+    if (recovered.kind !== "response") throw new Error("expected recovered prompt");
+    assert.equal(recovered.response.outbound.id, before.id);
+    assert.equal(recovered.response.reply_text, before.textContent);
+    assert.equal(channel.searchCalls(), 0);
+    const state = await new PostgresChannelInboundMessageRepository().findById(inbound.record.id);
+    assert.equal(state?.status, "processed");
+    assert.equal(state?.conversationId, fixture.conversationId);
+    assert.equal(state?.searchRequestId, fixture.searchRequestId);
+    assert.equal((await bilateralCounts(fixture)).contacts, 0);
+    assert.equal(await repository.recoverConsentResponse(randomUUID(), inbound.record.id), null);
+  } finally { await fixture.cleanup(); }
 });

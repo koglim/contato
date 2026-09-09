@@ -147,7 +147,7 @@ function existingSelectionOutcome(row: ExistingSelectionRow, input: SelectShownM
     serviceName: row.service_name,
     selectedAt: row.selected_at,
     replayed: true,
-    ...(row.public_code ? { publicCode: row.public_code } : {}),
+    ...(row.public_code ? { publicCode: row.public_code, conversationId: row.selection_conversation_id ?? undefined, searchRequestId: row.search_request_id } : {}),
   };
 }
 
@@ -163,7 +163,7 @@ function replayedSelectionOutcome(row: ExistingSelectionRow): SelectedMatchOutco
     serviceName: row.service_name,
     selectedAt: row.selected_at,
     replayed: true,
-    ...(row.public_code ? { publicCode: row.public_code } : {}),
+    ...(row.public_code ? { publicCode: row.public_code, conversationId: row.selection_conversation_id ?? undefined, searchRequestId: row.search_request_id } : {}),
   };
 }
 
@@ -219,12 +219,13 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
   }
 
   async recoverConsentResponse(customerId: string, selectionKey: string): Promise<ConsentOutcome | null> {
-    const result = await this.execute<{ bilateral_response: unknown }>(`SELECT bilateral_response FROM channel_inbound_messages
+    const result = await this.execute<{ bilateral_response: unknown; conversation_id: string; search_request_id: string }>(`SELECT bilateral_response, conversation_id, search_request_id FROM channel_inbound_messages
       WHERE id = $1 AND customer_id = $2 AND bilateral_response IS NOT NULL`, [selectionKey, customerId]);
     if (!result.rows[0]) return null;
     const contract = selectionMessageContractSchema.parse(result.rows[0].bilateral_response);
-    if (contract.kind === "consent_required") return { kind: "consent_required", professionalDisplayName: contract.professional_name };
-    if (contract.kind === "consent_declined") return { kind: "consent_declined" };
+    const context = { conversationId: result.rows[0].conversation_id, searchRequestId: result.rows[0].search_request_id };
+    if (contract.kind === "consent_required") return { kind: "consent_required", professionalDisplayName: contract.professional_name, ...context };
+    if (contract.kind === "consent_declined") return { kind: "consent_declined", ...context };
     throw new Error("Unexpected consent response kind");
   }
 
@@ -358,6 +359,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
               COALESCE(contacts.bilateral_snapshot ->> 'professional_phone_e164', professionals.phone_e164) AS phone_e164,
               COALESCE(contacts.bilateral_snapshot ->> 'service_name', services.name) AS service_name,
               contacts.public_code,
+              contacts.selection_conversation_id,
               matches.selected_at
          FROM contacts
          JOIN matches
@@ -485,6 +487,8 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         selectedAt: selected.rows[0].selected_at,
         replayed: false,
         publicCode: contact.snapshot.public_code,
+        conversationId: input.conversationId,
+        searchRequestId: input.searchRequestId,
       };
       });
     } catch (error) {

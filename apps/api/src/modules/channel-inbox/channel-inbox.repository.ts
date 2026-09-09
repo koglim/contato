@@ -145,7 +145,7 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
           input.outbound.provider,
           input.outbound.recipientPhoneE164,
           input.outbound.textContent,
-          input.outbound.matchIds.length && input.outbound.textContent.includes(BILATERAL_NOTICE) ? BILATERAL_NOTICE_VERSION : null,
+          input.outbound.textContent.includes(BILATERAL_NOTICE) ? BILATERAL_NOTICE_VERSION : null,
         ],
       );
       await associateOutboundMessageMatches(client, outbound.rows[0].id, input.outbound);
