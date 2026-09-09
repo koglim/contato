@@ -47,6 +47,9 @@ export class ProfessionalOpportunityService {
       }
       if (parsed.codes.length) return this.finish(db, record, "unavailable", "Não consegui identificar essa oportunidade para você. Confira o código recebido.");
       const pending = owned.filter((contact) => contact.status === "requested");
+      if (customer && parsed.resume === null && /\b(?:retomar|voltar)\b/u.test(normalizeOpportunityCommand(record.rawText)) && record.rawText.includes("?")) {
+        return this.finish(db, record, "clarification", "Quer retomar uma busca anterior? Envie ‘retomar’ com o serviço ou o código. Sua busca atual permanece como está.");
+      }
       if (active && pending.length && /^(?:talvez|nao sei|onde fica|quanto e|e se eu aceitar|posso responder depois)\??$/u.test(normalizeOpportunityCommand(record.rawText))) {
         return this.finish(db, record, "clarification", "Você quer falar da oportunidade recebida ou continuar sua busca atual? Para responder à oportunidade, envie a decisão com o código.");
       }
@@ -68,6 +71,7 @@ export class ProfessionalOpportunityService {
         });
         return this.finish(db, record, "clarification", `Responda com uma decisão clara e o código da oportunidade:\n${options.join("\n")}\nExemplo: “aceito ${pending[0].public_code}”.`);
       }
+      if (parsed.decision && owned.length > 1) return this.finish(db, record, "clarification", "Informe o código da oportunidade junto com sua decisão para eu identificar a solicitação correta.");
       return null;
     });
   }

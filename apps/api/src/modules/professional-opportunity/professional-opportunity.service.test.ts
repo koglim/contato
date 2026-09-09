@@ -37,6 +37,12 @@ test("keep does not suspend or resume the current search", async () => {
   assert.equal(response?.result.route === "opportunity" && response.result.result.kind, "kept");
   assert.ok(h.writes.every((sql) => !sql.includes("UPDATE search_conversations")));
 });
+test("a question about resuming asks for confirmation without changing context", async () => {
+  const h = harness([],{id:"current"});
+  const response = await h.service.handle({...record,rawText:"posso retomar?"});
+  assert.equal(response?.result.route === "opportunity" && response.result.result.kind, "clarification");
+  assert.ok(h.writes.every((sql) => !sql.includes("UPDATE search_conversations")));
+});
 test("unambiguous resume suspends the current slot before activating the old search", async () => {
   const h = harness([{id:"old",service_text:"eletricista",public_code:null,valid:true,resume_slot:"selection"}],{id:"current"});
   await h.service.handle(record);

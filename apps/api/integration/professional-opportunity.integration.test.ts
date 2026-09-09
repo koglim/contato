@@ -109,6 +109,8 @@ test("decline preserves active search; explicit resume suspends it and replay ne
     const notice = (await query("SELECT text_content FROM channel_outbound_messages WHERE purpose='customer_contact_update' AND recipient_phone_e164=$1", [f.customerPhone])).rows[0].text_content;
     assert.match(notice, /eletricista/); assert.match(notice, /encanador/); assert.match(notice, /retomar CC-/);
     await f.send("continuar aqui", f.customerPhone);
+    const uncertain = await f.send("posso retomar?", f.customerPhone);
+    assert.equal(uncertain.result.route === "opportunity" && uncertain.result.result.kind, "clarification");
     assert.equal((await f.conversations()).find((c) => c.id === f.otherId)?.status, "active");
     const id = randomUUID();
     await f.send(`retomar ${f.code}`, f.customerPhone, id);
@@ -151,10 +153,61 @@ test("questions do not decide and foreign opportunity codes do not disclose owne
     assert.equal(await f.countEvents(), 0);
     const foreign = await f.send(`aceito ${f.code}`, f.customerPhone);
     assert.equal(foreign.result.route === "opportunity" && foreign.result.result.kind, "unavailable");
+    const unknown = await f.send("aceito CC-23456789", f.customerPhone);
+    assert.equal(unknown.reply_text, foreign.reply_text);
+    for (const uncertain of ["talvez", "e se eu aceitar?", "não sei"]) {
+      const clarification = await f.send(uncertain);
+      assert.equal(clarification.result.route === "opportunity" && clarification.result.result.kind, "clarification");
+    }
     assert.equal(await f.countEvents(), 0);
     await f.send(`aceito ${f.code}`);
     assert.equal(await f.countEvents(), 1);
   } finally { await f.cleanup(); }
+});
+
+for (const command of ["aceito", "recuso"]) {
+  test(`two simultaneous ${command} deliveries produce one transition`, async () => {
+    const f = await fixture();
+    try {
+      const results = await Promise.all([f.send(`${command} ${f.code}`), f.send(`${command} ${f.code}`)]);
+      assert.equal(results[0].outbound.id, results[1].outbound.id);
+      assert.equal(await f.countEvents(), 1);
+    } finally { await f.cleanup(); }
+  });
+}
+
+test("cancellation concurrent with refusal keeps the single-active constraint and never selects a substitute", async () => {
+  const f = await fixture(true);
+  try {
+    await Promise.all([f.send(`recuso ${f.code}`), f.send("cancelar", f.customerPhone)]);
+    assert.ok((await f.conversations()).filter((c) => c.status === "active").length <= 1);
+    assert.equal((await f.conversations()).find((c) => c.id === f.otherId)?.status, "cancelled");
+    assert.equal((await query("SELECT count(*)::int AS count FROM contacts WHERE customer_id=$1", [f.customerId])).rows[0].count, 1);
+    assert.equal(await f.countEvents(), 1);
+  } finally { await f.cleanup(); }
+});
+
+test("crash before inbound completion rolls back all intentions and is recoverable", async () => {
+  const f = await fixture();
+  const delivery = randomUUID();
+  try {
+    await query(`CREATE FUNCTION fail_opportunity_completion() RETURNS trigger AS $$ BEGIN
+      IF NEW.status='processed' AND NEW.result->>'route'='opportunity' THEN RAISE EXCEPTION 'opportunity-test-crash'; END IF;
+      RETURN NEW; END; $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_opportunity_completion BEFORE UPDATE ON channel_inbound_messages FOR EACH ROW EXECUTE FUNCTION fail_opportunity_completion()`);
+    const response = await f.app.inject({method:"POST",url:"/internal/channel/inbound/messages",headers:{"x-internal-key":key},
+      payload:{provider:"test",provider_message_id:delivery,phone_e164:f.professionalPhone,raw_text:`aceito ${f.code}`,country_code:"BR",limit:3}});
+    assert.equal(response.statusCode,500);
+    assert.equal(await f.countEvents(),0);
+    assert.equal((await query("SELECT status FROM contacts WHERE id=$1",[f.contactId])).rows[0].status,"requested");
+    assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)",[f.customerPhone,f.professionalPhone])).rows.length,0);
+    await query("DROP TRIGGER fail_opportunity_completion ON channel_inbound_messages; DROP FUNCTION fail_opportunity_completion()");
+    await f.send(`aceito ${f.code}`,f.professionalPhone,delivery);
+    assert.equal(await f.countEvents(),1);
+  } finally {
+    await query("DROP TRIGGER IF EXISTS fail_opportunity_completion ON channel_inbound_messages; DROP FUNCTION IF EXISTS fail_opportunity_completion()");
+    await f.cleanup();
+  }
 });
 
 test("new conversation versus resume retains one active context without losing either search", async () => {
