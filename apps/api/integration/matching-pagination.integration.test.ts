@@ -96,11 +96,11 @@ for (const candidateCount of [0, 1, 2, 3, 4, 6, 20, 25]) {
     const current = await fixture(candidateCount);
     try {
       const initialId = randomUUID();
-      const initial = await current.receive(`preciso de ${current.serviceName} em Sinop`, initialId);
+      const initial = await current.receive(`preciso de ${current.serviceName} aqui em Sinop`, initialId);
       assert.equal(initial.statusCode, 200, initial.body);
       const first = initial.json<{ outbound: { id: string }; reply_text: string }>();
       const request = await query<{ id: string }>("SELECT id FROM search_requests WHERE service_id = $1", [current.serviceId]);
-      assert.equal(request.rows.length, 1);
+      assert.equal(request.rows.length, 1, initial.body);
       const searchId = request.rows[0].id;
       const reader = new PostgresSelectionMatchRepository();
       assert.equal((await reader.getState(searchId)).totalMatchCount, Math.min(candidateCount, 20));
@@ -120,7 +120,7 @@ for (const candidateCount of [0, 1, 2, 3, 4, 6, 20, 25]) {
       assert.equal(premature.statusCode, 409, premature.body);
       await current.send(first.outbound.id, candidateCount === 20);
       assert.equal((await reader.getState(searchId)).shownMatchCount, Math.min(candidateCount, 3));
-      const replay = await current.receive(`preciso de ${current.serviceName} em Sinop`, initialId);
+      const replay = await current.receive(`preciso de ${current.serviceName} aqui em Sinop`, initialId);
       assert.equal(replay.json().duplicate, true);
       assert.equal(replay.json().outbound.id, first.outbound.id);
       assert.equal(replay.json().reply_text, first.reply_text);
