@@ -7,9 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "lint": "eslint src",
-    "test": "tsx --test src/**/*.test.ts",
-    "test:integration": "tsx --test --test-concurrency=1 integration/**/*.test.ts",
+    "lint": "eslint src scripts integration",
+    "test": "node scripts/run-tests.mjs unit",
+    "test:integration": "node scripts/run-tests.mjs integration",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

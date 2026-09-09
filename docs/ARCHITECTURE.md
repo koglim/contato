@@ -129,9 +129,12 @@ Esse fallback não altera Service Resolution, Location Resolution, Matching ou S
 START: mensagem → Message Search 3.5C
                     ├─ needs_location → ACTIVE/location
                     ├─ needs_service  → ACTIVE/service (se location_text existe)
-                    └─ resultado final → sem conversa pendente
+                    ├─ matched → ACTIVE/selection
+                    └─ no_matches → sem conversa pendente
 
-ACTIVE/location ↔ ACTIVE/service → Search Orchestrator → Matching → COMPLETED
+ACTIVE/location ↔ ACTIVE/service → Matching → ACTIVE/selection (matched)
+                                          └→ COMPLETED (no_matches)
+ACTIVE/selection → escolha confirmada → COMPLETED
 ```
 
 `search_conversations` é o estado transitório que preserva a primeira mensagem, as tentativas de serviço/localização, país, limite e o slot pendente. `search_requests` não foi reutilizada como sessão: permanece sendo criada pelo Matching somente quando a busca possui dados suficientes. Isso mantém intactos os módulos 3.1–3.5C e separa coleta conversacional de auditoria do marketplace.
@@ -146,7 +149,7 @@ O início reutiliza a mesma instância de `MessageSearchService`. `needs_locatio
 
 `location_text` permanece nullable no banco para representar corretamente conversas que ainda aguardam localização. A exigência de uma localização reutilizável em `pending_slot = service` é uma invariável da aplicação, validada na criação e antes da continuação, sem um CHECK rígido que limite futuras evoluções de slots.
 
-O TTL padrão é de 30 minutos e pode ser ajustado por `SEARCH_CONVERSATION_TTL_MINUTES`. A validade é calculada pelo relógio do PostgreSQL. Não há cron de limpeza: registros vencidos são tratados logicamente como expirados e não podem ser retomados. `needs_location` e `needs_service` mantêm a conversa ativa, atualizam o slot correspondente e renovam o TTL; `matched` e `no_matches` completam a conversa e vinculam o `search_request_id`.
+O TTL padrão é de 30 minutos e pode ser ajustado por `SEARCH_CONVERSATION_TTL_MINUTES`. A validade é calculada pelo relógio do PostgreSQL. Não há cron de limpeza: registros vencidos são tratados logicamente como expirados e não podem ser retomados. `needs_location` e `needs_service` mantêm a conversa ativa, atualizam o slot e renovam o TTL; `matched` mantém `selection` ativa, enquanto `no_matches` conclui. Ambos preservam o `search_request_id` quando há busca persistida.
 
 Concorrência usa um claim atômico com `processing_token` e `processing_started_at`. Uma conversa ativa e não expirada pode ser reservada quando não possui token ou quando a lease anterior já venceu; a lease padrão de 60 segundos é configurada por `SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS`. Ao reassumir um claim abandonado por crash ou restart, a atualização grava um novo token e reinicia `processing_started_at`. O geocoder roda fora de transação longa; conclusão ou renovação exige o mesmo token e então o remove. Uma segunda mensagem durante uma lease recente recebe `conversation_processing`, enquanto chamadas sequenciais após conclusão recebem `conversation_not_active`. Idempotência de webhooks será responsabilidade da futura camada de canal.
 
@@ -224,7 +227,7 @@ O Customer Search Router agora reconhece comandos globais antes de qualquer busc
 
 “Mostrar mais” agora consulta a mesma `search_request`, usa o `limit_value` original da conversa e devolve a próxima página ordenada por `rank_position`, preservando a numeração absoluta. A página é persistida na Inbox/Outbox e só considera matches ainda não reservados; `shown_at` continua sendo preenchido exclusivamente após confirmação de envio. A migration 011 adiciona unicidade por `match_id` em `channel_outbound_message_matches`, evitando que um match seja associado a mais de uma apresentação. A associação não usa `ON CONFLICT DO NOTHING`: se duas transações disputarem a mesma página, a segunda transação é revertida integralmente e responde com estado seguro de “próximas opções em preparação”, sem Outbox vazio ou nomes repetidos. Reservas pendentes também impedem que o cliente receba prematuramente “não há mais opções”.
 
-`selection-command` é a camada de aplicação interna entre o parser/router determinístico e `match-selection`. No contexto `selection`, ela consulta o estado de matches para rotear posições e, para texto livre, lista somente matches da busca atual com `shown_at` preenchido. O resolvedor de nomes aceita nome completo, primeiro nome único e frases naturais, mas devolve ambiguidade quando há mais de uma opção; escolhas únicas seguem para a mesma transação de seleção. Ela não lista novos profissionais, não marca `shown_at`, não cria outbound e não chama IA, HTTP, Inbox ou Customer Search.
+`selection-command` é a camada de aplicação interna entre o parser/router determinístico e `match-selection`. No contexto `selection`, consulta o estado para rotear posições e lista matches apresentados para resolver nomes. Nome completo, primeiro nome único e frases afirmativas inequívocas seguem à transação de seleção; ambiguidades não selecionam. Para “mostrar mais”, consulta a próxima página apenas se não houver reserva pendente. Não marca `shown_at`, não cria Outbox e não chama IA, HTTP, Inbox ou Customer Search; a Inbox recebe a ação tipada e persiste a apresentação transacionalmente.
 
 `selection-message` separa o contrato público da apresentação: converte exaustivamente o resultado da execução de seleção em dados sem IDs internos e produz texto pt-BR somente para respostas finais. Além de escolhas confirmadas, o contrato suporta ambiguidade sem telefone ou IDs, e texto não identificado mantém a conversa ativa com orientação para número ou nome. Comandos globais e `show_more` quando há opções seguem como ações tipadas, sem alegar execução.
 
@@ -264,6 +267,8 @@ Agregações SQL por conjunto usam apenas profissionais elegíveis; não há con
 Essa política não garante cotas comerciais de leads nem distribuição igual entre profissionais de qualidade operacional diferente. Requer calibração em produção e análise de planos com cardinalidades reais; os testes PostgreSQL provam comportamento/rotação com 25 perfis, não constituem benchmark de escala. CI valida os índices, rollback 013 com dados preservados, rollbacks anteriores e execução das integrações novamente após reaplicar.
 
 A reserva usa `FOR NO KEY UPDATE` sobre a busca: a Inbox pode já possuir `KEY SHARE` devido à FK `search_request_id`. Usar `FOR UPDATE` nesse ponto provocaria upgrade conflitante/deadlock entre duas mensagens. Uma regressão PostgreSQL sincroniza duas transações depois das inserções com FK e exige exatamente uma reserva e um conflito controlado, sem temporização arbitrária.
+
+`apps/api/scripts/run-tests.mjs` descobre recursivamente arquivos de teste e passa caminhos explícitos ao Node/tsx. Isso evita que a expansão de `**` pelo Bash execute somente testes de um nível de diretório e silenciosamente omita `app.test.ts`/módulos no CI. Nenhuma dependência nova é necessária; falha de descoberta ou do subprocesso reprova a execução.
 
 Não há garantia exactly-once matemática: se a Evolution aceitar o texto e o n8n cair antes da confirmação, uma lease vencida poderá ser reivindicada e reenviada. A Outbox evita a perda da intenção e múltiplas mensagens lógicas por inbound, além de tornar tentativas e estados observáveis. Logs incluem apenas IDs internos, provider, status, tentativas, flag de duplicata e código de erro controlado — nunca telefone, texto ou payload de webhook.
 
