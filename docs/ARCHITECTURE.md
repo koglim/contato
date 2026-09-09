@@ -45,9 +45,9 @@ O helper em `apps/api/src/modules/internal` centraliza a proteção temporária 
 
 `apps/api/src/modules/matching` recebe um serviço já identificado e coordenadas já resolvidas. Ele é deliberadamente separado da futura camada de interpretação: esta poderá transformar uma mensagem em `service_id` e localização, enquanto o matching decide de forma determinística quais profissionais são elegíveis com base em SQL e PostGIS.
 
-A busca usa `ST_DWithin` para respeitar o raio de cada área e `ST_Distance` para calcular a distância em metros. Uma janela SQL escolhe somente a área elegível mais próxima de cada profissional; depois aplica a ordenação estável por disponibilidade efetiva, distância, verificação e UUID. A disponibilidade é efetiva somente durante 240 minutos após a confirmação, mas não exclui profissionais.
+A busca usa `ST_DWithin` para respeitar o raio de cada área e `ST_Distance` para calcular a distância em metros. Uma janela SQL escolhe a área elegível mais próxima de cada profissional; depois aplica a política versionada de ranking descrita abaixo. A disponibilidade é efetiva somente durante 240 minutos após a confirmação, mas não exclui profissionais; confirmação ausente resulta em `false`.
 
-O repositório executa validação do catálogo, criação de `search_requests`, criação de `matches` e atualização de status no mesmo `withTransaction`. O snapshot de explicação persistido em cada match contém apenas disponibilidade efetiva, distância em metros e verificação. Não há score proprietário, ranking por reputação, IA, geocoding ou exposição de dados de contato nessa etapa.
+O repositório executa validação do catálogo, criação de `search_requests`, criação em lote dos `matches` e atualização de status no mesmo `withTransaction`. Cada match contém um `score_breakdown` versionado com os sinais usados. `score` permanece nulo porque a ordenação é lexicográfica, não uma soma de pesos incomparáveis. Matching não chama IA/geocoding nem expõe telefone ou e-mail.
 
 ## Service Resolution determinístico
 
@@ -239,6 +239,29 @@ A política interna `matching-policy.ts` separa `CANDIDATE_POOL_SIZE = 20`, `PRE
 Ao reservar uma página, a transação Inbox/Outbox bloqueia a linha da busca, rejeita páginas maiores que 3, ranks acima de 6, matches já mostrados e qualquer página anterior ainda não enviada. Esse segundo controle protege também leituras concorrentes defasadas. O índice único da migration 011 continua protegendo cada match. Falha/retry mantém a mesma reserva; somente `markSent` preenche `shown_at`, sem reescrever sua primeira data. Depois do teto, a resposta orienta escolher ou recomeçar/refinar, sem prometer outros candidatos.
 
 Os testes `matching-pagination.integration.test.ts` atravessam o fluxo real, substituindo apenas o geocoder externo. Cobrem 0/1/2/3/4/6/20/25 elegíveis, pool limitado, páginas, concorrência, retries e escolha na segunda página. Arquivos de integração executam sequencialmente porque o dispatcher geral consulta a fila compartilhada do banco descartável; concorrência dentro de cada cenário continua usando chamadas simultâneas reais.
+
+## Ranking auditável — fair-v1
+
+`matching-ranking.ts` centraliza constantes calibráveis por revisão de código, sem novas variáveis. A elegibilidade precede o ranking: profissional ativo, nome com pelo menos dois caracteres, slug preenchido, telefone canônico, serviço/vínculo ativos e cobertura geográfica. No schema atual, áreas existentes são operacionais (não existe flag de ativação); suspensão do profissional exclui todas as áreas. Assinatura/entitlement ainda não foi implementada e deverá ser adicionada antes de ativar cobrança por participação.
+
+A ordem é lexicográfica, aplicada a todos os elegíveis **antes** de limitar o pool a 20:
+
+1. Disponibilidade confirmada nos últimos 240 minutos.
+2. Banda de distância de 2.000 metros, crescente.
+3. Verificação, verdadeiro primeiro.
+4. Banda de reputação bayesiana de 0,5 ponto, decrescente.
+5. Carga de exposição, crescente: exposições confirmadas em 7 dias + 3 × contatos criados em 7 dias + 5 × exposições para o mesmo cliente em 30 dias.
+6. Reputação bayesiana exata, distância exata e UUID como desempates estáveis.
+
+Reputação = `(soma das notas + 5 × 4) / (quantidade + 5)`. Sem avaliações, o prior é 4, nunca zero; `newcomer` significa ausência de avaliações elegíveis, não a idade cadastral. Somente avaliações publicadas de contatos concluídos, com cliente/profissional correspondentes e telefones distintos, entram no cálculo. Uma única nota 5 produz aproximadamente 4,167. O benefício de baixa exposição não ultrapassa disponibilidade, banda de distância, verificação ou banda de reputação. Não há sorteio nem boost especial ilimitado para novos profissionais; entram na rotação comparável pela baixa carga.
+
+`score_breakdown` guarda versão/parâmetros da política, sinais operacionais, bandas, quantidade/reputação, newcomer, exposições, contatos, repetições e carga no instante da consulta. A explicação não contém telefone, texto do cliente ou lista de clientes. O rank persistido não é recalculado durante paginação. Somente envio confirmado conta como exposição; buscas e reservas não enviadas não penalizam o profissional.
+
+### Consultas e limites
+
+Agregações SQL por conjunto usam apenas profissionais elegíveis; não há consultas da aplicação por candidato. A persistência do pool usa um único `INSERT ... jsonb_to_recordset`. Migration 013 adiciona índices `(professional_id, shown_at)` parcial, `(professional_id, created_at)` e avaliações publicadas por profissional. A seleção geográfica mantém GiST e a janela da área mais próxima; as leituras de exposição usam janelas de 7/30 dias. A reputação ainda agrega o histórico elegível, apoiada no índice parcial; uma projeção materializada só deverá ser introduzida após medição com volume real.
+
+Essa política não garante cotas comerciais de leads nem distribuição igual entre profissionais de qualidade operacional diferente. Requer calibração em produção e análise de planos com cardinalidades reais; os testes PostgreSQL provam comportamento/rotação com 25 perfis, não constituem benchmark de escala. CI valida os índices, rollback 013 com dados preservados, rollbacks anteriores e execução das integrações novamente após reaplicar.
 
 Não há garantia exactly-once matemática: se a Evolution aceitar o texto e o n8n cair antes da confirmação, uma lease vencida poderá ser reivindicada e reenviada. A Outbox evita a perda da intenção e múltiplas mensagens lógicas por inbound, além de tornar tentativas e estados observáveis. Logs incluem apenas IDs internos, provider, status, tentativas, flag de duplicata e código de erro controlado — nunca telefone, texto ou payload de webhook.
 

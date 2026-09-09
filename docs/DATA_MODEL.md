@@ -37,6 +37,10 @@ Os pedidos podem continuar existindo sem cliente ou serviço associado, usando `
 
 O matching persiste um pool de até 20 `matches` por busca, com rank absoluto. A primeira resposta contém até 3; novas apresentações só podem reservar ranks até 6. Candidatos 7–20 ficam para auditoria, não entram em `hasMore` e não podem ser escolhidos sem `shown_at`. Contagem do pool não significa exposição. A reserva de página serializa pela linha de `search_requests` e pelo índice único de `channel_outbound_message_matches.match_id`; não há nova migration nesta etapa.
 
+`matches.score_breakdown` preserva a política `fair-v1` e seus sinais: disponibilidade, distância/banda, verificação, reputação bayesiana/banda, quantidade de avaliações elegíveis, indicador de ausência de histórico, exposições em 7 dias, contatos em 7 dias, repetição do cliente em 30 dias e carga ponderada. Não guarda PII. `score` permanece nulo; `rank_position` é a decisão final lexicográfica e permanece estável na paginação.
+
+A migration 013 cria somente índices de suporte às consultas de sinais em `matches`, `contacts` e `reviews`; seu rollback remove esses três índices e não altera registros de negócio. O fluxo de criação/moderação de avaliações e o domínio de assinaturas continuam pendentes: ler avaliações válidas existentes não implementa essas jornadas.
+
 ## Localização e busca futura
 
 PostGIS armazena `center` e `location` como `GEOGRAPHY(Point, 4326)`, o que permite calcular distância em metros e testar se uma localização está dentro do raio de atendimento. Os índices GiST tornam essas consultas geoespaciais escaláveis.

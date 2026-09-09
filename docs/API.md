@@ -224,7 +224,7 @@ No canal, “mostrar mais” usa a mesma busca e apresenta no máximo seis profi
 
 Em uma única transação, a API valida que o serviço existe e está ativo, registra um `search_request` com o ponto PostGIS, identifica os profissionais elegíveis e persiste um `match` para cada resultado. Um profissional só entra se estiver ativo, oferecer o serviço de forma ativa e possuir uma área ativa cujo raio contenha o ponto consultado. Quando possui várias áreas elegíveis, somente a mais próxima é considerada.
 
-O campo `effective_available_now` é verdadeiro apenas quando a disponibilidade está ligada e foi confirmada nos últimos 240 minutos. A disponibilidade não elimina candidatos; a ordenação é: disponibilidade efetiva, menor distância, profissional verificado e UUID do profissional. A resposta não expõe telefone ou e-mail.
+O campo `effective_available_now` é verdadeiro apenas quando a disponibilidade está ligada e foi confirmada nos últimos 240 minutos. A disponibilidade não elimina candidatos. O ranking `fair-v1` compara disponibilidade, banda de distância de 2 km, verificação, banda de reputação bayesiana e menor carga de exposição/contatos/repetição; reputação exata, distância e UUID desempatarão. A política e os sinais são preservados internamente em `score_breakdown`, sem expansão do contrato de resposta. A resposta não expõe telefone ou e-mail. As regras completas e limites de elegibilidade atuais estão em `ARCHITECTURE.md`.
 
 Se não houver candidatos, a resposta ainda é `200`, com `matches: []` e `status: "ready"`. Com candidatos, o status é `"matched"`.
 
