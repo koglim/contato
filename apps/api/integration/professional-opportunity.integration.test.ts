@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
 import { buildApp } from "../src/app.js";
@@ -7,6 +10,7 @@ import { closeDatabaseConnection, query, withTransaction } from "../src/database
 import { createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
 import { PostgresSearchConversationRepository } from "../src/modules/search-conversations/search-conversation.repository.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
+import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel-outbox/channel-outbox.repository.js";
 
 after(closeDatabaseConnection);
 const key = "opportunity-integration";
@@ -51,18 +55,29 @@ async function fixture(other = false) {
       await db.query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
       // Fixture teardown only; production never bypasses the append-only guard.
       await db.query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
-      await db.query("DELETE FROM opportunity_response_events WHERE contact_id=$1", [contactId]);
+      await db.query("DELETE FROM opportunity_response_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$1)", [customerId]);
       await db.query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
       await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
-      await db.query("DELETE FROM contacts WHERE id=$1", [contactId]);
-      await db.query("DELETE FROM matches WHERE search_request_id=$1", [searchId]);
+      await db.query("DELETE FROM contacts WHERE customer_id=$1", [customerId]);
+      await db.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE customer_id=$1)", [customerId]);
       await db.query("DELETE FROM search_conversations WHERE customer_id=$1", [customerId]);
       await db.query("DELETE FROM search_requests WHERE customer_id=$1", [customerId]);
       await db.query("DELETE FROM professionals WHERE id=$1", [professionalId]);
       await db.query("DELETE FROM customers WHERE id=$1", [customerId]);
     });
   }
-  return { customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, conversations, countEvents, cleanup };
+  async function addOpportunity() {
+    const search = randomUUID(), conversation = randomUUID(), publicCode = createOpportunityCode(), selectionKey = randomUUID();
+    await query("INSERT INTO search_requests (id,customer_id,raw_text,status) VALUES ($1,$2,'eletricista','selected')", [search,customerId]);
+    await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
+      VALUES ($1,$2,'completed','eletricista','eletricista','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [conversation,customerId,search]);
+    await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value)
+      VALUES ($1::uuid,'test',$1::text,$2,'Ana','BR',3)`,[selectionKey,customerPhone]);
+    await query(`INSERT INTO contacts (professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id)
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)`, [professionalId,customerId,search,selectionKey,publicCode,JSON.stringify({...snapshot,public_code:publicCode,choice_inbound_id:selectionKey}),conversation]);
+    return { conversation, publicCode };
+  }
+  return { app, customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, conversations, countEvents, cleanup, addOpportunity };
 }
 
 test("decline reopens without another active search; events, replies and replay are atomic", async () => {
@@ -182,4 +197,97 @@ test("reopened search revalidates previously shown inactive professionals", asyn
     await query("DELETE FROM services WHERE id=$1", [service]);
     await query("DELETE FROM service_categories WHERE id=$1", [category]);
   }
+});
+
+for (const decision of ["posso atender", "não consigo hoje"]) {
+  test(`natural professional decision ${decision} is stable across different deliveries and sent replay`, async () => {
+    const f = await fixture();
+    try {
+      const first = await f.send(decision);
+      const repo = new PostgresChannelOutboundMessageRepository(), token = randomUUID();
+      assert.ok(await repo.claim(first.outbound.id,token,60));
+      assert.equal(await repo.markSent(first.outbound.id,{processing_token:token,provider_message_id:randomUUID()}),true);
+      const second = await f.send(decision);
+      assert.equal(second.outbound.id,first.outbound.id);
+      assert.equal(second.outbound.status,"sent");
+      assert.equal(await f.countEvents(),1);
+    } finally { await f.cleanup(); }
+  });
+}
+
+test("multiple pending opportunities and ambiguous resumptions require clarification", async () => {
+  const f = await fixture(true);
+  try {
+    const other = await f.addOpportunity();
+    const ambiguity = await f.send("aceito");
+    assert.equal(ambiguity.result.route === "opportunity" && ambiguity.result.result.kind,"clarification");
+    assert.ok(ambiguity.reply_text.includes(f.code)); assert.ok(ambiguity.reply_text.includes(other.publicCode));
+    assert.equal(await f.countEvents(),0);
+    await f.send(`recuso ${f.code}`);
+    await query("UPDATE search_conversations SET resume_slot='selection' WHERE id=$1",[other.conversation]);
+    const resume = await f.send("retomar eletricista",f.customerPhone);
+    assert.equal(resume.result.route === "opportunity" && resume.result.result.kind,"clarification");
+    assert.equal((await f.conversations()).find((c)=>c.status==="active")?.id,f.otherId);
+  } finally { await f.cleanup(); }
+});
+
+test("a professional with a customer conversation is not forced into the opportunity context", async () => {
+  const f = await fixture();
+  const dualCustomer = randomUUID(), dualConversation = randomUUID();
+  try {
+    await query("INSERT INTO customers (id,phone_e164) VALUES ($1,$2)",[dualCustomer,f.professionalPhone]);
+    await query(`INSERT INTO search_conversations (id,customer_id,status,pending_slot,original_raw_text,service_text,country_code,limit_value,expires_at)
+      VALUES ($1,$2,'active','location','pintor','pintor','BR',3,NOW()+INTERVAL '1 hour')`,[dualConversation,dualCustomer]);
+    const ambiguous = await f.send("sim, consigo");
+    assert.equal(ambiguous.result.route === "opportunity" && ambiguous.result.result.kind,"clarification");
+    assert.equal(await f.countEvents(),0);
+    await f.send(`aceito ${f.code}`);
+    assert.equal((await query("SELECT status FROM search_conversations WHERE id=$1",[dualConversation])).rows[0].status,"active");
+  } finally {
+    await query("DELETE FROM search_conversations WHERE id=$1",[dualConversation]);
+    await query("DELETE FROM customers WHERE id=$1",[dualCustomer]);
+    await f.cleanup();
+  }
+});
+
+test("Outbox failure rolls back decision, event and reopening; retry after crash succeeds once", async () => {
+  const f = await fixture();
+  const delivery = randomUUID();
+  try {
+    await query(`CREATE FUNCTION fail_opportunity_reply() RETURNS trigger AS $$ BEGIN
+      IF NEW.purpose='professional_reply' THEN RAISE EXCEPTION 'opportunity-test-outbox-failure'; END IF;
+      RETURN NEW; END; $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_opportunity_reply BEFORE INSERT ON channel_outbound_messages FOR EACH ROW EXECUTE FUNCTION fail_opportunity_reply()`);
+    const response = await f.app.inject({method:"POST",url:"/internal/channel/inbound/messages",headers:{"x-internal-key":key},
+      payload:{provider:"test",provider_message_id:delivery,phone_e164:f.professionalPhone,raw_text:`recuso ${f.code}`,country_code:"BR",limit:3}});
+    assert.equal(response.statusCode,500);
+    assert.equal(await f.countEvents(),0);
+    assert.equal((await query("SELECT status FROM contacts WHERE id=$1",[f.contactId])).rows[0].status,"requested");
+    assert.equal((await f.conversations())[0].status,"completed");
+    assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)",[f.customerPhone,f.professionalPhone])).rows.length,0);
+    await query("DROP TRIGGER fail_opportunity_reply ON channel_outbound_messages; DROP FUNCTION fail_opportunity_reply()");
+    await f.send(`recuso ${f.code}`,f.professionalPhone,delivery);
+    assert.equal(await f.countEvents(),1);
+    assert.equal((await f.send(`recuso ${f.code}`,f.professionalPhone,delivery)).duplicate,true);
+  } finally {
+    await query("DROP TRIGGER IF EXISTS fail_opportunity_reply ON channel_outbound_messages; DROP FUNCTION IF EXISTS fail_opportunity_reply()");
+    await f.cleanup();
+  }
+});
+
+test("migration 015 refuses destructive rollback and events cannot be overwritten", async () => {
+  const f = await fixture();
+  try {
+    await f.send(`aceito ${f.code}`);
+    await assert.rejects(query("UPDATE opportunity_response_events SET next_state='declined' WHERE contact_id=$1",[f.contactId]),/append-only/);
+    const before = await f.conversations();
+    await assert.rejects(promisify(execFile)(process.execPath,["node_modules/node-pg-migrate/bin/node-pg-migrate.js","-m","database/migrations","--database-url-var","DATABASE_URL","down"],
+      {cwd:fileURLToPath(new URL("../../../",import.meta.url))}), (error: unknown) => {
+      assert.ok(error instanceof Error && "stderr" in error);
+      assert.match(String(error.stderr),/OPPORTUNITY_RESPONSE_ROLLBACK_BLOCKED/);
+      assert.match(String(error.stderr),/P0015/); return true;
+    });
+    assert.equal(await f.countEvents(),1);
+    assert.deepEqual(await f.conversations(),before);
+  } finally { await f.cleanup(); }
 });

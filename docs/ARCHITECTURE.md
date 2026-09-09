@@ -321,6 +321,8 @@ O aviso identifica serviço/código e informa que a busca atual continua normalm
 `retomar CC-...` ou uma frase inequívoca com o serviço troca o foco explicitamente;
 `manter atual`/`continuar aqui` não muda a busca. Ambiguidade pede esclarecimento.
 A conversa que perde o foco permanece salva com seu slot, opções, limite e TTL;
+um código público de retomada (`resume_code`) permite voltar mesmo quando duas
+buscas têm o mesmo serviço. O código da oportunidade recusada é preservado.
 não há dois registros ativos. Locks no cliente serializam criação e retomada;
 o índice de uma conversa ativa continua sendo a última proteção.
 

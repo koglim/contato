@@ -241,6 +241,8 @@ fica retomável; somente comando explícito inequívoco troca o foco. A busca at
 fica suspensa/retomável, nunca apagada. “Manter atual” e “continuar aqui” preservam
 o contexto. TTL não é renovado artificialmente; expiração exige nova busca.
 Revalidar profissionais restantes, preservar shown_at, não selecionar substituto.
+Ao suspender a busca atual, retornar seu código de retomada para permitir voltar
+mesmo que ambas as buscas sejam do mesmo serviço. Não renovar o TTL nessa troca.
 
 Branch: feat/professional-opportunity-response. Migration nova: 015, com up/down
 protegido. Não executar em produção nem fazer deploy nesta etapa. Confirmar CI

@@ -2,6 +2,8 @@ exports.up = (pgm) => {
   pgm.sql(`
     ALTER TABLE search_conversations ADD COLUMN resume_slot TEXT
       CHECK (resume_slot IS NULL OR resume_slot IN ('location', 'service', 'selection'));
+    ALTER TABLE search_conversations ADD COLUMN resume_code TEXT UNIQUE
+      CHECK (resume_code IS NULL OR resume_code ~ '^CC-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$');
     CREATE TABLE opportunity_response_events (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE RESTRICT,
@@ -46,7 +48,7 @@ exports.down = (pgm) => {
     DO $$ BEGIN
       IF EXISTS (SELECT 1 FROM opportunity_response_events)
         OR EXISTS (SELECT 1 FROM channel_inbound_messages WHERE response_outbound_id IS NOT NULL)
-        OR EXISTS (SELECT 1 FROM search_conversations WHERE resume_slot IS NOT NULL)
+        OR EXISTS (SELECT 1 FROM search_conversations WHERE resume_slot IS NOT NULL OR resume_code IS NOT NULL)
         OR EXISTS (SELECT 1 FROM channel_outbound_messages WHERE purpose IN ('professional_reply', 'customer_contact_update'))
         OR EXISTS (SELECT 1 FROM contacts WHERE bilateral_snapshot IS NOT NULL GROUP BY search_request_id HAVING count(*) > 1)
       THEN RAISE EXCEPTION USING ERRCODE = 'P0015', MESSAGE = 'OPPORTUNITY_RESPONSE_ROLLBACK_BLOCKED';
@@ -66,6 +68,6 @@ exports.down = (pgm) => {
     DROP INDEX contacts_pending_professional_idx;
     DROP INDEX contacts_bilateral_search_unique_idx;
     CREATE UNIQUE INDEX contacts_bilateral_search_unique_idx ON contacts(search_request_id) WHERE bilateral_snapshot IS NOT NULL;
-    ALTER TABLE search_conversations DROP COLUMN resume_slot;
+    ALTER TABLE search_conversations DROP COLUMN resume_slot, DROP COLUMN resume_code;
   `);
 };

@@ -270,7 +270,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
                   )
               )::integer AS pending_reservation_count
          FROM matches
-        WHERE search_request_id = $1`,
+        WHERE search_request_id = $1 AND ${resumedMatchEligibilitySql}`,
       [searchRequestId, MAX_PRESENTED_PER_SEARCH],
     );
     const row = result.rows[0];

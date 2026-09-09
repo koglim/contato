@@ -1,16 +1,17 @@
-import { opportunityMessageSchema, type ChannelInboundMessageResponse } from "@contatocerto/shared";
+import { channelInboundMessageResponseSchema, opportunityMessageSchema, type ChannelInboundMessageResponse } from "@contatocerto/shared";
 import { withTransaction, type DatabaseClient } from "../../database/connection.js";
-import { bilateralSnapshotSchema, safeOpportunityText } from "../bilateral-contact/bilateral-contact.policy.js";
+import { bilateralSnapshotSchema, createOpportunityCode, safeOpportunityText } from "../bilateral-contact/bilateral-contact.policy.js";
 import { parseGlobalConversationCommand } from "../conversation-commands/conversation-command.parser.js";
 import type { ChannelInboundMessageRecord } from "../channel-inbox/channel-inbox.types.js";
 import { normalizeOpportunityCommand, parseOpportunityMessage } from "./professional-opportunity.parser.js";
 import { resolveResumeTarget } from "./resume-target.js";
+import { resumedMatchEligibilitySql } from "./resumed-match-eligibility.js";
 
 type Contact = { id: string; professional_id: string; customer_id: string; search_request_id: string;
   selection_conversation_id: string; public_code: string; status: string; bilateral_snapshot: unknown };
 type Conversation = { id: string; customer_id: string; status: string; pending_slot: string | null;
   resume_slot: string | null; search_request_id: string | null; service_text: string; location_text: string | null;
-  valid: boolean; processing_token: string | null };
+  valid: boolean; processing_token: string | null; resume_code?: string | null };
 type Result = ReturnType<typeof opportunityMessageSchema.parse>;
 type Transaction = <T>(callback: (client: DatabaseClient) => Promise<T>) => Promise<T>;
 
@@ -35,7 +36,7 @@ export class ProfessionalOpportunityService {
         WHERE professionals.phone_e164 = $1 AND contacts.bilateral_snapshot ->> 'professional_phone_e164' = $1
           AND contacts.bilateral_snapshot IS NOT NULL
           AND (contacts.status IN ('requested', 'accepted', 'declined') OR lower(contacts.public_code) = ANY($2::text[]))
-        ORDER BY contacts.created_at, contacts.id LIMIT 21`, [record.phoneE164, parsed.codes.map((code) => code.toLowerCase())])).rows;
+        ORDER BY (contacts.status = 'requested') DESC, contacts.created_at DESC, contacts.id LIMIT 21`, [record.phoneE164, parsed.codes.map((code) => code.toLowerCase())])).rows;
       const byCode = owned.filter((contact) => parsed.codes.includes(contact.public_code));
       if (parsed.codes.length === 1 && byCode.length === 1 && parsed.resume === null) {
         return this.decide(db, record, byCode[0], parsed.decision);
@@ -46,6 +47,9 @@ export class ProfessionalOpportunityService {
       }
       if (parsed.codes.length) return this.finish(db, record, "unavailable", "Não consegui identificar essa oportunidade para você. Confira o código recebido.");
       const pending = owned.filter((contact) => contact.status === "requested");
+      if (active && pending.length && /^(?:talvez|nao sei|onde fica|quanto e|e se eu aceitar|posso responder depois)\??$/u.test(normalizeOpportunityCommand(record.rawText))) {
+        return this.finish(db, record, "clarification", "Você quer falar da oportunidade recebida ou continuar sua busca atual? Para responder à oportunidade, envie a decisão com o código.");
+      }
       // A short repeat is safe only when there is one owned opportunity and no
       // competing customer context. Otherwise ask for its public code.
       if (parsed.decision && pending.length === 0 && owned.length === 1 && !active) {
@@ -100,12 +104,18 @@ export class ProfessionalOpportunityService {
       const other = (await db.query<Conversation>(`SELECT *, expires_at > NOW() AS valid FROM search_conversations
         WHERE customer_id = $1 AND id <> $2 AND status = 'active' AND expires_at > NOW() FOR NO KEY UPDATE`, [contact.customer_id, conversation.id])).rows[0];
       customerText = `O profissional da solicitação de ${safeOpportunityText(snapshot.service_name, 120)}, código ${contact.public_code}, não poderá atender.`;
-      await db.query("UPDATE search_conversations SET resume_slot = 'selection' WHERE id = $1 AND status <> 'active'", [conversation.id]);
+      await db.query("UPDATE search_conversations SET resume_slot = 'selection', resume_code = $2 WHERE id = $1 AND status <> 'active'", [conversation.id, contact.public_code]);
       if (conversation.valid) {
         await db.query("UPDATE search_requests SET status = 'matched' WHERE id = $1 AND status = 'selected'", [contact.search_request_id]);
         if (!other && conversation.status === "completed") {
           await db.query(`UPDATE search_conversations SET status = 'active', pending_slot = 'selection', resume_slot = NULL, completed_at = NULL WHERE id = $1`, [conversation.id]);
-          customerText += " Você pode escolher outra opção já apresentada ou pedir ‘mostrar mais’. Se as opções acabaram, envie ‘nova busca’.";
+          const remaining = (await db.query<{ shown: number; unshown: number }>(`SELECT
+            count(*) FILTER (WHERE shown_at IS NOT NULL)::integer AS shown,
+            count(*) FILTER (WHERE shown_at IS NULL)::integer AS unshown
+            FROM matches WHERE search_request_id = $1 AND rank_position <= 6 AND ${resumedMatchEligibilitySql}`, [contact.search_request_id])).rows[0];
+          customerText += remaining.shown ? " Você pode escolher outra opção já apresentada."
+            : remaining.unshown ? " Para ver outras opções, envie ‘mostrar mais’."
+              : " Não restaram opções válidas nesta busca. Envie ‘nova busca’ para procurar novamente.";
         } else {
           customerText += other ? ` Sua busca atual por ${safeOpportunityText(other.service_text, 100)} continua normalmente.` : " Sua busca atual permanece como está.";
           customerText += ` Para voltar à solicitação anterior, envie “retomar ${contact.public_code}”.`;
@@ -125,7 +135,7 @@ export class ProfessionalOpportunityService {
     await db.query("SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE", [customerId]);
     if (parsed.keep) return this.finish(db, record, "kept", "Tudo certo. Continue sua busca atual normalmente.");
     const targets = (await db.query<Conversation & { public_code: string | null }>(`SELECT conversation.*, conversation.expires_at > NOW() AS valid,
-      (SELECT public_code FROM contacts WHERE selection_conversation_id = conversation.id AND status = 'declined' ORDER BY created_at DESC LIMIT 1) AS public_code
+      COALESCE(conversation.resume_code, (SELECT public_code FROM contacts WHERE selection_conversation_id = conversation.id AND status = 'declined' ORDER BY created_at DESC LIMIT 1)) AS public_code
       FROM search_conversations conversation WHERE conversation.customer_id = $1 AND conversation.resume_slot IS NOT NULL
       ORDER BY conversation.created_at DESC LIMIT 30 FOR NO KEY UPDATE OF conversation`, [customerId])).rows;
     const target = resolveResumeTarget(targets, parsed.codes, parsed.resume ?? "");
@@ -133,19 +143,26 @@ export class ProfessionalOpportunityService {
     if (!target.valid) return this.finish(db, record, "expired", `A busca de ${safeOpportunityText(target.service_text, 120)} expirou. Inicie uma nova busca desse serviço em ${safeOpportunityText(target.location_text, 120) || "sua localização"}.`);
     const current = (await db.query<Conversation>(`SELECT *, expires_at > NOW() AS valid FROM search_conversations WHERE customer_id = $1 AND status = 'active' FOR NO KEY UPDATE`, [customerId])).rows[0];
     if (current?.processing_token) return this.finish(db, record, "clarification", "Sua busca está sendo atualizada. Tente retomar novamente em instantes.");
-    if (current && current.id !== target.id) await db.query(`UPDATE search_conversations SET resume_slot = pending_slot::text, status = 'completed', pending_slot = NULL, completed_at = NOW() WHERE id = $1`, [current.id]);
+    let savedCode: string | undefined;
+    if (current && current.id !== target.id) {
+      savedCode = current.resume_code ?? createOpportunityCode();
+      await db.query(`UPDATE search_conversations SET resume_slot = pending_slot::text, resume_code = $2,
+        status = 'completed', pending_slot = NULL, completed_at = NOW() WHERE id = $1`, [current.id, savedCode]);
+    }
     await db.query(`UPDATE search_conversations SET pending_slot = resume_slot::search_conversation_pending_slot, resume_slot = NULL,
       status = 'active', completed_at = NULL WHERE id = $1`, [target.id]);
-    return this.finish(db, record, "resumed", `Retomamos sua busca de ${safeOpportunityText(target.service_text, 120)}. ${target.resume_slot === "selection" ? "Escolha outra opção apresentada ou peça ‘mostrar mais’." : "Continue de onde parou."} A outra busca ficou salva para retomar depois.`);
+    return this.finish(db, record, "resumed", `Retomamos sua busca de ${safeOpportunityText(target.service_text, 120)}. ${target.resume_slot === "selection" ? "Escolha outra opção apresentada ou peça ‘mostrar mais’." : "Continue de onde parou."}${savedCode ? ` A outra busca ficou salva. Para voltar a ela, envie “retomar ${savedCode}”.` : ""}`);
   }
 
   private async finish(db: DatabaseClient, record: ChannelInboundMessageRecord, kind: Result["result"]["kind"], text: string,
     code?: string, reuseId?: string, eventId?: string) {
     const result = opportunityMessageSchema.parse({ route: "opportunity", result: { kind, text, ...(code ? { public_code: code } : {}) } });
+    const command = parseOpportunityMessage(record.rawText);
+    const purpose = command.resume !== null || command.keep ? "customer_reply" : "professional_reply";
     const outboundId = reuseId ?? (await db.query<{ id: string }>(`INSERT INTO channel_outbound_messages
       (channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, opportunity_event_id, business_key)
-      VALUES ($1, 'professional_reply', $2, $3, $4, $5, $6) RETURNING id`,
-    [record.id, record.provider, record.phoneE164, text, eventId ?? null, eventId ? `opportunity:${eventId}:professional` : `context:${record.id}`])).rows[0].id;
+      VALUES ($1, $7, $2, $3, $4, $5, $6) RETURNING id`,
+    [record.id, record.provider, record.phoneE164, text, eventId ?? null, eventId ? `opportunity:${eventId}:professional` : `context:${record.id}`, purpose])).rows[0].id;
     await db.query(`UPDATE channel_inbound_messages SET status = 'processed', result = $2::jsonb, response_outbound_id = $3,
       processing_token = NULL, processing_started_at = NULL, error_code = NULL, processed_at = NOW() WHERE id = $1`, [record.id, JSON.stringify(result), outboundId]);
     return this.response(db, record.id, outboundId, result, false);
@@ -155,6 +172,6 @@ export class ProfessionalOpportunityService {
     const outbound = (await db.query<{ id: string; status: "pending" | "processing" | "failed" | "sent"; text_content: string }>(
       "SELECT id, status, text_content FROM channel_outbound_messages WHERE id = $1", [outboundId])).rows[0];
     if (!outbound) throw new Error("Opportunity response is unavailable");
-    return { message_id: inboundId, duplicate, reply_text: outbound.text_content, outbound: { id: outbound.id, status: outbound.status }, result };
+    return channelInboundMessageResponseSchema.parse({ message_id: inboundId, duplicate, reply_text: outbound.text_content, outbound: { id: outbound.id, status: outbound.status }, result });
   }
 }

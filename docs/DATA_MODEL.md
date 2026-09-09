@@ -64,3 +64,17 @@ As extensões `pg_trgm` e `unaccent` preparam a busca tolerante a erros de digit
 ## Preços e integridade
 
 Valores monetários usam inteiros em centavos, nunca `FLOAT`. A restrição de `professional_services` exige valores coerentes para cada modo de preço: orçamento sem valor, fixo/a partir de com valor inicial, ou faixa com limites ordenados. UUIDs são gerados pelo PostgreSQL com `gen_random_uuid()` da extensão `pgcrypto`.
+# Migration 015 — resposta de oportunidade e retomada
+
+- `contacts.status`: requested = aguardando; accepted = aceita; declined = recusada.
+- `opportunity_response_events`: um evento append-only por contato, com profissional,
+  inbound, estados anterior/novo, origem, versão e timestamp; sem duplicar texto bruto.
+- Outbox: finalidades professional_reply/customer_contact_update, referência ao evento
+  e chave de negócio. A confirmação por ID/lease permanece idempotente.
+- Inbox: response_outbound_id referencia a confirmação original inclusive em outra
+  entrega da mesma decisão; status processed e resposta são persistidos atomicamente.
+- Conversas: resume_slot preserva o slot e resume_code identifica a busca suspensa; usa status completed sem
+  disputar o índice parcial de uma única conversa ativa. Expiração original é mantida.
+- Um contato recusado não bloqueia outro contato da mesma busca, mas seu histórico,
+  snapshot e selected_at permanecem; uma retomada não inventa uma nova oportunidade.
+- Down bloqueia com P0015 diante de dados incompatíveis, sem apagar eventos/PII.
