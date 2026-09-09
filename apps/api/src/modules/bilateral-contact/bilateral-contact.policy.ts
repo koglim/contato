@@ -59,5 +59,6 @@ export function presentProfessionalOpportunity(snapshot: BilateralSnapshot) {
     `Solicitação: ${snapshot.summary}`,
     `Telefone do cliente: ${snapshot.customer_phone_e164}`,
     "Entre em contato para combinar o atendimento solicitado.",
+    `Para responder, envie “aceito ${snapshot.public_code}” ou “recuso ${snapshot.public_code}”.`,
   ].join("\n");
 }

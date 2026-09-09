@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { ProfessionalOpportunityService } from "./modules/professional-opportunity/professional-opportunity.service.js";
 import { healthResponseSchema } from "@contatocerto/shared";
 import { checkDatabaseConnection } from "./database/connection.js";
 import { professionalsRoutes } from "./modules/professionals/professionals.routes.js";
@@ -96,6 +97,7 @@ type AppDependencies = {
   channelOutboundService?: ChannelOutboundService;
   channelOutboundConfig?: ChannelOutboundConfig;
   internalApiKey?: string;
+  professionalOpportunityService?: Pick<ProfessionalOpportunityService, "handle">;
 };
 
 function createLazyLocationResolutionService(provider?: GeocodingProvider): LocationResolutionService {
@@ -154,6 +156,7 @@ export function buildApp({
   channelOutboundMessageRepository,
   channelOutboundService,
   channelOutboundConfig,
+  professionalOpportunityService,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: true });
   const resolvedMessageInterpretationFallbackConfig =
@@ -210,6 +213,7 @@ export function buildApp({
     channelInboxConfig ?? readChannelInboxConfig(),
     messagePresenter ?? new DefaultMessagePresenter(),
     resolvedChannelOutboundMessageRepository,
+    professionalOpportunityService ?? (channelInboundMessageRepository ? undefined : new ProfessionalOpportunityService()),
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));

@@ -234,3 +234,24 @@ OTP com hash, validade, consumo único, tentativas/cooldown/rate limit e proteç
 ## Prompt de continuação
 
 Continue `koglim/contato` na branch `feat/api-product-core`, atualizando somente por fast-forward a partir do remoto. Leia os AGENTS aplicáveis, este handoff, README, docs de arquitetura/modelo/API, migrations e código/testes afetados. Confira o SHA e o CI do HEAD. Preserve os commits de pool, ranking e correção de deadlock. Etapas 0–2 estão entregues no recorte descrito; siga agora a etapa 3 (contato bilateral) deste backlog e depois 4–8 sequencialmente. Use 014 como próxima migration; revise 012 somente com estratégia explícita para quem já a aplicou. Consentimento, telefone, snapshot de replay, código público e unicidade Outbox são obrigatórios antes de ligar notificação profissional à seleção. Não implemente assinatura/OTP de fachada. Faça commits pequenos, valide lint/typecheck/build/test e PostgreSQL real antes/depois dos rollbacks/reaplicação; mantenha ON_ERROR_STOP=1 no CI. Faça push dos checkpoints e aguarde o Actions do SHA correto. Não faça merge, deploy, alterações de frontend/n8n ou uso do banco real. Se a rodada terminar antes de todas as etapas, deixe apenas entregas completas, árvore limpa e atualize este backlog com evidências reais.
+# Resposta profissional e contexto retomável — aguardando revisão da branch
+
+Decisão aprovada: recusa preserva integralmente outra busca ativa. A busca anterior
+fica retomável; somente comando explícito inequívoco troca o foco. A busca atual
+fica suspensa/retomável, nunca apagada. “Manter atual” e “continuar aqui” preservam
+o contexto. TTL não é renovado artificialmente; expiração exige nova busca.
+Revalidar profissionais restantes, preservar shown_at, não selecionar substituto.
+Ao suspender a busca atual, retornar seu código de retomada para permitir voltar
+mesmo que ambas as buscas sejam do mesmo serviço. Não renovar o TTL nessa troca.
+
+Branch: feat/professional-opportunity-response. Migration nova: 015, com up/down
+protegido. Não executar em produção nem fazer deploy nesta etapa. Confirmar CI
+PostgreSQL e rollbacks antes de aprovar. n8n, frontend e variáveis não alterados.
+
+Cobertura: decisões naturais/código, ambiguidade, proprietário, dupla identidade,
+aceite/recusa concorrentes, recusa com/sem busca ativa, suspensão/retomada, TTL,
+falha de Outbox e falha antes de concluir inbound, replay, alternativas elegíveis,
+próxima página, confirmação de envio e proteção de rollback. Testes usam Inbox,
+serviços/repositórios reais e banco descartável do CI, sem integração de produção.
+O consumidor futuro deve continuar confirmando por ID/lease, sem enviar mensagens
+fora da Outbox. A etapa não garante entrega externa até o consumidor ser integrado.

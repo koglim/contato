@@ -592,3 +592,18 @@ Há uma limitação conhecida: uma queda depois do Customer Router concluir e an
 - `409`: `channel_message_processing` quando a mesma mensagem de canal ainda possui claim ativo.
 - `409`: `channel_message_payload_conflict` quando a mesma idempotency key é recebida com payload diferente.
 - `500`: `internal_error`, sem expor SQL, stack trace ou segredos.
+# Respostas a oportunidades pela Channel Inbox
+
+O endpoint existente aceita decisões como `aceito CC-23456789` e
+`recuso CC-23456789`, sempre vinculadas ao remetente persistido. Sem código,
+somente uma oportunidade inequívoca pode ser respondida. Perguntas não são decisões.
+O resultado adicional tem `route: opportunity` e `result: { kind, text, public_code? }`;
+`kind` é accepted, declined, clarification, unavailable, resumed, kept ou expired.
+Não inclui telefone ou identificadores internos do contato/profissional.
+
+Após recusa, o cliente pode enviar `retomar CC-23456789`, `retomar eletricista`
+ou `continuar aqui`. Outra busca ativa nunca é substituída implicitamente.
+Se houver ambiguidade ou expiração, a resposta informa o próximo passo sem trocar
+o contexto. Uma resposta repetida mantém a Outbox e a decisão já persistidas.
+Novas finalidades Outbox: `professional_reply` e `customer_contact_update`.
+O dispatcher e o fluxo de confirmação de envio permanecem os mesmos.

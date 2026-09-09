@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { customerSearchMessageResponseSchema, type ChannelInboundMessageInput } from "@contatocerto/shared";
+import { customerSearchMessageResponseSchema, opportunityMessageSchema, type ChannelInboundMessageInput } from "@contatocerto/shared";
+import type { ProfessionalOpportunityService } from "../professional-opportunity/professional-opportunity.service.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import type { ChannelInboxConfig } from "../../config/channel-inbox.js";
@@ -75,6 +76,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     private readonly config: ChannelInboxConfig,
     private readonly messagePresenter: MessagePresenter,
     private readonly channelOutboundMessageRepository: ChannelOutboundMessageRepository,
+    private readonly professionalOpportunities?: Pick<ProfessionalOpportunityService, "handle">,
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
@@ -97,6 +99,8 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     }
 
     try {
+      const opportunity = await this.professionalOpportunities?.handle(claimed);
+      if (opportunity) return { kind: "response", response: opportunity };
       const routed = await this.customerSearchRouter.route({
         phone_e164: claimed.phoneE164,
         raw_text: claimed.rawText,
@@ -152,6 +156,10 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   }
 
   private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
+    if (opportunityMessageSchema.safeParse(record.result).success) {
+      const response = await this.professionalOpportunities?.handle(record);
+      return response ? { kind: "response", response } : { kind: "channel_message_result_invalid" };
+    }
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
     if (!parsed.success) return { kind: "channel_message_result_invalid" };
     const result = parsed.data;

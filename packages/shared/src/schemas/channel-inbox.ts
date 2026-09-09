@@ -2,6 +2,7 @@ import { z } from "zod";
 import { phoneE164Schema } from "./phone.js";
 import { channelOutboundMessageSummarySchema } from "./channel-outbound.js";
 import { customerSearchMessageResponseSchema } from "./customer-search.js";
+import { opportunityMessageSchema } from "./opportunity-message.js";
 
 function hasRawMessageText(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasRawMessageText);
@@ -25,7 +26,7 @@ export const channelInboundMessageResponseSchema = z.object({
   duplicate: z.boolean(),
   reply_text: z.string().trim().min(1).max(2_000),
   outbound: channelOutboundMessageSummarySchema,
-  result: customerSearchMessageResponseSchema.refine((value) => !hasRawMessageText(value), {
+  result: z.union([customerSearchMessageResponseSchema, opportunityMessageSchema]).refine((value) => !hasRawMessageText(value), {
     message: "channel inbox results must not expose raw message text",
   }),
 }).strict();

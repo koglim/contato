@@ -68,10 +68,11 @@ export class PostgresSearchConversationRepository implements SearchConversationR
 
   async createPending(input: CreatePendingConversation) {
     const result = await this.execute<SearchConversationRow>(
-      `INSERT INTO search_conversations (
+      `WITH owner_lock AS MATERIALIZED (SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE)
+       INSERT INTO search_conversations (
          customer_id, status, pending_slot, original_raw_text, service_text, location_text, country_code,
          limit_value, last_message_text, expires_at
-       ) VALUES ($1, 'active', $2, $3, $4, $5, $6, $7, $3, NOW() + ($8 * INTERVAL '1 minute'))
+       ) SELECT $1, 'active', $2, $3, $4, $5, $6, $7, $3, NOW() + ($8 * INTERVAL '1 minute') FROM (SELECT count(*) FROM owner_lock) locked
        RETURNING ${conversationColumns}`,
       [
         input.customerId ?? null,
@@ -89,12 +90,13 @@ export class PostgresSearchConversationRepository implements SearchConversationR
 
   async createAwaitingSelection(input: CreateAwaitingSelectionConversation) {
     const result = await this.execute<SearchConversationRow>(
-      `INSERT INTO search_conversations (
+      `WITH owner_lock AS MATERIALIZED (SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE)
+       INSERT INTO search_conversations (
          customer_id, status, pending_slot, original_raw_text, service_text, location_text, country_code,
          limit_value, last_message_text, search_request_id, processing_token, processing_started_at,
          completed_at, expires_at
-       ) VALUES ($1, 'active', 'selection', $2, $3, $4, $5, $6, $2, $7, NULL, NULL, NULL,
-         NOW() + ($8 * INTERVAL '1 minute'))
+       ) SELECT $1, 'active', 'selection', $2, $3, $4, $5, $6, $2, $7, NULL, NULL, NULL,
+         NOW() + ($8 * INTERVAL '1 minute') FROM (SELECT count(*) FROM owner_lock) locked
        RETURNING ${conversationColumns}`,
       [
         input.customerId ?? null,

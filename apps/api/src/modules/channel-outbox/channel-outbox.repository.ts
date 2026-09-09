@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { resumedMatchEligibilitySql } from "../professional-opportunity/resumed-match-eligibility.js";
 import { BILATERAL_NOTICE, BILATERAL_NOTICE_VERSION } from "../bilateral-contact/bilateral-contact.policy.js";
 import { MAX_PRESENTED_PER_SEARCH, PRESENTATION_PAGE_SIZE } from "../matching/matching-policy.js";
 import { query, withTransaction, type DatabaseClient, type SqlValue } from "../../database/connection.js";
@@ -13,7 +14,7 @@ import type { ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInpu
 export type ChannelOutboundMessageRow = {
   id: string;
   channel_inbound_message_id: string | null;
-  purpose: "customer_reply" | "professional_contact_notification";
+  purpose: ChannelOutboundMessageRecord["purpose"];
   provider: string;
   recipient_phone_e164: string;
   message_type: "text";
@@ -120,6 +121,7 @@ export async function associateOutboundMessageMatches(
         AND rank_position IS NOT NULL
         AND rank_position <= $3
         AND shown_at IS NULL
+        AND ${resumedMatchEligibilitySql}
         AND id = ANY($2::uuid[])
         AND EXISTS (SELECT 1 FROM search_requests WHERE id = $1 AND status = 'matched')
         AND NOT EXISTS (
