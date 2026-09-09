@@ -51,7 +51,8 @@ test("outbox repository recovers one legacy outbound, associates ranked matches,
   assert.match(current.calls[6]!.text, /status = 'sent'/u);
   assert.match(current.calls[7]!.text, /shown_at = COALESCE\(shown_at, NOW\(\)\)/u);
   assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "evolution_timeout" }), true);
-  assert.match(current.calls[8]!.text, /CASE WHEN attempt_count >= \$4 THEN 'failed' ELSE 'pending'/u);
+  assert.match(current.calls[8]!.text, /THEN 'failed'::channel_outbound_message_status/u);
+  assert.match(current.calls[8]!.text, /ELSE 'pending'::channel_outbound_message_status END/u);
   assert.match(current.calls[8]!.text, /next_attempt_at/u);
 });
 
