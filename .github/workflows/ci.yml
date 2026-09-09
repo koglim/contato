@@ -227,6 +227,23 @@ jobs:
            WHERE id = '00000000-0000-0000-0000-000000000002';
           SQL
 
+      - name: Roll back migration 014 with compatible data
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
+      - name: Verify migration 014 rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND column_name IN
+                ('bilateral_snapshot', 'public_code', 'selection_conversation_id', 'bilateral_pending', 'bilateral_response', 'business_key', 'bilateral_notice_version'))
+              OR to_regclass('contacts_public_code_unique_idx') IS NOT NULL
+              OR to_regprocedure('protect_bilateral_contact_snapshot()') IS NOT NULL THEN
+              RAISE EXCEPTION 'migration 014 schema remained after compatible rollback';
+            END IF;
+          END $$;
+          SQL
+
       - name: Roll back migration 013
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
 
@@ -343,7 +360,7 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 013
+      - name: Reapply migrations 008 through 014
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
       - name: Test PostgreSQL integrations after reapply
