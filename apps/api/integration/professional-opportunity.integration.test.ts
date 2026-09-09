@@ -334,12 +334,41 @@ test("migration 015 refuses destructive rollback and events cannot be overwritte
     await f.send(`aceito ${f.code}`);
     await assert.rejects(query("UPDATE opportunity_response_events SET next_state='declined' WHERE contact_id=$1",[f.contactId]),/append-only/);
     const before = await f.conversations();
-    await assert.rejects(promisify(execFile)(process.execPath,["node_modules/node-pg-migrate/bin/node-pg-migrate.js","-m","database/migrations","--database-url-var","DATABASE_URL","down","2"],
+    const beforeEvents = await query<{ contact_id: string; next_state: string; rule_version: string }>(
+      "SELECT contact_id, next_state, rule_version FROM opportunity_response_events WHERE contact_id=$1",[f.contactId]);
+    const beforeMigrations = await query<{ name: string }>(
+      "SELECT name FROM pgmigrations WHERE name IN ('015_add_opportunity_responses','016_add_outbound_retry_schedule') ORDER BY name");
+    const beforeOutbox = await query<{ id: string; status: string; purpose: string; text_content: string; next_attempt_at: string | null }>(
+      `SELECT id::text, status, purpose, text_content, next_attempt_at::text
+       FROM channel_outbound_messages
+       WHERE recipient_phone_e164 IN ($1,$2) ORDER BY id`,[f.customerPhone,f.professionalPhone]);
+    // Exercise the protected 015 rollback with the supported CLI syntax. The
+    // explicit single transaction must roll back 016 as well when 015 rejects.
+    await assert.rejects(promisify(execFile)(process.execPath,["node_modules/node-pg-migrate/bin/node-pg-migrate.js","down","2","--single-transaction","-m","database/migrations","--database-url-var","DATABASE_URL"],
       {cwd:fileURLToPath(new URL("../../../",import.meta.url))}), (error: unknown) => {
       assert.ok(error instanceof Error && "stderr" in error);
       assert.match(String(error.stderr),/OPPORTUNITY_RESPONSE_ROLLBACK_BLOCKED/);
       assert.match(String(error.stderr),/P0015/); return true;
     });
+    const retryColumn = await query<{ column_name: string }>(`SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='channel_outbound_messages'
+        AND column_name='next_attempt_at'`);
+    assert.equal(retryColumn.rows.length,1,"migration 016 must remain applied after the protected 015 rollback");
+    const retryIndex = await query<{ index_name: string | null }>(
+      "SELECT to_regclass('channel_outbound_messages_pending_next_attempt_idx') AS index_name");
+    assert.equal(retryIndex.rows[0]?.index_name,"channel_outbound_messages_pending_next_attempt_idx");
+    const migration016 = await query<{ name: string }>(
+      "SELECT name FROM pgmigrations WHERE name='016_add_outbound_retry_schedule'");
+    assert.deepEqual(migration016.rows,[{ name: "016_add_outbound_retry_schedule" }]);
+    assert.deepEqual((await query<{ contact_id: string; next_state: string; rule_version: string }>(
+      "SELECT contact_id, next_state, rule_version FROM opportunity_response_events WHERE contact_id=$1",[f.contactId])).rows,beforeEvents.rows);
+    assert.deepEqual((await query<{ name: string }>(
+      "SELECT name FROM pgmigrations WHERE name IN ('015_add_opportunity_responses','016_add_outbound_retry_schedule') ORDER BY name")).rows,beforeMigrations.rows);
+    assert.deepEqual((await query<{ id: string; status: string; purpose: string; text_content: string; next_attempt_at: string | null }>(
+      `SELECT id::text, status, purpose, text_content, next_attempt_at::text
+       FROM channel_outbound_messages
+       WHERE recipient_phone_e164 IN ($1,$2) ORDER BY id`,[f.customerPhone,f.professionalPhone])).rows,beforeOutbox.rows);
     assert.equal(await f.countEvents(),1);
     assert.deepEqual(await f.conversations(),before);
   } finally { await f.cleanup(); }
