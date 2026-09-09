@@ -10,6 +10,11 @@ import type {
   CreateIndependentChannelOutboundMessage,
 } from "./channel-outbox.types.js";
 import type { ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
+import { OUTBOX_MAX_ATTEMPTS, OUTBOX_RETRY_BACKOFF_SECONDS } from "./channel-outbox.retry.js";
+
+const retryBackoffSql = OUTBOX_RETRY_BACKOFF_SECONDS
+  .map((seconds, index) => `WHEN ${index + 1} THEN ${seconds}`)
+  .join(" ");
 
 export type ChannelOutboundMessageRow = {
   id: string;
@@ -26,6 +31,7 @@ export type ChannelOutboundMessageRow = {
   attempt_count: number;
   last_error_code: string | null;
   sent_at: Date | null;
+  next_attempt_at: Date | null;
 };
 
 export type ChannelOutboxQuery = <T extends QueryResultRow>(text: string, values?: unknown[]) => Promise<{ rows: T[] }>;
@@ -33,14 +39,15 @@ export type ChannelOutboxTransaction = <T>(callback: (client: DatabaseClient) =>
 
 export const channelOutboundMessageColumns = `
   id, channel_inbound_message_id, purpose, provider, recipient_phone_e164, message_type, text_content,
-  status, processing_token, processing_started_at, provider_message_id, attempt_count, last_error_code, sent_at
+  status, processing_token, processing_started_at, provider_message_id, attempt_count, last_error_code, sent_at,
+  next_attempt_at
 `;
 
 const qualifiedChannelOutboundMessageColumns = `
   outbound.id, outbound.channel_inbound_message_id, outbound.purpose, outbound.provider,
   outbound.recipient_phone_e164, outbound.message_type, outbound.text_content, outbound.status,
   outbound.processing_token, outbound.processing_started_at, outbound.provider_message_id,
-  outbound.attempt_count, outbound.last_error_code, outbound.sent_at
+  outbound.attempt_count, outbound.last_error_code, outbound.sent_at, outbound.next_attempt_at
 `;
 
 export class MatchReservationConflictError extends Error {
@@ -68,6 +75,7 @@ export function toChannelOutboundMessageRecord(row: ChannelOutboundMessageRow): 
     attemptCount: row.attempt_count,
     lastErrorCode: row.last_error_code,
     sentAt: row.sent_at,
+    nextAttemptAt: row.next_attempt_at,
   };
 }
 
@@ -199,14 +207,16 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
   async claim(id: string, processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<ChannelOutboundMessageRow>(
       `UPDATE channel_outbound_messages
-       SET status = 'processing', processing_token = $2, processing_started_at = NOW(), attempt_count = attempt_count + 1
+       SET status = 'processing', processing_token = $2, processing_started_at = NOW(),
+           next_attempt_at = NULL, attempt_count = attempt_count + 1
        WHERE id = $1
          AND (
-           status IN ('pending', 'failed')
+           (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
+           OR (status = 'failed' AND attempt_count < $4 AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
            OR (status = 'processing' AND processing_started_at <= NOW() - ($3 * INTERVAL '1 second'))
          )
        RETURNING ${channelOutboundMessageColumns}`,
-      [id, processingToken, processingLeaseSeconds],
+      [id, processingToken, processingLeaseSeconds, OUTBOX_MAX_ATTEMPTS],
     );
     return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;
   }
@@ -216,18 +226,22 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
       `WITH candidate AS (
          SELECT id
            FROM channel_outbound_messages
-          WHERE status IN ('pending', 'failed')
+          WHERE (
+            (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
+            OR (status = 'failed' AND attempt_count < $2 AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
+          )
              OR (status = 'processing' AND processing_started_at <= NOW() - ($1 * INTERVAL '1 second'))
           ORDER BY created_at ASC, id ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
        )
        UPDATE channel_outbound_messages AS outbound
-          SET status = 'processing', processing_token = $2, processing_started_at = NOW(), attempt_count = attempt_count + 1
+          SET status = 'processing', processing_token = $3, processing_started_at = NOW(),
+              next_attempt_at = NULL, attempt_count = attempt_count + 1
          FROM candidate
         WHERE outbound.id = candidate.id
        RETURNING ${qualifiedChannelOutboundMessageColumns}`,
-      [processingLeaseSeconds, processingToken],
+      [processingLeaseSeconds, OUTBOX_MAX_ATTEMPTS, processingToken],
     );
     return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;
   }
@@ -237,7 +251,7 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
       const result = await client.query<{ id: string }>(
       `UPDATE channel_outbound_messages
        SET status = 'sent', provider_message_id = $3, sent_at = NOW(), processing_token = NULL,
-           processing_started_at = NULL, last_error_code = NULL
+           processing_started_at = NULL, next_attempt_at = NULL, last_error_code = NULL
        WHERE id = $1 AND status = 'processing' AND processing_token = $2
        RETURNING id`,
         [id, input.processing_token, input.provider_message_id],
@@ -258,10 +272,13 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
   async markFailed(id: string, input: MarkChannelOutboundMessageFailedInput) {
     const result = await this.execute<{ id: string }>(
       `UPDATE channel_outbound_messages
-       SET status = 'failed', last_error_code = $3, processing_token = NULL, processing_started_at = NULL
+       SET status = CASE WHEN attempt_count >= $4 THEN 'failed' ELSE 'pending' END,
+           next_attempt_at = CASE WHEN attempt_count >= $4 THEN NULL
+             ELSE NOW() + (CASE attempt_count ${retryBackoffSql} ELSE ${OUTBOX_RETRY_BACKOFF_SECONDS.at(-1)} END * INTERVAL '1 second') END,
+           last_error_code = $3, processing_token = NULL, processing_started_at = NULL
        WHERE id = $1 AND status = 'processing' AND processing_token = $2
        RETURNING id`,
-      [id, input.processing_token, input.error_code],
+      [id, input.processing_token, input.error_code, OUTBOX_MAX_ATTEMPTS],
     );
     return result.rows.length === 1;
   }

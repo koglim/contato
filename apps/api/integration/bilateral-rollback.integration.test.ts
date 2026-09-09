@@ -71,7 +71,7 @@ for (const protectedData of ["independent", "selection_key", "snapshot", "notice
       let blocked = false;
       try {
         await exec(process.execPath, ["node_modules/node-pg-migrate/bin/node-pg-migrate.js",
-          "-m", "database/migrations", "--database-url-var", "DATABASE_URL", "down", "2"], { cwd: root });
+          "-m", "database/migrations", "--database-url-var", "DATABASE_URL", "down", "3"], { cwd: root });
       } catch (error) {
         assert.ok(error instanceof Error && "stderr" in error);
         assert.match(String(error.stderr), /BILATERAL_ROLLBACK_BLOCKED/);

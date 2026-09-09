@@ -12,7 +12,7 @@ function row(overrides: Record<string, unknown> = {}) {
   return {
     id, channel_inbound_message_id: inboundId, purpose: "customer_reply", provider: "test", recipient_phone_e164: "+5566999999999",
     message_type: "text", text_content: "Olá", status: "pending", processing_token: null,
-    processing_started_at: null, provider_message_id: null, attempt_count: 0, last_error_code: null, sent_at: null,
+    processing_started_at: null, provider_message_id: null, attempt_count: 0, last_error_code: null, sent_at: null, next_attempt_at: null,
     ...overrides,
   };
 }
@@ -43,14 +43,16 @@ test("outbox repository recovers one legacy outbound, associates ranked matches,
   assert.match(current.calls[3]!.text, /pending.shown_at IS NULL/u);
   assert.match(current.calls[4]!.text, /channel_outbound_message_matches/u);
   assert.equal((await current.repository.claim(id, token, 60))?.attemptCount, 2);
-  assert.match(current.calls[5]!.text, /status IN \('pending', 'failed'\)/u);
+  assert.match(current.calls[5]!.text, /status = 'pending'/u);
+  assert.match(current.calls[5]!.text, /next_attempt_at IS NULL/u);
   assert.match(current.calls[5]!.text, /processing_started_at <=/u);
   assert.match(current.calls[5]!.text, /attempt_count = attempt_count \+ 1/u);
   assert.equal(await current.repository.markSent(id, { processing_token: token, provider_message_id: "evolution-001" }), true);
   assert.match(current.calls[6]!.text, /status = 'sent'/u);
   assert.match(current.calls[7]!.text, /shown_at = COALESCE\(shown_at, NOW\(\)\)/u);
   assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "evolution_timeout" }), true);
-  assert.match(current.calls[8]!.text, /status = 'failed'/u);
+  assert.match(current.calls[8]!.text, /CASE WHEN attempt_count >= \$4 THEN 'failed' ELSE 'pending'/u);
+  assert.match(current.calls[8]!.text, /next_attempt_at/u);
 });
 
 test("outbox repository rejects unranked or foreign matches before creating associations", async () => {
@@ -92,4 +94,16 @@ test("outbox repository creates an independent purpose and atomically claims the
   assert.match(current.calls[1]!.text, /FOR UPDATE SKIP LOCKED/u);
   assert.match(current.calls[1]!.text, /processing_started_at <=/u);
   assert.match(current.calls[1]!.text, /RETURNING\s+outbound\.id/u);
+  assert.match(current.calls[1]!.text, /outbound\.next_attempt_at/u);
+});
+
+test("outbox repository centralizes the retry schedule and dead-letter limit in SQL parameters", async () => {
+  const current = fake([[{ id }]]);
+  assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "transport_timeout" }), true);
+  assert.match(current.calls[0]!.text, /WHEN 1 THEN 30/u);
+  assert.match(current.calls[0]!.text, /WHEN 2 THEN 60/u);
+  assert.match(current.calls[0]!.text, /WHEN 3 THEN 120/u);
+  assert.match(current.calls[0]!.text, /WHEN 4 THEN 240/u);
+  assert.match(current.calls[0]!.text, /WHEN 5 THEN 480/u);
+  assert.deepEqual(current.calls[0]!.values, [id, token, "transport_timeout", 5]);
 });

@@ -550,7 +550,7 @@ No mesmo commit transacional que marca a Inbox como `processed`, a API cria uma 
 
 Para compatibilidade com inbounds históricos que já estavam `processed` antes da Outbox existir, um replay válido sem registro outbound faz um repair lazy: gera `reply_text` com o Message Presenter e executa `INSERT ... ON CONFLICT (channel_inbound_message_id) ... RETURNING` usando somente provider e telefone persistidos no inbound. Não altera o status inbound, não chama Customer Router, Matching, geocoder ou OpenAI. A unicidade mantém uma única intenção outbound mesmo em replays concorrentes; a migration 007 não faz backfill textual em SQL.
 
-O n8n não interpreta linguagem nem aplica regras de negócio: ele transporta a intenção outbound persistida pela API até a futura Evolution. Nesta etapa não há chamada direta à Evolution pela API, worker, retry automático ou uso de OpenAI pelo presenter.
+O n8n não interpreta linguagem nem aplica regras de negócio: ele transporta a intenção outbound persistida pela API até a futura Evolution. Nesta etapa não há chamada direta à Evolution pela API nem uso de OpenAI pelo presenter; a política de retries fica persistida na Outbox para o consumidor separado.
 
 ## Channel Outbox
 
@@ -572,11 +572,17 @@ Em erro de transporte, o n8n chama `POST /internal/channel/outbound/:id/failed`.
 
 Após a Evolution aceitar a mensagem, `POST /internal/channel/outbound/:outboundId/sent` recebe `processing_token` e `provider_message_id`; somente o claim atual pode marcar `sent`. Em falha, `POST /internal/channel/outbound/:outboundId/failed` recebe o token e um `error_code` controlado. Ambos retornam somente `{ id, status }`; token inválido, expirado ou já concluído retorna `409 outbound_message_claim_invalid`.
 
-`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem pendente, falha ou abandonada; quando a fila está vazia, retorna `204 No Content`. O claim individual existente continua retornando `404` para um ID inexistente. A API persiste a intenção profissional, mas não faz envio externo nem altera o n8n.
+`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem elegível; considera `pending` sem agendamento, `next_attempt_at <= NOW()` e leases `processing` vencidas. A fila vazia retorna `204 No Content`; o claim individual existente continua retornando `404` para um ID inexistente. A transação termina antes do envio externo.
+
+### Retry da Outbox (migration 016)
+
+Uma mensagem nova começa com `attempt_count = 0` e `next_attempt_at = NULL`. Cada claim incrementa o contador e cria uma lease. O consumidor confirma sucesso com `/sent` ou informa falha transitória com `/failed`; nesse segundo caso a mensagem volta a `pending`, preserva `last_error_code` e recebe backoff determinístico de 30, 60, 120, 240 e 480 segundos para as tentativas 1 a 5. Antes de `next_attempt_at` a mensagem não é elegível. A quinta falha marca a mensagem `failed` (dead-letter), limpa a agenda e impede novas claims. `sent` nunca volta a `pending`.
+
+O `markFailed` exige o `processing_token` da lease atual, é idempotente para tokens inválidos e retorna `{ id, status: "pending" }` quando uma nova tentativa foi agendada ou `{ id, status: "failed" }` ao atingir o limite. A política é centralizada em código, sem variável de ambiente nesta etapa. A migration 016 cria o índice parcial de pendências elegíveis; seu `down` bloqueia com `P0016 / OUTBOUND_RETRY_ROLLBACK_BLOCKED` se houver `next_attempt_at` preenchido, sem apagar ou transformar dados.
 
 Há uma janela residual inevitável: a Evolution pode aceitar a mensagem e o n8n cair antes de confirmar `/sent`; após a lease expirar, um novo claim poderá reenviá-la. A arquitetura evita perda da intenção e duplicações lógicas usuais, mas não promete exactly-once matemático.
 
-Falhas controladas do router preservam seus códigos HTTP e deixam a mensagem em `failed`; uma nova entrega com a mesma chave pode reclaimá-la. A lease é controlada por `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` (60 segundos por padrão), permitindo recuperar processamento abandonado sem uma transação aberta em chamadas de IA ou geocoding.
+Falhas controladas do router preservam seus códigos HTTP. A lease da Inbox é controlada por `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` (60 segundos por padrão), permitindo recuperar processamento abandonado sem uma transação aberta em chamadas de IA ou geocoding; falhas de transporte da Outbox seguem a política de retry acima.
 
 Há uma limitação conhecida: uma queda depois do Customer Router concluir e antes de a inbox registrar `processed` pode levar a nova execução após a lease. Portanto o mecanismo fornece idempotência persistida para entregas normais at-least-once, não exactly-once matemático de transporte.
 
