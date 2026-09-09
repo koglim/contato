@@ -233,6 +233,9 @@ jobs:
            WHERE id = '00000000-0000-0000-0000-000000000002';
           SQL
 
+      - name: Roll back migration 015 with compatible data
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
       - name: Roll back migration 014 with compatible data
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
 
@@ -373,7 +376,7 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 014
+      - name: Reapply migrations 008 through 015
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
       - name: Test PostgreSQL integrations after reapply

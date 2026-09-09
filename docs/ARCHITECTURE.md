@@ -301,3 +301,35 @@ A reserva usa `FOR NO KEY UPDATE` sobre a busca: a Inbox pode já possuir `KEY S
 Não há garantia exactly-once matemática: se a Evolution aceitar o texto e o n8n cair antes da confirmação, uma lease vencida poderá ser reivindicada e reenviada. A Outbox evita a perda da intenção e múltiplas mensagens lógicas por inbound, além de tornar tentativas e estados observáveis. Logs incluem apenas IDs internos, provider, status, tentativas, flag de duplicata e código de erro controlado — nunca telefone, texto ou payload de webhook.
 
 Essa camada reduz duplicatas usuais de uma entrega at-least-once e garante um único processamento ativo em condições normais. Não promete exactly-once matemático: se o processo cair após o efeito do router mas antes do `markProcessed`, um reclaim posterior pode reexecutar o domínio. Idempotência de eventos e adaptação concreta da Evolution permanecem deliberadamente para a próxima fase.
+# Resposta profissional e retomada explícita (migration 015)
+
+A Inbox identifica oportunidades pelo telefone normalizado do remetente, conferido
+com o profissional e o snapshot persistido. Comandos globais continuam prioritários.
+Código próprio explícito ou uma única oportunidade pendente permitem aceitar/recusar;
+perguntas, hipóteses e múltiplas oportunidades exigem esclarecimento. Não há IA ou HTTP.
+
+`requested` é o estado aguardando resposta; somente uma transição para `accepted`
+ou `declined` é permitida. `opportunity_response_events` registra origem, versão,
+inbound e estados anteriores/novos, com unicidade por contato e proteção append-only.
+A decisão, evento, aviso independente ao cliente, resposta profissional e inbound
+processado são gravados na mesma transação. `response_outbound_id` permite que uma
+nova entrega repetindo a decisão reutilize a resposta original, sem novo aviso.
+
+**Decisão de contexto aprovada:** uma recusa jamais substitui outra busca ativa.
+A conversa anterior fica retomável (`status=completed`, `resume_slot=selection`).
+O aviso identifica serviço/código e informa que a busca atual continua normalmente.
+`retomar CC-...` ou uma frase inequívoca com o serviço troca o foco explicitamente;
+`manter atual`/`continuar aqui` não muda a busca. Ambiguidade pede esclarecimento.
+A conversa que perde o foco permanece salva com seu slot, opções, limite e TTL;
+não há dois registros ativos. Locks no cliente serializam criação e retomada;
+o índice de uma conversa ativa continua sendo a última proteção.
+
+Sem outra busca ativa, uma recusa reabre a seleção ainda válida. Busca vencida
+não reativa opções: a resposta orienta uma nova busca do mesmo serviço/localização.
+Depois de recusa, apresentação e seleção revalidam status, serviço e cobertura
+PostGIS; ranks, reservas e `shown_at` não são apagados. Nenhum outro profissional
+é escolhido ou notificado automaticamente. Replay reproduz a decisão persistida,
+sem executar novamente a troca de contexto.
+
+Migration 015 possui down protegido (`P0015`): dados de decisões ou retomadas
+impedem remoção destrutiva. Rollback compatível é exercitado antes dos downs anteriores.

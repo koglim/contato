@@ -133,3 +133,4 @@ export type {
 } from "./types/channel-outbound.js";
 export type { SelectionMessageContract } from "./types/selection-message.js";
 export type { GlobalConversationMessageContract } from "./types/global-conversation-message.js";
+export { opportunityMessageSchema } from "./schemas/opportunity-message.js";

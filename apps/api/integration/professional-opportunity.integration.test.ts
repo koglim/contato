@@ -1,0 +1,185 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { after, test } from "node:test";
+import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
+import { buildApp } from "../src/app.js";
+import { closeDatabaseConnection, query, withTransaction } from "../src/database/connection.js";
+import { createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
+import { PostgresSearchConversationRepository } from "../src/modules/search-conversations/search-conversation.repository.js";
+import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
+
+after(closeDatabaseConnection);
+const key = "opportunity-integration";
+const phone = () => `+5566${Math.floor(100000000 + Math.random() * 899999999)}`;
+
+async function fixture(other = false) {
+  const customerId = randomUUID(), professionalId = randomUUID(), searchId = randomUUID(), conversationId = randomUUID();
+  const contactId = randomUUID(), choiceId = randomUUID(), otherId = randomUUID(), code = createOpportunityCode();
+  const customerPhone = phone(), professionalPhone = phone();
+  const app = buildApp({ internalApiKey: key });
+  await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, customerPhone]);
+  await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, 'Ana', $1::text, $2, 'active')", [professionalId, professionalPhone]);
+  await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, 'eletricista em Sinop', 'selected')", [searchId, customerId]);
+  await query(`INSERT INTO search_conversations (id, customer_id, status, original_raw_text, service_text, location_text,
+    country_code, limit_value, search_request_id, expires_at, completed_at)
+    VALUES ($1, $2, 'completed', 'eletricista em Sinop', 'eletricista', 'Sinop, MT', 'BR', 3, $3, NOW() + INTERVAL '1 hour', NOW())`, [conversationId, customerId, searchId]);
+  await query(`INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value)
+    VALUES ($1::uuid, 'test', $1::text, $2, 'Ana', 'BR', 3)`, [choiceId, customerPhone]);
+  const snapshot = { public_code: code, service_name: "eletricista", city: "Sinop", state: "MT", neighborhood: null,
+    summary: "Reparar tomada", professional_name: "Ana", professional_phone_e164: professionalPhone,
+    customer_phone_e164: customerPhone, notice_version: "bilateral-v1", notice_outbound_id: randomUUID(),
+    notice_sent_at: new Date().toISOString(), choice_inbound_id: choiceId, chosen_at: new Date().toISOString(),
+    consented_at: new Date().toISOString(), consent_method: "selection_after_notice" };
+  await query(`INSERT INTO contacts (id, professional_id, customer_id, search_request_id, selection_key,
+    public_code, bilateral_snapshot, selection_conversation_id) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+  [contactId, professionalId, customerId, searchId, choiceId, code, JSON.stringify(snapshot), conversationId]);
+  if (other) await query(`INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text,
+    service_text, country_code, limit_value, expires_at) VALUES ($1,$2,'active','location','encanador','encanador','BR',3,NOW()+INTERVAL '1 hour')`, [otherId, customerId]);
+  async function send(text: string, sender = professionalPhone, id = randomUUID()) {
+    const response = await app.inject({ method: "POST", url: "/internal/channel/inbound/messages",
+      headers: { "x-internal-key": key }, payload: { provider: "test", provider_message_id: id, phone_e164: sender, raw_text: text, country_code: "BR", limit: 3 } });
+    assert.equal(response.statusCode, 200, `Inbox failed with ${response.statusCode}`);
+    return channelInboundMessageResponseSchema.parse(response.json());
+  }
+  const conversations = async () => (await query<{ id: string; status: string; resume_slot: string | null }>(
+    "SELECT id, status, resume_slot FROM search_conversations WHERE customer_id=$1 ORDER BY id", [customerId])).rows;
+  const countEvents = async () => Number((await query("SELECT count(*) FROM opportunity_response_events WHERE contact_id=$1", [contactId])).rows[0].count);
+  async function cleanup() {
+    await app.close();
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_inbound_messages SET response_outbound_id=NULL WHERE phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
+      await db.query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
+      // Fixture teardown only; production never bypasses the append-only guard.
+      await db.query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
+      await db.query("DELETE FROM opportunity_response_events WHERE contact_id=$1", [contactId]);
+      await db.query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
+      await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
+      await db.query("DELETE FROM contacts WHERE id=$1", [contactId]);
+      await db.query("DELETE FROM matches WHERE search_request_id=$1", [searchId]);
+      await db.query("DELETE FROM search_conversations WHERE customer_id=$1", [customerId]);
+      await db.query("DELETE FROM search_requests WHERE customer_id=$1", [customerId]);
+      await db.query("DELETE FROM professionals WHERE id=$1", [professionalId]);
+      await db.query("DELETE FROM customers WHERE id=$1", [customerId]);
+    });
+  }
+  return { customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, conversations, countEvents, cleanup };
+}
+
+test("decline reopens without another active search; events, replies and replay are atomic", async () => {
+  const f = await fixture();
+  try {
+    const id = randomUUID();
+    const first = await f.send(`recuso ${f.code}`, f.professionalPhone, id);
+    assert.equal(first.result.route, "opportunity");
+    assert.deepEqual(await f.conversations(), [{ id: f.conversationId, status: "active", resume_slot: null }]);
+    assert.equal(await f.countEvents(), 1);
+    const replay = await f.send(`recuso ${f.code}`, f.professionalPhone, id);
+    assert.equal(replay.duplicate, true);
+    assert.deepEqual(replay.outbound, first.outbound);
+    const repeat = await f.send(`aceito ${f.code}`);
+    assert.deepEqual(repeat.outbound, first.outbound);
+    assert.equal(await f.countEvents(), 1);
+    const rows = (await query("SELECT purpose FROM channel_outbound_messages WHERE opportunity_event_id IN (SELECT id FROM opportunity_response_events WHERE contact_id=$1) ORDER BY purpose", [f.contactId])).rows;
+    assert.deepEqual(rows.map((r) => r.purpose), ["customer_contact_update", "professional_reply"]);
+    assert.ok(!JSON.stringify(first.result).includes(f.customerPhone));
+  } finally { await f.cleanup(); }
+});
+
+test("decline preserves active search; explicit resume suspends it and replay never swaps again", async () => {
+  const f = await fixture(true);
+  try {
+    const before = await query("SELECT to_jsonb(c) AS value FROM search_conversations c WHERE id=$1", [f.otherId]);
+    await f.send(`não posso atender ${f.code}`);
+    assert.deepEqual((await query("SELECT to_jsonb(c) AS value FROM search_conversations c WHERE id=$1", [f.otherId])).rows, before.rows);
+    const notice = (await query("SELECT text_content FROM channel_outbound_messages WHERE purpose='customer_contact_update' AND recipient_phone_e164=$1", [f.customerPhone])).rows[0].text_content;
+    assert.match(notice, /eletricista/); assert.match(notice, /encanador/); assert.match(notice, /retomar CC-/);
+    await f.send("continuar aqui", f.customerPhone);
+    assert.equal((await f.conversations()).find((c) => c.id === f.otherId)?.status, "active");
+    const id = randomUUID();
+    await f.send(`retomar ${f.code}`, f.customerPhone, id);
+    assert.equal((await f.conversations()).find((c) => c.id === f.conversationId)?.status, "active");
+    assert.equal((await f.conversations()).find((c) => c.id === f.otherId)?.resume_slot, "location");
+    await f.send("quero voltar para a busca de encanador", f.customerPhone);
+    await f.send(`retomar ${f.code}`, f.customerPhone, id);
+    assert.equal((await f.conversations()).find((c) => c.id === f.otherId)?.status, "active");
+    assert.equal((await f.conversations()).filter((c) => c.status === "active").length, 1);
+  } finally { await f.cleanup(); }
+});
+
+test("expired prior search does not replace current context or reuse options", async () => {
+  const f = await fixture(true);
+  try {
+    await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 minute' WHERE id=$1", [f.conversationId]);
+    await f.send(`recuso ${f.code}`);
+    const result = await f.send(`retomar ${f.code}`, f.customerPhone);
+    assert.equal(result.result.route === "opportunity" && result.result.result.kind, "expired");
+    assert.match(result.reply_text, /nova busca/);
+    assert.equal((await f.conversations()).find((c) => c.status === "active")?.id, f.otherId);
+  } finally { await f.cleanup(); }
+});
+
+test("accept versus decline concurrent decisions have one event and one stable outcome", async () => {
+  const f = await fixture();
+  try {
+    const results = await Promise.all([f.send(`aceito ${f.code}`), f.send(`recuso ${f.code}`)]);
+    assert.deepEqual(results[0].outbound, results[1].outbound);
+    assert.deepEqual(results[0].result, results[1].result);
+    assert.equal(await f.countEvents(), 1);
+  } finally { await f.cleanup(); }
+});
+
+test("questions do not decide and foreign opportunity codes do not disclose ownership", async () => {
+  const f = await fixture();
+  try {
+    const question = await f.send(`posso atender ${f.code}?`);
+    assert.equal(question.result.route === "opportunity" && question.result.result.kind, "clarification");
+    assert.equal(await f.countEvents(), 0);
+    const foreign = await f.send(`aceito ${f.code}`, f.customerPhone);
+    assert.equal(foreign.result.route === "opportunity" && foreign.result.result.kind, "unavailable");
+    assert.equal(await f.countEvents(), 0);
+    await f.send(`aceito ${f.code}`);
+    assert.equal(await f.countEvents(), 1);
+  } finally { await f.cleanup(); }
+});
+
+test("new conversation versus resume retains one active context without losing either search", async () => {
+  const f = await fixture(true);
+  try {
+    await f.send(`recuso ${f.code}`);
+    await query("UPDATE search_conversations SET status='cancelled',pending_slot=NULL WHERE id=$1", [f.otherId]);
+    const repo = new PostgresSearchConversationRepository();
+    const [resume, creation] = await Promise.allSettled([
+      f.send(`retomar ${f.code}`, f.customerPhone),
+      repo.createPending({ customerId:f.customerId, pendingSlot:"location", originalRawText:"pintor", serviceText:"pintor", locationText:null, countryCode:"BR", limitValue:3, ttlMinutes:30 }),
+    ]);
+    assert.equal(resume.status, "fulfilled");
+    if (creation.status === "rejected") assert.equal(creation.reason.code, "23505");
+    const rows = await f.conversations();
+    assert.equal(rows.filter((c) => c.status === "active").length, 1);
+    assert.ok(rows.some((c) => c.id === f.conversationId));
+    assert.ok(rows.some((c) => c.id === f.otherId));
+  } finally { await f.cleanup(); }
+});
+
+test("reopened search revalidates previously shown inactive professionals", async () => {
+  const f = await fixture();
+  const category = randomUUID(), service = randomUUID();
+  try {
+    await query("INSERT INTO service_categories (id,name,slug) VALUES ($1::uuid,'Teste',$1::text)", [category]);
+    await query("INSERT INTO services (id,category_id,name,slug) VALUES ($1::uuid,$2,'Eletricista',$1::text)", [service, category]);
+    await query("UPDATE search_requests SET service_id=$2 WHERE id=$1", [f.searchId, service]);
+    await query("INSERT INTO professional_services (professional_id,service_id) VALUES ($1,$2)", [f.professionalId, service]);
+    await query("INSERT INTO matches (search_request_id,professional_id,rank_position,shown_at) VALUES ($1,$2,2,NOW())", [f.searchId, f.professionalId]);
+    await f.send(`recuso ${f.code}`);
+    await query("UPDATE professionals SET status='suspended' WHERE id=$1", [f.professionalId]);
+    const repo = new PostgresSelectionMatchRepository();
+    assert.equal(await repo.findShownByPosition(f.searchId, 2), null);
+    assert.deepEqual(await repo.listShown(f.searchId), []);
+    assert.deepEqual(await repo.listNextUnshown(f.searchId, 3), []);
+  } finally {
+    await query("DELETE FROM professional_services WHERE professional_id=$1", [f.professionalId]);
+    await f.cleanup();
+    await query("DELETE FROM services WHERE id=$1", [service]);
+    await query("DELETE FROM service_categories WHERE id=$1", [category]);
+  }
+});

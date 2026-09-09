@@ -2,7 +2,7 @@ import { z } from "zod";
 import { phoneE164Schema } from "./phone.js";
 
 export const channelOutboundMessageStatusSchema = z.enum(["pending", "processing", "sent", "failed"]);
-export const channelOutboundMessagePurposeSchema = z.enum(["customer_reply", "professional_contact_notification"]);
+export const channelOutboundMessagePurposeSchema = z.enum(["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update"]);
 
 export const channelOutboundMessageSummarySchema = z.object({
   id: z.string().uuid(),

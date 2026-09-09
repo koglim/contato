@@ -234,3 +234,14 @@ OTP com hash, validade, consumo único, tentativas/cooldown/rate limit e proteç
 ## Prompt de continuação
 
 Continue `koglim/contato` na branch `feat/api-product-core`, atualizando somente por fast-forward a partir do remoto. Leia os AGENTS aplicáveis, este handoff, README, docs de arquitetura/modelo/API, migrations e código/testes afetados. Confira o SHA e o CI do HEAD. Preserve os commits de pool, ranking e correção de deadlock. Etapas 0–2 estão entregues no recorte descrito; siga agora a etapa 3 (contato bilateral) deste backlog e depois 4–8 sequencialmente. Use 014 como próxima migration; revise 012 somente com estratégia explícita para quem já a aplicou. Consentimento, telefone, snapshot de replay, código público e unicidade Outbox são obrigatórios antes de ligar notificação profissional à seleção. Não implemente assinatura/OTP de fachada. Faça commits pequenos, valide lint/typecheck/build/test e PostgreSQL real antes/depois dos rollbacks/reaplicação; mantenha ON_ERROR_STOP=1 no CI. Faça push dos checkpoints e aguarde o Actions do SHA correto. Não faça merge, deploy, alterações de frontend/n8n ou uso do banco real. Se a rodada terminar antes de todas as etapas, deixe apenas entregas completas, árvore limpa e atualize este backlog com evidências reais.
+# Etapa em implementação: resposta profissional e contexto retomável
+
+Decisão aprovada: recusa preserva integralmente outra busca ativa. A busca anterior
+fica retomável; somente comando explícito inequívoco troca o foco. A busca atual
+fica suspensa/retomável, nunca apagada. “Manter atual” e “continuar aqui” preservam
+o contexto. TTL não é renovado artificialmente; expiração exige nova busca.
+Revalidar profissionais restantes, preservar shown_at, não selecionar substituto.
+
+Branch: feat/professional-opportunity-response. Migration nova: 015, com up/down
+protegido. Não executar em produção nem fazer deploy nesta etapa. Confirmar CI
+PostgreSQL e rollbacks antes de aprovar. n8n, frontend e variáveis não alterados.

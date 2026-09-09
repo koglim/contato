@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { resumedMatchEligibilitySql } from "../professional-opportunity/resumed-match-eligibility.js";
 import { selectionMessageContractSchema } from "@contatocerto/shared";
 import { createOpportunityCode, parseBilateralConfirmation } from "../bilateral-contact/bilateral-contact.policy.js";
 import { createBilateralContact, prepareBilateralSelection, pendingConsentSchema, persistConsentResponse, selectionInbound } from "../bilateral-contact/bilateral-contact.transaction.js";
@@ -298,7 +299,8 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
           AND professional_services.service_id = search_requests.service_id
         WHERE matches.search_request_id = $1
           AND matches.rank_position = $2
-          AND matches.shown_at IS NOT NULL`,
+          AND matches.shown_at IS NOT NULL
+          AND ${resumedMatchEligibilitySql}`,
       [searchRequestId, position],
     );
     return result.rows[0] ? toSelectionMatchRecord(result.rows[0]) : null;
@@ -316,6 +318,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
           AND professional_services.service_id = search_requests.service_id
         WHERE matches.search_request_id = $1
           AND matches.shown_at IS NULL
+          AND ${resumedMatchEligibilitySql}
           AND matches.rank_position IS NOT NULL
           AND matches.rank_position <= $3
           AND NOT EXISTS (
@@ -342,6 +345,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         WHERE matches.search_request_id = $1
           AND matches.shown_at IS NOT NULL
           AND matches.rank_position IS NOT NULL
+          AND ${resumedMatchEligibilitySql}
         ORDER BY matches.rank_position ASC`,
       [searchRequestId],
     );
@@ -439,6 +443,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
             AND matches.rank_position = $2
             AND matches.shown_at IS NOT NULL
             AND matches.selected_at IS NULL
+            AND ${resumedMatchEligibilitySql}
           FOR UPDATE OF matches`,
         [input.searchRequestId, input.position],
       );
