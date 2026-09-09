@@ -9,7 +9,7 @@ const inboundId = "22222222-2222-4222-8222-222222222222";
 
 function record(overrides: Partial<ChannelOutboundMessageRecord> = {}): ChannelOutboundMessageRecord {
   return {
-    id, channelInboundMessageId: inboundId, provider: "test", recipientPhoneE164: "+5566999999999", messageType: "text",
+    id, channelInboundMessageId: inboundId, purpose: "customer_reply", provider: "test", recipientPhoneE164: "+5566999999999", messageType: "text",
     textContent: "Em qual cidade você precisa do atendimento?", status: "pending", processingToken: null,
     processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, ...overrides,
   };
@@ -20,11 +20,13 @@ class FakeRepository implements ChannelOutboundMessageRepository {
   async findById() { return this.current; }
   async findByInboundMessageId() { return this.current; }
   async createOrFindForProcessedInbound() { return this.current ?? record(); }
+  async createIndependent() { return this.current ?? record({ purpose: "professional_contact_notification", channelInboundMessageId: null }); }
   async claim(_id: string, token: string) {
     if (!this.current || this.current.status === "sent" || this.current.status === "processing") return null;
     this.current = { ...this.current, status: "processing", processingToken: token, processingStartedAt: new Date(), attemptCount: this.current.attemptCount + 1 };
     return this.current;
   }
+  async claimNextPending(token: string) { return this.claim(id, token); }
   async markSent(_id: string, input: { processing_token: string; provider_message_id: string }) {
     if (!this.current || this.current.status !== "processing" || this.current.processingToken !== input.processing_token) return false;
     this.current = { ...this.current, status: "sent", processingToken: null, processingStartedAt: null, providerMessageId: input.provider_message_id, lastErrorCode: null, sentAt: new Date() };
@@ -67,7 +69,7 @@ test("processing claims block concurrent delivery and sent messages are not recl
   assert.ok(token);
   assert.equal((await current.service.markSent(id, { processing_token: token!, provider_message_id: "evolution-001" })).kind, "response");
   const replay = await current.service.claim(id);
-  assert.deepEqual(replay, { kind: "response", response: { id, status: "sent", attempt_count: 1 } });
+  assert.deepEqual(replay, { kind: "response", response: { id, status: "sent", attempt_count: 1, purpose: "customer_reply" } });
   assert.equal(current.repository.current?.processingToken, null);
   assert.ok(current.repository.current?.sentAt);
 });
@@ -83,4 +85,10 @@ test("sent and failed mutations protect the current processing token", async () 
     await current.service.markFailed(id, { processing_token: randomUUID(), error_code: "evolution_timeout" }),
     { kind: "outbound_message_claim_invalid" },
   );
+});
+
+test("claiming the next message treats an empty queue as a normal state", async () => {
+  const current = context();
+  current.repository.current = null;
+  assert.deepEqual(await current.service.claimNextPending(), { kind: "outbound_queue_empty" });
 });

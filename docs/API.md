@@ -218,11 +218,13 @@ Rota interna protegida por `X-Internal-Key` para executar o matching quando o se
 }
 ```
 
-`raw_text`, `service_id`, `latitude` e `longitude` são obrigatórios. O texto aceita até 2.000 caracteres; latitude e longitude precisam estar nas faixas geográficas válidas. Os metadados de localização são opcionais e `limit` é opcional, com padrão `3` e intervalo de `1` a `10`.
+`raw_text`, `service_id`, `latitude` e `longitude` são obrigatórios. O texto aceita até 2.000 caracteres; latitude e longitude precisam estar nas faixas geográficas válidas. Os metadados de localização são opcionais e `limit` é opcional, com padrão `3` e intervalo aceito de `1` a `10`. Por política de apresentação, a resposta limita a página a `min(limit, 3)` e informa esse valor em `meta.limit`; valores 1 e 2 continuam funcionando. O matching persiste até 20 candidatos independentemente de `limit`, sem expor o pool completo na resposta. Esta é uma limitação intencional de quantidade para clientes legados que pediam 4–10 resultados, sem mudança de formato.
+
+No canal, “mostrar mais” usa a mesma busca e apresenta no máximo seis profissionais ao todo. Uma página pendente retorna `409 selection_show_more_pending`, sem outra Outbox; pode ser tentada novamente após envio. Ao esgotar as posições apresentáveis, retorna seleção `no_more_options`, mesmo que o pool auditável contenha mais candidatos. Mensagens de um único dígito são aceitas pela Inbox e pelo Customer Search; executar seleção ainda exige chave idempotente interna.
 
 Em uma única transação, a API valida que o serviço existe e está ativo, registra um `search_request` com o ponto PostGIS, identifica os profissionais elegíveis e persiste um `match` para cada resultado. Um profissional só entra se estiver ativo, oferecer o serviço de forma ativa e possuir uma área ativa cujo raio contenha o ponto consultado. Quando possui várias áreas elegíveis, somente a mais próxima é considerada.
 
-O campo `effective_available_now` é verdadeiro apenas quando a disponibilidade está ligada e foi confirmada nos últimos 240 minutos. A disponibilidade não elimina candidatos; a ordenação é: disponibilidade efetiva, menor distância, profissional verificado e UUID do profissional. A resposta não expõe telefone ou e-mail.
+O campo `effective_available_now` é verdadeiro apenas quando a disponibilidade está ligada e foi confirmada nos últimos 240 minutos. A disponibilidade não elimina candidatos. O ranking `fair-v1` compara disponibilidade, banda de distância de 2 km, verificação, banda de reputação bayesiana e menor carga de exposição/contatos/repetição; reputação exata, distância e UUID desempatarão. A política e os sinais são preservados internamente em `score_breakdown`, sem expansão do contrato de resposta. A resposta não expõe telefone ou e-mail. As regras completas e limites de elegibilidade atuais estão em `ARCHITECTURE.md`.
 
 Se não houver candidatos, a resposta ainda é `200`, com `matches: []` e `status: "ready"`. Com candidatos, o status é `"matched"`.
 
@@ -516,6 +518,8 @@ O n8n não interpreta linguagem nem aplica regras de negócio: ele transporta a 
 
 ## Channel Outbox
 
+Cada registro Outbox possui uma finalidade explícita: `customer_reply` para a resposta vinculada a um inbound (mantendo uma por inbound) ou `professional_contact_notification` para uma futura mensagem independente. Nesta etapa somente a primeira finalidade é criada pelo fluxo de negócio; nenhuma notificação ao profissional é gerada.
+
 Quando o cliente envia “mostrar mais” durante uma seleção, a API não inicia nova busca: consulta a mesma `search_request`, usa o limite original salvo na conversa e cria uma nova mensagem Outbox com a próxima página ordenada por `rank_position`. A numeração é absoluta e a resposta orienta a escolha por número ou nome. Matches já associados a outra apresentação não entram na página; a migration 011 garante essa reserva única por `match_id`. A reserva e a criação da Outbox são protegidas pela transação: uma colisão concorrente reverte o inbound e retorna `selection_show_more_pending`, sem criar uma Outbox sem associações. Enquanto uma página estiver pendente ou falha, novas solicitações não são tratadas como “não há mais opções”.
 
 Depois da resposta da Inbox, o n8n deve operar somente a mensagem Outbox indicada por `outbound.id`:
@@ -532,7 +536,7 @@ Em erro de transporte, o n8n chama `POST /internal/channel/outbound/:id/failed`.
 
 Após a Evolution aceitar a mensagem, `POST /internal/channel/outbound/:outboundId/sent` recebe `processing_token` e `provider_message_id`; somente o claim atual pode marcar `sent`. Em falha, `POST /internal/channel/outbound/:outboundId/failed` recebe o token e um `error_code` controlado. Ambos retornam somente `{ id, status }`; token inválido, expirado ou já concluído retorna `409 outbound_message_claim_invalid`.
 
-`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade, há no máximo uma intenção outbound por inbound e não há Redis, chamada à Evolution pela API, outbox worker ou retry automático nesta etapa.
+`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem pendente, falha ou abandonada; quando a fila está vazia, retorna `204 No Content`. O claim individual existente continua retornando `404` para um ID inexistente. Esta etapa não envia mensagens, não cria notificação ao profissional e não altera o n8n.
 
 Há uma janela residual inevitável: a Evolution pode aceitar a mensagem e o n8n cair antes de confirmar `/sent`; após a lease expirar, um novo claim poderá reenviá-la. A arquitetura evita perda da intenção e duplicações lógicas usuais, mas não promete exactly-once matemático.
 

@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { MAX_PRESENTED_PER_SEARCH, presentationPageSize } from "../matching/matching-policy.js";
 import { query, withTransaction, type DatabaseClient, type SqlValue } from "../../database/connection.js";
 import type {
   SelectionMatchRecord,
@@ -204,14 +205,14 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
                 WHERE rank_position IS NOT NULL AND shown_at IS NOT NULL
               )::integer AS shown_match_count,
               COUNT(*) FILTER (
-                WHERE rank_position IS NOT NULL AND shown_at IS NULL
+                WHERE rank_position IS NOT NULL AND rank_position <= $2 AND shown_at IS NULL
                   AND NOT EXISTS (
                     SELECT 1 FROM channel_outbound_message_matches reservations
                      WHERE reservations.match_id = matches.id
                   )
               )::integer AS available_match_count,
               COUNT(*) FILTER (
-                WHERE rank_position IS NOT NULL AND shown_at IS NULL
+                WHERE rank_position IS NOT NULL AND rank_position <= $2 AND shown_at IS NULL
                   AND EXISTS (
                     SELECT 1
                       FROM channel_outbound_message_matches reservations
@@ -223,7 +224,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
               )::integer AS pending_reservation_count
          FROM matches
         WHERE search_request_id = $1`,
-      [searchRequestId],
+      [searchRequestId, MAX_PRESENTED_PER_SEARCH],
     );
     const row = result.rows[0];
     const totalMatchCount = Number(row?.total_match_count ?? 0);
@@ -270,13 +271,14 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         WHERE matches.search_request_id = $1
           AND matches.shown_at IS NULL
           AND matches.rank_position IS NOT NULL
+          AND matches.rank_position <= $3
           AND NOT EXISTS (
             SELECT 1 FROM channel_outbound_message_matches reservations
              WHERE reservations.match_id = matches.id
           )
         ORDER BY matches.rank_position ASC
         LIMIT $2`,
-      [searchRequestId, limit],
+      [searchRequestId, presentationPageSize(limit), MAX_PRESENTED_PER_SEARCH],
     );
     return result.rows.map(toSelectionMatchRecord);
   }

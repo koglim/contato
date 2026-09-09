@@ -11,7 +11,7 @@ class FakeOutbox implements ChannelOutboundService {
     return {
       kind: "response" as const,
       response: {
-        id: outboundId, status: "processing" as const, attempt_count: 1, provider: "test",
+        id: outboundId, status: "processing" as const, attempt_count: 1, purpose: "customer_reply" as const, provider: "test",
         recipient_phone_e164: "+5566999999999", message_type: "text" as const,
         text_content: "Em qual cidade você precisa do atendimento?", processing_token: "22222222-2222-4222-8222-222222222222",
       },
@@ -19,6 +19,7 @@ class FakeOutbox implements ChannelOutboundService {
   }
   async markSent() { return { kind: "response" as const, response: { id: outboundId, status: "sent" as const } }; }
   async markFailed() { return { kind: "response" as const, response: { id: outboundId, status: "failed" as const } }; }
+  async claimNextPending() { return { kind: "outbound_queue_empty" as const }; }
 }
 
 test("outbox routes require auth, validate input and expose recipient only on a claim", async () => {
@@ -28,6 +29,7 @@ test("outbox routes require auth, validate input and expose recipient only on a 
   const claim = await app.inject({ method: "POST", url: claimUrl, headers: { "x-internal-key": internalApiKey } });
   assert.equal(claim.statusCode, 200);
   assert.equal(claim.json().recipient_phone_e164, "+5566999999999");
+  assert.equal(claim.json().purpose, "customer_reply");
 
   const sentUrl = `/internal/channel/outbound/${outboundId}/sent`;
   assert.equal((await app.inject({ method: "POST", url: sentUrl, headers: { "x-internal-key": internalApiKey }, payload: { processing_token: "invalid", provider_message_id: "evolution-001" } })).statusCode, 400);
@@ -39,5 +41,13 @@ test("outbox routes require auth, validate input and expose recipient only on a 
   assert.equal((await app.inject({ method: "POST", url: failedUrl, headers: { "x-internal-key": internalApiKey }, payload: { processing_token: "22222222-2222-4222-8222-222222222222", error_code: "Error with spaces" } })).statusCode, 400);
   const failed = await app.inject({ method: "POST", url: failedUrl, headers: { "x-internal-key": internalApiKey }, payload: { processing_token: "22222222-2222-4222-8222-222222222222", error_code: "evolution_timeout" } });
   assert.deepEqual(failed.json(), { id: outboundId, status: "failed" });
+  await app.close();
+});
+
+test("outbox route can claim the next pending message without an outbound id", async () => {
+  const app = buildApp({ channelOutboundService: new FakeOutbox(), internalApiKey });
+  const response = await app.inject({ method: "POST", url: "/internal/channel/outbound/next/claim", headers: { "x-internal-key": internalApiKey } });
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.body, "");
   await app.close();
 });

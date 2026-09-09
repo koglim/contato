@@ -63,6 +63,7 @@ export {
   channelOutboundMessageMutationResponseSchema,
   channelOutboundMessageParamsSchema,
   channelOutboundMessageStatusSchema,
+  channelOutboundMessagePurposeSchema,
   markChannelOutboundMessageFailedSchema,
   markChannelOutboundMessageSentSchema,
 } from "./schemas/channel-outbound.js";
@@ -126,6 +127,7 @@ export type {
   ChannelOutboundMessageMutationResponse,
   ChannelOutboundMessageParams,
   ChannelOutboundMessageStatus,
+  ChannelOutboundMessagePurpose,
   MarkChannelOutboundMessageFailedInput,
   MarkChannelOutboundMessageSentInput,
 } from "./types/channel-outbound.js";

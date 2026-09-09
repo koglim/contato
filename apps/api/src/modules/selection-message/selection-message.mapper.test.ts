@@ -43,7 +43,7 @@ test("selection message mapper covers command, pagination, invalid and unavailab
     [{ kind: "invalid_selection", requestedPosition: 5, visibleMatchCount: 3 }, "invalid_selection", "Escolha um número de 1 a 3."],
     [{ kind: "not_command" }, "not_command", "Não consegui identificar qual profissional você escolheu. Responda com o número ou com o nome da opção."],
     [{ kind: "ambiguous_selection", options: [{ position: 1, professionalDisplayName: "Ana Souza" }, { position: 3, professionalDisplayName: "Ana Silva" }] }, "ambiguous_selection", "Encontrei mais de uma opção com esse nome:\n\n1. Ana Souza\n3. Ana Silva\n\nResponda com o número ou com o nome completo."],
-    [{ kind: "show_more_requested", hasMore: false, shownMatchCount: 3 }, "no_more_options", "Todas as opções disponíveis já foram apresentadas."],
+    [{ kind: "show_more_requested", hasMore: false, shownMatchCount: 3 }, "no_more_options", "Todas as opções disponíveis para esta busca já foram apresentadas. Escolha uma delas ou envie “recomeçar” para refinar o serviço ou a região."],
     [{ kind: "show_more_requested", hasMore: true, shownMatchCount: 3 }, "show_more_requested", null],
     [{ kind: "global_command", command: { kind: "cancel" } }, "global_command", null],
     [{ kind: "global_command", command: { kind: "restart" } }, "global_command", null],

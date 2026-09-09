@@ -1,5 +1,7 @@
 import type { MatchingSearchInput, MatchingSearchResponse } from "@contatocerto/shared";
 import { withTransaction } from "../../database/connection.js";
+import { CANDIDATE_POOL_SIZE, presentationPageSize } from "./matching-policy.js";
+import { RANKING_POLICY, rankingCtes, rankingOrder } from "./matching-ranking.js";
 import { MATCHING_AVAILABILITY_FRESHNESS_MINUTES, type MatchingRepository, type MatchingSearchOutcome, type SearchExecutionContext } from "./matching.types.js";
 
 type ServiceRow = { id: string; name: string; slug: string; is_active: boolean };
@@ -9,8 +11,10 @@ type CandidateRow = {
   is_verified: boolean; professional_service_id: string; description: string | null; price_mode: "quote" | "fixed" | "from" | "range";
   price_from_cents: number | null; price_to_cents: number | null; service_area_id: string; service_area_label: string | null;
   service_area_city: string; service_area_state: string; radius_meters: number; distance_meters: number | string; effective_available_now: boolean;
+  distance_band: number; recent_exposures: number; customer_repeats: number; recent_contacts: number;
+  review_count: number; bayesian_reputation: number | string; reputation_band: number; exposure_load: number | string;
 };
-type MatchRow = { id: string };
+type MatchRow = { id: string; professional_id: string };
 
 function responseFor(input: MatchingSearchInput, service: ServiceRow, searchRequestId: string, candidates: CandidateRow[], matchIds: string[]): MatchingSearchResponse {
   const matches = candidates.map((candidate, index) => ({
@@ -22,7 +26,7 @@ function responseFor(input: MatchingSearchInput, service: ServiceRow, searchRequ
   return {
     search_request_id: searchRequestId, status: matches.length ? "matched" : "ready", service: { id: service.id, name: service.name, slug: service.slug },
     location: { latitude: input.latitude, longitude: input.longitude, city: input.city ?? null, state: input.state ?? null, neighborhood: input.neighborhood ?? null },
-    matches, meta: { count: matches.length, limit: input.limit, availability_freshness_minutes: MATCHING_AVAILABILITY_FRESHNESS_MINUTES },
+    matches, meta: { count: matches.length, limit: presentationPageSize(input.limit), availability_freshness_minutes: MATCHING_AVAILABILITY_FRESHNESS_MINUTES },
   };
 }
 
@@ -52,7 +56,7 @@ export class PostgresMatchingRepository implements MatchingRepository {
              professional_service_areas.city AS service_area_city, professional_service_areas.state AS service_area_state,
              professional_service_areas.radius_meters,
              ROUND(ST_Distance(professional_service_areas.center, requested_location.point))::integer AS distance_meters,
-             (professionals.is_available_now = TRUE AND professionals.available_now_updated_at >= NOW() - ($4 * INTERVAL '1 minute')) AS effective_available_now,
+             COALESCE(professionals.is_available_now = TRUE AND professionals.available_now_updated_at >= NOW() - ($4 * INTERVAL '1 minute'), FALSE) AS effective_available_now,
              ROW_NUMBER() OVER (PARTITION BY professionals.id ORDER BY ST_Distance(professional_service_areas.center, requested_location.point) ASC, professional_service_areas.id ASC) AS area_position
            FROM professionals
            JOIN professional_services ON professional_services.professional_id = professionals.id
@@ -60,29 +64,58 @@ export class PostgresMatchingRepository implements MatchingRepository {
            JOIN professional_service_areas ON professional_service_areas.professional_id = professionals.id
            CROSS JOIN requested_location
            WHERE professionals.status = 'active'
+             AND length(trim(professionals.display_name)) >= 2
+             AND professionals.phone_e164 ~ '^[+][1-9][0-9]{7,14}$'
+             AND length(trim(professionals.slug)) > 0
              AND professional_services.service_id = $3
              AND professional_services.is_active = TRUE
              AND services.is_active = TRUE
              AND ST_DWithin(professional_service_areas.center, requested_location.point, professional_service_areas.radius_meters)
-         )
-         SELECT * FROM candidate_areas WHERE area_position = 1
-         ORDER BY effective_available_now DESC, distance_meters ASC, is_verified DESC, professional_id ASC
+         ), ${rankingCtes}
+         SELECT * FROM ranked
+         ORDER BY ${rankingOrder}
          LIMIT $5`,
-        [input.latitude, input.longitude, input.service_id, MATCHING_AVAILABILITY_FRESHNESS_MINUTES, input.limit],
+        [input.latitude, input.longitude, input.service_id, MATCHING_AVAILABILITY_FRESHNESS_MINUTES, CANDIDATE_POOL_SIZE, context.customerId ?? null],
       );
       const candidates = candidatesResult.rows;
-      const matchIds: string[] = [];
-      for (const [index, candidate] of candidates.entries()) {
-        const scoreBreakdown = JSON.stringify({ effective_available_now: candidate.effective_available_now, distance_meters: Number(candidate.distance_meters), is_verified: candidate.is_verified });
+      let matchIds: string[] = [];
+      if (candidates.length) {
+        const records = candidates.map((candidate, index) => ({
+          professional_id: candidate.professional_id,
+          rank_position: index + 1,
+          score_breakdown: {
+            policy: RANKING_POLICY,
+            effective_available_now: candidate.effective_available_now,
+            distance_meters: Number(candidate.distance_meters),
+            is_verified: candidate.is_verified,
+            distance_band: candidate.distance_band,
+            review_count: candidate.review_count,
+            bayesian_reputation: Number(candidate.bayesian_reputation),
+            reputation_band: candidate.reputation_band,
+            recent_exposures: candidate.recent_exposures,
+            recent_contacts: candidate.recent_contacts,
+            customer_repeats: candidate.customer_repeats,
+            exposure_load: Number(candidate.exposure_load),
+            newcomer: candidate.review_count === 0,
+          },
+        }));
         const result = await client.query<MatchRow>(
           `INSERT INTO matches (search_request_id, professional_id, rank_position, score, score_breakdown)
-           VALUES ($1, $2, $3, NULL, $4::jsonb) RETURNING id`,
-          [searchRequestId, candidate.professional_id, index + 1, scoreBreakdown],
+           SELECT $1, professional_id, rank_position, NULL, score_breakdown
+           FROM jsonb_to_recordset($2::jsonb) AS entry(professional_id uuid, rank_position integer, score_breakdown jsonb)
+           RETURNING id, professional_id`,
+          [searchRequestId, JSON.stringify(records)],
         );
-        matchIds.push(result.rows[0].id);
+        const idsByProfessional = new Map(result.rows.map((row) => [row.professional_id, row.id]));
+        matchIds = candidates.map((candidate) => {
+          const id = idsByProfessional.get(candidate.professional_id);
+          if (!id) throw new Error("Matching persistence returned an incomplete pool");
+          return id;
+        });
+        await client.query("UPDATE search_requests SET status = 'matched' WHERE id = $1", [searchRequestId]);
       }
-      if (candidates.length) await client.query("UPDATE search_requests SET status = 'matched' WHERE id = $1", [searchRequestId]);
-      return { kind: "success", response: responseFor(input, service, searchRequestId, candidates, matchIds) };
+      const pageSize = presentationPageSize(input.limit);
+      return { kind: "success", response: responseFor(input, service, searchRequestId, candidates.slice(0, pageSize), matchIds.slice(0, pageSize)) };
     });
   }
 }

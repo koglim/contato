@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { MAX_PRESENTED_PER_SEARCH, PRESENTATION_PAGE_SIZE } from "../matching/matching-policy.js";
 import { query, withTransaction, type DatabaseClient, type SqlValue } from "../../database/connection.js";
 import type {
   ChannelOutboundMessageRecord,
@@ -9,7 +10,8 @@ import type { ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInpu
 
 export type ChannelOutboundMessageRow = {
   id: string;
-  channel_inbound_message_id: string;
+  channel_inbound_message_id: string | null;
+  purpose: "customer_reply" | "professional_contact_notification";
   provider: string;
   recipient_phone_e164: string;
   message_type: "text";
@@ -27,8 +29,15 @@ export type ChannelOutboxQuery = <T extends QueryResultRow>(text: string, values
 export type ChannelOutboxTransaction = <T>(callback: (client: DatabaseClient) => Promise<T>) => Promise<T>;
 
 export const channelOutboundMessageColumns = `
-  id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content,
+  id, channel_inbound_message_id, purpose, provider, recipient_phone_e164, message_type, text_content,
   status, processing_token, processing_started_at, provider_message_id, attempt_count, last_error_code, sent_at
+`;
+
+const qualifiedChannelOutboundMessageColumns = `
+  outbound.id, outbound.channel_inbound_message_id, outbound.purpose, outbound.provider,
+  outbound.recipient_phone_e164, outbound.message_type, outbound.text_content, outbound.status,
+  outbound.processing_token, outbound.processing_started_at, outbound.provider_message_id,
+  outbound.attempt_count, outbound.last_error_code, outbound.sent_at
 `;
 
 export class MatchReservationConflictError extends Error {
@@ -44,6 +53,7 @@ export function toChannelOutboundMessageRecord(row: ChannelOutboundMessageRow): 
   return {
     id: row.id,
     channelInboundMessageId: row.channel_inbound_message_id,
+    purpose: row.purpose,
     provider: row.provider,
     recipientPhoneE164: row.recipient_phone_e164,
     messageType: row.message_type,
@@ -68,17 +78,31 @@ export async function associateOutboundMessageMatches(
   const matchIds = [...new Set(input.matchIds)];
   if (matchIds.length === 0) return;
   if (!input.searchRequestId) throw new Error("A search request is required when associating outbound matches");
+  if (matchIds.length > PRESENTATION_PAGE_SIZE) throw new MatchReservationConflictError();
+
+  // Serialize reservations for this search, including disjoint pages computed
+  // from stale reads. Sending happens outside this short transaction.
+  // Inbox FK writes may already hold KEY SHARE on this row. NO KEY UPDATE
+  // serializes reservers without deadlocking on concurrent FK lock upgrades.
+  await client.query("SELECT id FROM search_requests WHERE id = $1 FOR NO KEY UPDATE", [input.searchRequestId]);
 
   const valid = await client.query<{ id: string }>(
     `SELECT id
        FROM matches
       WHERE search_request_id = $1
         AND rank_position IS NOT NULL
-        AND id = ANY($2::uuid[])`,
-    [input.searchRequestId, matchIds],
+        AND rank_position <= $3
+        AND shown_at IS NULL
+        AND id = ANY($2::uuid[])
+        AND NOT EXISTS (
+          SELECT 1 FROM matches pending
+          JOIN channel_outbound_message_matches reservation ON reservation.match_id = pending.id
+          WHERE pending.search_request_id = $1 AND pending.shown_at IS NULL
+        )`,
+    [input.searchRequestId, matchIds, MAX_PRESENTED_PER_SEARCH],
   );
   if (valid.rows.length !== matchIds.length) {
-    throw new Error("Outbound matches must belong to the ranked search request");
+    throw new MatchReservationConflictError();
   }
 
   try {
@@ -125,15 +149,28 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
     return this.transaction(async (client) => {
       const result = await client.query<ChannelOutboundMessageRow>(
       `INSERT INTO channel_outbound_messages (
-         channel_inbound_message_id, provider, recipient_phone_e164, text_content
-       ) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (channel_inbound_message_id) DO UPDATE
+         channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content
+       ) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (channel_inbound_message_id) WHERE channel_inbound_message_id IS NOT NULL DO UPDATE
          SET channel_inbound_message_id = EXCLUDED.channel_inbound_message_id
        RETURNING ${channelOutboundMessageColumns}`,
-        [input.channelInboundMessageId, input.provider, input.recipientPhoneE164, input.textContent],
+        [input.channelInboundMessageId, "customer_reply", input.provider, input.recipientPhoneE164, input.textContent],
       );
       await associateOutboundMessageMatches(client, result.rows[0].id, input);
       return toChannelOutboundMessageRecord(result.rows[0]);
+    });
+  }
+
+  async createIndependent(input: { purpose: "professional_contact_notification"; provider: string; recipientPhoneE164: string; textContent: string }) {
+    return this.transaction(async (client) => {
+      const result = await client.query<ChannelOutboundMessageRow>(
+        `INSERT INTO channel_outbound_messages (
+           channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content
+         ) VALUES (NULL, $1, $2, $3, $4)
+         RETURNING ${channelOutboundMessageColumns}`,
+        [input.purpose, input.provider, input.recipientPhoneE164, input.textContent],
+      );
+      return toChannelOutboundMessageRecord(result.rows[0]!);
     });
   }
 
@@ -148,6 +185,27 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
          )
        RETURNING ${channelOutboundMessageColumns}`,
       [id, processingToken, processingLeaseSeconds],
+    );
+    return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;
+  }
+
+  async claimNextPending(processingToken: string, processingLeaseSeconds: number) {
+    const result = await this.execute<ChannelOutboundMessageRow>(
+      `WITH candidate AS (
+         SELECT id
+           FROM channel_outbound_messages
+          WHERE status IN ('pending', 'failed')
+             OR (status = 'processing' AND processing_started_at <= NOW() - ($1 * INTERVAL '1 second'))
+          ORDER BY created_at ASC, id ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+       )
+       UPDATE channel_outbound_messages AS outbound
+          SET status = 'processing', processing_token = $2, processing_started_at = NOW(), attempt_count = attempt_count + 1
+         FROM candidate
+        WHERE outbound.id = candidate.id
+       RETURNING ${qualifiedChannelOutboundMessageColumns}`,
+      [processingLeaseSeconds, processingToken],
     );
     return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;
   }

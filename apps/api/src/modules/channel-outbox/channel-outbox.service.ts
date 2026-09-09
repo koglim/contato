@@ -10,7 +10,7 @@ import type {
 import type { MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 
 function claimResponse(record: ChannelOutboundMessageRecord) {
-  if (record.status === "sent") return { id: record.id, status: "sent" as const, attempt_count: record.attemptCount };
+  if (record.status === "sent") return { id: record.id, status: "sent" as const, attempt_count: record.attemptCount, purpose: record.purpose };
   if (record.status !== "processing" || record.processingToken === null) {
     throw new Error(`Cannot create outbound claim response for ${record.status}`);
   }
@@ -18,6 +18,7 @@ function claimResponse(record: ChannelOutboundMessageRecord) {
     id: record.id,
     status: "processing" as const,
     attempt_count: record.attemptCount,
+    purpose: record.purpose,
     provider: record.provider,
     recipient_phone_e164: record.recipientPhoneE164,
     message_type: record.messageType,
@@ -40,6 +41,12 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
     if (!current) return { kind: "outbound_message_not_found" };
     if (current.status === "sent") return { kind: "response", response: claimResponse(current) };
     return { kind: "outbound_message_processing" };
+  }
+
+  async claimNextPending(): Promise<ChannelOutboundClaimOutcome> {
+    const claimed = await this.repository.claimNextPending(randomUUID(), this.config.processingLeaseSeconds);
+    if (claimed) return { kind: "response", response: claimResponse(claimed) };
+    return { kind: "outbound_queue_empty" };
   }
 
   async markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<ChannelOutboundMutationOutcome> {

@@ -275,15 +275,17 @@ test("channel inbox selects by professional name and replays the same inbound sa
     assert.equal(duplicate.response.outbound.id, first.response.outbound.id);
     assert.equal(duplicate.response.reply_text, first.response.reply_text);
     assert.equal(routerCalls, 1);
-    const state = await query<{ contacts: string; outbounds: string; status: string }>(
+    const state = await query<{ contacts: string; outbounds: string; status: string; purpose: string }>(
       `SELECT (SELECT COUNT(*) FROM contacts WHERE search_request_id = $1) AS contacts,
               (SELECT COUNT(*) FROM channel_outbound_messages WHERE channel_inbound_message_id = $2) AS outbounds,
-              (SELECT status FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $3) AS status`,
+              (SELECT status FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $3) AS status,
+              (SELECT purpose::text FROM channel_outbound_messages WHERE channel_inbound_message_id = $2) AS purpose`,
       [fixture.searchRequestId, first.response.message_id, providerMessageId],
     );
     assert.equal(Number(state.rows[0]!.contacts), 1);
     assert.equal(Number(state.rows[0]!.outbounds), 1);
     assert.equal(state.rows[0]!.status, "processed");
+    assert.equal(state.rows[0]!.purpose, "customer_reply");
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1)`, [providerMessageId]);
     await query(`DELETE FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1`, [providerMessageId]);

@@ -59,7 +59,7 @@ jobs:
 
       - name: Verify migration 010
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$
           BEGIN
             IF NOT EXISTS (
@@ -84,9 +84,22 @@ jobs:
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 
+      - name: Verify migration 013
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF to_regclass('matches_professional_shown_at_idx') IS NULL
+              OR to_regclass('contacts_professional_created_at_idx') IS NULL
+              OR to_regclass('reviews_published_professional_idx') IS NULL THEN
+              RAISE EXCEPTION 'matching signal indexes missing';
+            END IF;
+          END $$;
+          SQL
+
       - name: Verify migration 009
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$
           BEGIN
             IF to_regclass('channel_outbound_message_matches') IS NULL THEN
@@ -120,7 +133,7 @@ jobs:
 
       - name: Verify migration 011
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$
           BEGIN
             IF to_regclass('channel_outbound_message_matches_match_id_unique_idx') IS NULL THEN
@@ -138,9 +151,36 @@ jobs:
           $$;
           SQL
 
+      - name: Verify migration 012
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'channel_outbound_messages' AND column_name = 'purpose'
+            ) THEN
+              RAISE EXCEPTION 'channel_outbound_messages purpose column is missing';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_type WHERE typname = 'channel_outbound_message_purpose'
+            ) THEN
+              RAISE EXCEPTION 'channel outbound purpose type is missing';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE tablename = 'channel_outbound_messages'
+                 AND indexname = 'channel_outbound_messages_customer_reply_inbound_uidx'
+            ) THEN
+              RAISE EXCEPTION 'customer reply inbound uniqueness index is missing';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Create rollback regression fixture
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           INSERT INTO search_requests (id, raw_text)
           VALUES ('00000000-0000-0000-0000-000000000001', 'eletricista');
 
@@ -187,12 +227,51 @@ jobs:
            WHERE id = '00000000-0000-0000-0000-000000000002';
           SQL
 
+      - name: Roll back migration 013
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
+      - name: Verify migration 013 rollback preserves data
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF to_regclass('matches_professional_shown_at_idx') IS NOT NULL
+              OR to_regclass('contacts_professional_created_at_idx') IS NOT NULL
+              OR to_regclass('reviews_published_professional_idx') IS NOT NULL THEN
+              RAISE EXCEPTION 'matching signal indexes remained';
+            END IF;
+            IF (SELECT count(*) FROM search_conversations WHERE search_request_id = '00000000-0000-0000-0000-000000000001') <> 2 THEN
+              RAISE EXCEPTION 'business records changed during index rollback';
+            END IF;
+          END $$;
+          SQL
+
+      - name: Roll back migration 012
+        run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
+
+      - name: Verify migration 012 rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'channel_outbound_messages' AND column_name = 'purpose'
+            ) OR EXISTS (
+              SELECT 1 FROM pg_type WHERE typname = 'channel_outbound_message_purpose'
+            ) THEN
+              RAISE EXCEPTION 'channel outbound purpose schema remained after rollback';
+            END IF;
+          END
+          $$;
+          SQL
+
       - name: Roll back migration 011
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL down
 
       - name: Verify migration 011 rollback
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$
           BEGIN
             IF to_regclass('channel_outbound_message_matches_match_id_unique_idx') IS NOT NULL THEN
@@ -207,7 +286,7 @@ jobs:
 
       - name: Verify migration 010 rollback
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$
           BEGIN
             IF EXISTS (
@@ -225,7 +304,7 @@ jobs:
 
       - name: Verify migration 009 rollback
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$
           BEGIN
             IF to_regclass('channel_outbound_message_matches') IS NOT NULL THEN
@@ -240,7 +319,7 @@ jobs:
 
       - name: Verify rollback compatibility
         run: |
-          psql "$DATABASE_URL" <<'SQL'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$
           BEGIN
             IF EXISTS (
@@ -264,5 +343,8 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008, 009, 010 and 011
+      - name: Reapply migrations 008 through 013
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+
+      - name: Test PostgreSQL integrations after reapply
+        run: pnpm --filter @contatocerto/api test:integration

@@ -25,7 +25,7 @@ export function presentSelectionMessage(contract: SelectionMessageContract): str
     case "not_command":
       return "Não consegui identificar qual profissional você escolheu. Responda com o número ou com o nome da opção.";
     case "no_more_options":
-      return "Todas as opções disponíveis já foram apresentadas.";
+      return "Todas as opções disponíveis para esta busca já foram apresentadas. Escolha uma delas ou envie “recomeçar” para refinar o serviço ou a região.";
     case "selection_unavailable":
       return "Essa seleção não está mais disponível. Faça uma nova busca para continuar.";
     case "show_more_requested": {

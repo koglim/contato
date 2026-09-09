@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DefaultSelectionCommandService } from "./selection-command.service.js";
 import type { SelectionCommandInput } from "./selection-command.types.js";
-import type { SelectionMatchRepository } from "../match-selection/match-selection.types.js";
+import type { SelectionMatchRepository, SelectionMatchState } from "../match-selection/match-selection.types.js";
 
 const input: SelectionCommandInput = {
   conversationId: "11111111-1111-4111-8111-111111111111",
@@ -15,7 +15,7 @@ const input: SelectionCommandInput = {
 };
 
 class FakeSelectionMatchRepository implements SelectionMatchRepository {
-  state = { totalMatchCount: 3, shownMatchCount: 2, hasMore: true };
+  state: SelectionMatchState = { totalMatchCount: 3, shownMatchCount: 2, hasMore: true };
   selected = {
     kind: "selected" as const,
     contactId: "44444444-4444-4444-8444-444444444444",
@@ -194,5 +194,24 @@ test("selection command service recovers a selection without parsing or selectin
   );
   assert.deepEqual(current.selectionMatchRepository.recoveryCalls, [[input.customerId, input.selectionKey]]);
   assert.equal(current.selectionMatchRepository.getStateCalls, 0);
+  assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
+});
+
+test("selection command service waits for a reserved page and caps the next page", async () => {
+  const current = context();
+  let calls = 0;
+  current.selectionMatchRepository.listNextUnshown = async (_id: string, limit: number) => {
+    calls += 1;
+    assert.equal(limit, 3);
+    return [];
+  };
+  current.selectionMatchRepository.state = { totalMatchCount: 20, shownMatchCount: 3, hasMore: true, hasPendingReservations: true };
+  assert.deepEqual(await current.service.process({ ...input, rawText: "mostrar mais", limit: 10 }), {
+    kind: "show_more_requested", shownMatchCount: 3, hasMore: true,
+  });
+  assert.equal(calls, 0);
+  current.selectionMatchRepository.state.hasPendingReservations = false;
+  await current.service.process({ ...input, rawText: "mostrar mais", limit: 10 });
+  assert.equal(calls, 1);
   assert.deepEqual(current.selectionMatchRepository.selectCalls, []);
 });
