@@ -367,3 +367,8 @@ sem executar novamente a troca de contexto.
 
 Migration 015 possui down protegido (`P0015`): dados de decisões ou retomadas
 impedem remoção destrutiva. Rollback compatível é exercitado antes dos downs anteriores.
+# Continuidade B2
+
+Ver [B2_CONTEXTUAL_CONVERSATION.md](B2_CONTEXTUAL_CONVERSATION.md) para o handler
+opcional, memória/hipóteses, fencing, quotas e limites do checkpoint. A ativação
+continua desabilitada; não equivale à conclusão comercial da V1.

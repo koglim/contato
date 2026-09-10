@@ -31,8 +31,9 @@ function responseFor(input: MatchingSearchInput, service: ServiceRow, searchRequ
 }
 
 export class PostgresMatchingRepository implements MatchingRepository {
+  constructor(private readonly transaction: typeof withTransaction = withTransaction) {}
   async search(input: MatchingSearchInput, context: SearchExecutionContext = {}): Promise<MatchingSearchOutcome> {
-    return withTransaction(async (client) => {
+    return this.transaction(async (client) => {
       const serviceResult = await client.query<ServiceRow>("SELECT id, name, slug, is_active FROM services WHERE id = $1", [input.service_id]);
       const service = serviceResult.rows[0];
       if (!service) return { kind: "service_not_found" };

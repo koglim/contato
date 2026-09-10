@@ -667,3 +667,11 @@ Se houver ambiguidade ou expiração, a resposta informa o próximo passo sem tr
 o contexto. Uma resposta repetida mantém a Outbox e a decisão já persistidas.
 Novas finalidades Outbox: `professional_reply` e `customer_contact_update`.
 O dispatcher e o fluxo de confirmação de envio permanecem os mesmos.
+# B2 opcional na Inbox
+
+Sem nova rota: a Inbox pode retornar o resultado aditivo
+`{route:"contextual",customer_id,status}`. Status: needs_service, needs_location,
+clarification, information, matched, no_matches ou fallback. Envelope, Outbox,
+claim/sent/failed e entrega compartilhada permanecem iguais. Nenhuma memória ou
+evidência da IA é incluída. Replay usa a Outbox mesmo com a B2 desligada.
+Veja [B2_CONTEXTUAL_CONVERSATION.md](B2_CONTEXTUAL_CONVERSATION.md).

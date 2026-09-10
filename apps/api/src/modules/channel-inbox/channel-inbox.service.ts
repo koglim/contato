@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { customerSearchMessageResponseSchema, opportunityMessageSchema, type ChannelInboundMessageInput } from "@contatocerto/shared";
+import { customerSearchMessageResponseSchema, opportunityMessageSchema, contextualMessageSchema, type ChannelInboundMessageInput } from "@contatocerto/shared";
+import type { ContextualInboxHandler } from "../contextual-conversation/contextual.service.js";
 import type { ProfessionalOpportunityService } from "../professional-opportunity/professional-opportunity.service.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
@@ -77,6 +78,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     private readonly messagePresenter: MessagePresenter,
     private readonly channelOutboundMessageRepository: ChannelOutboundMessageRepository,
     private readonly professionalOpportunities?: Pick<ProfessionalOpportunityService, "handle">,
+    private readonly contextualConversation?: ContextualInboxHandler,
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
@@ -101,6 +103,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     try {
       const opportunity = await this.professionalOpportunities?.handle(claimed);
       if (opportunity) return { kind: "response", response: opportunity };
+      if (this.contextualConversation) return await this.contextualConversation.handle(claimed);
       const routed = await this.customerSearchRouter.route({
         phone_e164: claimed.phoneE164,
         raw_text: claimed.rawText,
@@ -156,6 +159,14 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   }
 
   private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
+    const contextual = contextualMessageSchema.safeParse(record.result);
+    if (contextual.success) {
+      const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id);
+      // B2 is atomic: a missing Outbox is corruption, never a reason to regenerate or execute again.
+      if (!outbound) return { kind: "channel_message_result_invalid" };
+      return { kind: "response", response: { message_id: record.id, duplicate: true, reply_text: outbound.textContent,
+        outbound: { id: outbound.id, status: outbound.status }, result: contextual.data } };
+    }
     if (opportunityMessageSchema.safeParse(record.result).success) {
       const response = await this.professionalOpportunities?.handle(record);
       return response ? { kind: "response", response } : { kind: "channel_message_result_invalid" };

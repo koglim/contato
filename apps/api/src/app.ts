@@ -1,4 +1,7 @@
 import Fastify, { LogController } from "fastify";
+import { readContextualConfig } from "./config/contextual-conversation.js";
+import { ContextualConversationService, type ContextualInboxHandler } from "./modules/contextual-conversation/contextual.service.js";
+import { OpenAIContextualProvider } from "./modules/contextual-conversation/contextual.provider.js";
 import { apiLoggerOptions, type LogStream } from "./observability/logging.js";
 import { ProfessionalOpportunityService } from "./modules/professional-opportunity/professional-opportunity.service.js";
 import { healthResponseSchema } from "@contatocerto/shared";
@@ -69,6 +72,7 @@ import type { ChannelOutboundMessageRepository, ChannelOutboundService } from ".
 import { readChannelOutboundConfig, type ChannelOutboundConfig } from "./config/channel-outbound.js";
 
 type AppDependencies = {
+  contextualConversation?: ContextualInboxHandler;
   logStream?: LogStream;
   checkDatabase?: () => Promise<void>;
   professionalsRepository?: ProfessionalsRepository;
@@ -160,6 +164,7 @@ export function buildApp({
   channelOutboundConfig,
   professionalOpportunityService,
   logStream,
+  contextualConversation,
 }: AppDependencies = {}) {
   const app = Fastify({ logger: apiLoggerOptions(logStream), logController: new LogController({ disableRequestLogging: true }), requestIdHeader: false });
   app.addHook("onError", async (request, _reply, error) => {
@@ -227,6 +232,10 @@ export function buildApp({
     messagePresenter ?? new DefaultMessagePresenter(),
     resolvedChannelOutboundMessageRepository,
     professionalOpportunityService ?? (channelInboundMessageRepository ? undefined : new ProfessionalOpportunityService()),
+    contextualConversation ?? (() => {
+      const config = readContextualConfig();
+      return config.enabled ? new ContextualConversationService(new OpenAIContextualProvider(config.model, config.apiKey), resolvedLocationResolutionService) : undefined;
+    })(),
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));

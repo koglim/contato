@@ -139,3 +139,4 @@ export { opportunityMessageSchema } from "./schemas/opportunity-message.js";
 export { dashboardMutationSchema, updateSelfServiceProfileSchema } from "./schemas/dashboard-mutation.js";
 export { channelOutboundQueueStatusSchema } from "./schemas/channel-outbound.js";
 export type { ChannelOutboundQueueStatus } from "./types/channel-outbound.js";
+export { contextualMessageSchema } from "./schemas/contextual-message.js";

@@ -28,7 +28,7 @@ export type ChannelInboundMessageRecord = {
 export type MarkProcessedInboundMessage = {
   id: string;
   processingToken: string;
-  result: CustomerSearchMessageResponse;
+  result: CustomerSearchMessageResponse | Extract<ChannelInboundMessageResponse["result"], { route: "contextual" }>;
   customerId: string;
   conversationId: string | null;
   searchRequestId: string | null;
