@@ -1,4 +1,4 @@
-# Transporte — quatro exports inativos
+# Transporte — cinco exports inativos
 
 Alvo informado: **n8n 1.123.21 / Evolution 2.3.7**. Código das versões conferido;
 homologação no motor/WhatsApp real ainda não executada. O community node 1.0.4
@@ -10,6 +10,7 @@ permanece instalado no ambiente, mas os novos exports não dependem dele.
 | shared-delivery.json | Entrega de negócio: gate, Evolution HTTP, sent/failed/hold |
 | outbox-dispatcher.json | Claim da fila, orçamento e chamada do mesmo shared |
 | inbox-recovery.json | Recuperação de entradas persistidas; não envia WhatsApp |
+| media-consumer.json | Claim da mídia, transcrição primária/fallback e persistência; não envia WhatsApp |
 
 O gateway mantém `instance:key.id` como identidade histórica. Nunca enviar
 reply_text diretamente nem usar telefone do webhook para uma Outbox independente.
@@ -30,8 +31,9 @@ e tipos no runbook). Segredos só no cofre, nunca em Variables.
 
 JWT HS256 autentica origem, não assina conteúdo. Conferir TLS, URL interna,
 body/taxa na borda, expiração e persistência do segredo após reinício.
-Não reutilizar INTERNAL_API_KEY. Nenhuma variável API/web ou migration nova:
-aplicar todas as pendentes, inclusive 017/018/019, antes da API; B2 desligada.
+Não reutilizar INTERNAL_API_KEY como segredo JWT. Nenhuma variável API/web nova;
+migration020 adicionada: aplicar todas as pendentes, inclusive017/018/019/020,
+antes da API; B2 desligada. Não há Variables ou credentials novas neste checkpoint.
 
 HTTP Request usa fullResponse, **text/body**, parse controlado e redirects
 desligados. Trata 204 sem erro no parser JSON. Transporte nunca usa retryOnFail;
@@ -39,19 +41,21 @@ somente confirmação API tem três tentativas. 400/401/403/404/422/429 genéric
 não provam rejeição. Envelope exato 401 do authGuard → failed/backoff;
 outros resultados incertos → hold. ID aceito é conservado para confirmação.
 
-Áudio até120s, limitado, Groq primário/OpenAI fallback e uma saída para Inbox.
-**Exceção:** aviso de áudio inválido/falha total é one-shot direto, sem retry ou
-entrada fictícia. Não tem deduplicação durável entre webhooks; reentrega,
-transcrição variável e queda antes da Inbox são pendências explícitas.
-O runbook exige decisão antes do público, não promete exactly-once.
+Gateway persiste áudio/aviso antes do ACK; não transcreve nem envia aviso direto.
+Consumer separado usa mídia durável por lease, Groq/OpenAI e resultado persistido.
+API mantém até3MiB por uma hora e bloqueia expiração/reprocessamento indevido;
+notice usa Shared Delivery. Rotina de purge ocorre a cada claim; manter consumer
+em execução após homologação para cumprir expurgo. Limites e intervenção em
+[TRANSPORT_DURABILITY.md](../../docs/TRANSPORT_DURABILITY.md).
 Não salvar dados de execução success/error/manual/progress.
 
 Lease Outbox >=60s; envio15s, confirmação5s×3, shared55s. Dispatcher10 itens/45s
-por ciclo, timeout105s; recovery HTTP70s/execução120s; gateway165s.
+por ciclo, timeout105s; recovery HTTP70s/execução120s; gateway140s; media consumer55s,
+um item por execução/10s, lease60s e transcritor10s cada, sem retry HTTP de modelo.
 Conferir timeout da origem/proxy para ACK depois da Inbox e antes do envio.
 API indisponível após envio exige pausa/reconciliação, não liberação automática.
 
 Desenvolvimento: alterar delivery-contract.mjs, gateway-contract.mjs e
 build-workflows.mjs; executar `pnpm build:workflows`, `pnpm test:workflows`
-e versionar quatro JSONs. CI verifica exports determinísticos e PostgreSQL;
+e versionar cinco JSONs. CI verifica exports determinísticos e PostgreSQL;
 HTTP, transcrição e grafo n8n simulados não substituem homologação.

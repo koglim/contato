@@ -386,3 +386,15 @@ Decisões, limites transacionais, preservação de evidência, identidade admini
 declarada e testes: [INBOX_RECOVERY.md](INBOX_RECOVERY.md). O export agendado é
 inativo e não possui transporte; dispatcher/gateway continuam usando uma Outbox
 e entrega compartilhada. Migrations anteriores não foram alteradas.
+
+# Checkpoint 020 — admissão de mídia e reconciliação
+
+Gateway não envia avisos diretamente: persiste evento e placeholder FIFO da Inbox
+antes do ACK. BYTEA temporário, SHA-256, lease e resultado são controlados pela API;
+consumer separado só transcreve; recovery processa o único inbound original.
+Avisos API-owned são Outboxes channel_notice independentes idempotentes. Shared
+Delivery continua único caminho de envio, com holds e fencing. Transcrição e
+transporte HTTP sempre ocorrem fora das transações. Disposições administrativas
+serializadas preservam recibos, tentativas e histórico append-only, sem consentimento.
+Ver [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md) para invariantes, limites,
+privacidade, riscos de resultado externo incerto e identidade administrativa declarada.

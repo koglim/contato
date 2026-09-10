@@ -687,3 +687,14 @@ nem retorna telefone/texto/token. A Outbox resultante usa a entrega compartilhad
 `operator_id` (UUIDs), `action: retry | close` e razão enumerada. Idempotente e
 auditado; 404 inexistente, 409 conflito/ação insegura. Não concede consentimento.
 Contrato completo, backoff, quarentena e rollout: [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
+
+# Transporte durável 020
+
+Contratos novos, todos com X-Internal-Key: POST /internal/channel/media/events,
+/media/next/claim (204 vazio), /media/:id/result, /media/purge;
+POST /internal/channel/outbound/:id/disposition e GET /internal/channel/transport/diagnostics.
+A nova finalidade channel_notice usa o claim/sent/failed/hold existentes; nenhum
+contrato da Inbox foi substituído. /hold aceita provider_message_id opcional para
+preservar confirmação pendente. Disposição tem request_id, operator_id, ação/razão
+e evidência; 409 no conflito e fencing do token antigo. Nenhum consentimento é inferido.
+Corpos, respostas e política completa: [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).

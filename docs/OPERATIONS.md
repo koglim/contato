@@ -119,3 +119,13 @@ restauração integral só após avaliação do operador e reconciliação de en
 018/019 também têm down protegido quando há dados incompatíveis. Nunca excluir
 memória, eventos ou quarentena para forçar downgrade. Casos legados classificados
 `legacy_effects_uncertain` no upgrade exigem análise antes de retomar a fila.
+
+# Publicação futura da020
+
+Seguir [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md): drenar/pausar caminho
+antigo, backup, migrations pendentes até020 (incluindo017 e018) antes da API,
+cinco exports inativos, credenciais já existentes e homologação autorizada.
+Monitorar GET /internal/channel/transport/diagnostics; retenção de bytes exige
+consumer ativo ou /media/purge agendado. Falhas totais do worker deixam a expiração
+lógica preservada mas atrasam exclusão física. Nunca reenviar hold sem evidência
+nem limpar auditoria para rollback. B2 off; sem alteração operacional neste checkpoint.

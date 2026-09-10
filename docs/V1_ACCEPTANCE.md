@@ -16,7 +16,7 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T02 | Falta serviço/cidade | Aprovado automatizado: slots independentes e pergunta somente sobre o campo faltante; revisão humana da redação pendente |
 | T03 | Aspas/emoji/multiline | Aprovado no contrato puro de transporte; homologação do gateway pendente |
 | T04 | Texto/resposta citada | Parcial: normalização testada; gateway instalado não executado |
-| T05 | Áudio/limites/falhas | Contratos/grafo simulados: até120s, Groq/OpenAI, saída única; áudio real e durabilidade dos avisos/reentregas pendentes, ver TRANSPORT_HOMOLOGATION.md |
+| T05 | Áudio/limites/falhas | Implementação020: eventos/avisos duráveis, transcrição persistida, lease, TTL, quarentena e Shared; mocks e PostgreSQL no CI. Áudio/motor reais pendentes, ver TRANSPORT_DURABILITY.md |
 | T06 | Próprio/grupo/evento inválido | Parcial: normalizador ignora; integração no webhook pendente |
 | T07 | Autenticidade do webhook | Gateway inativo usa JWT HS256 nativo compatível com tags 2.3.7/1.123.21; claims/envelope testados; prova criptográfica no motor/rede real pendente. JWT não assina o body |
 | T08 | Replay do inbound | Aprovado automatizado: Inbox, contato/Outbox únicos e conteúdo persistido |
@@ -55,7 +55,7 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T41 | Anonimização/retenção | Parcial: logs sanitizados; política de expurgo/dados imutáveis pendente |
 | T42 | Backup/restauração | Não executado; runbook sem alegação de ensaio realizado |
 | T43 | Carga/providers lentos | Parcial: testes de corrida/leases; carga e SLOs não medidos |
-| T44 | Migrations/rollback | CI ampliado até 019: proteção P0019, preservação de 018 e proteções anteriores, down compatível 019–008 e reaplicação 008–019; evidência por SHA em INBOX_RECOVERY.md |
+| T44 | Migrations/rollback | CI ampliado até020: P0020 e proteções anteriores, down compatível020–008, reaplicação008–020 e nova rodada PostgreSQL; evidência por SHA no relatório de transporte |
 | T45 | Regionalismos/abreviações | Corpus B2 inclui casos sintéticos; execução com propostas simuladas não mede compreensão real |
 | T46 | Problema sem profissão | Aprovado automatizado: hipótese ligada ao catálogo real, confirmação antes da promoção; modelo real pendente |
 | T47 | Dados fora de ordem | Teste PostgreSQL B2 de cidade antes do serviço; preservação de slots e no_matches |
@@ -81,5 +81,17 @@ Checkpoint transporte: gateway/dispatcher disputam a mesma Outbox em teste
 PostgreSQL; hold impede retry mesmo após lease expirada. Exports sem secrets e
 sem gravação de dados de execução. Compatibilidade estática por tag e matriz dos
 32 casos em [TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md). Simulação
-de grafo não é motor n8n. Exceção de aviso de áudio direto não oferece recibo
-durável; não contar como aprovação de exactly-once. Nenhum envio real realizado.
+de grafo não é motor n8n. Aviso de áudio direto foi substituído pela admissão durável020 e Shared Delivery;
+isso não comprova exactly-once externo. Nenhum envio real realizado.
+
+
+## Checkpoint 020 — durabilidade de áudio e intervenção
+
+Implementação e critérios de aceite em [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).
+Nova migration020; áudio/aviso antes do ACK, resultado persistido, leases/quarentena,
+retenção, disposição auditada e diagnóstico agregado. CI inclui PostgreSQL real,
+rollback protegido/compatível020–008 e reaplicação até020. Serviços externos
+simulados; versões fixadas e exports inativos. Nenhuma variável/credential nova.
+Publicação futura: todas as migrations pendentes (017–020 quando aplicável) antes
+da API; depois cinco workflows ainda inativos e homologação autorizada. B2 off.
+Não houve deploy/merge/envio/avaliação paga. V1 comercial continua incompleta.

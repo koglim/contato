@@ -57,7 +57,7 @@ ativo continua protegido pelos endpoints internos; o hash não é devolvido.
 Recibos legados ausentes não são inventados: claim de mensagem antiga `sent`
 encerra, mas uma confirmação antiga sem recibo não ganha autorização retroativa.
 
-Aplicar todas as migrations pendentes, inclusive 017, 018 e 019, antes da API. Não executar migrations no
+Aplicar todas as migrations pendentes, inclusive 017, 018, 019 e 020, antes da API. Não executar migrations no
 startup. Down bloqueia com `P0017 / OUTBOUND_RECEIPT_ROLLBACK_BLOCKED` se houver
 recibo ou retenção. Usar roll-forward ou restauração integral validada; nunca
 limpar evidências de produção para liberar rollback.
@@ -67,8 +67,9 @@ limpar evidências de produção para liberar rollback.
 1. Pausar o envio para o item e conferir a execução/ID no provider com acesso restrito.
 2. Se houver aceitação comprovada, chamar `/sent` com o ID retornado e token original.
 3. Se não houver prova do resultado, manter a retenção e investigar. Não reenviar.
-4. A interface administrativa para autorizar nova tentativa com motivo/auditoria
-   ainda está pendente. Não usar SQL ad hoc que apague histórico.
+4. Usar `/outbound/:id/disposition` para confirm/retry/close/retain com request ID,
+   operador e evidência conforme [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).
+   Essa decisão revoga o token antigo. Não usar SQL ad hoc que apague histórico.
 
 ## Diagnóstico sem dados pessoais
 
@@ -85,17 +86,29 @@ matriz [V1_EXECUTION.md](V1_EXECUTION.md).
 
 ## Transporte fixado em Evolution 2.3.7 / n8n 1.123.21
 
-Quatro exports inativos preparados; gateway e dispatcher usam Shared Outbox
+Cinco exports inativos preparados; gateway e dispatcher usam Shared Outbox
 Delivery. HTTP completo como text/body evita erro no 204 vazio. Sucesso exige
 key.id/fromMe/remoteJid; 400 genérico pode ocorrer **após** envio nessa versão.
 Somente rejeição de autenticação comprovada pelo envelope do authGuard vira
 failed; demais erros incertos, inclusive 429 sem prova, ficam em hold. Não
 classificar timeout como rejeição. Todas as finalidades continuam preservadas.
 
-Aviso técnico de áudio não transcrito é exceção one-shot fora da Outbox, sem
-retry automático; não é mensagem de negócio. Durabilidade/deduplicação desse
-aviso exige decisão antes do público. Detalhes, fontes, riscos e runbook em
+Aviso técnico de áudio usa a finalidade channel_notice e a admissão durável020;
+não existe mais envio one-shot. Administração e retenção de mídia descritas em
+[TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md). Detalhes, fontes, riscos e runbook em
 [TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md). Execuções n8n não guardam
 payloads; não depender de um dump para reconciliar. Se a API cair antes de gravar
 recibo/hold, pausar consumidores e coletar evidência restrita na origem; persiste
 o risco de queda na janela de envio externo, sem garantia exactly-once.
+
+
+## Checkpoint 020 — durabilidade de áudio e intervenção
+
+Implementação e critérios de aceite em [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).
+Nova migration020; áudio/aviso antes do ACK, resultado persistido, leases/quarentena,
+retenção, disposição auditada e diagnóstico agregado. CI inclui PostgreSQL real,
+rollback protegido/compatível020–008 e reaplicação até020. Serviços externos
+simulados; versões fixadas e exports inativos. Nenhuma variável/credential nova.
+Publicação futura: todas as migrations pendentes (017–020 quando aplicável) antes
+da API; depois cinco workflows ainda inativos e homologação autorizada. B2 off.
+Não houve deploy/merge/envio/avaliação paga. V1 comercial continua incompleta.

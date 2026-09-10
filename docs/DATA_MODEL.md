@@ -102,3 +102,16 @@ histórico; nenhuma entrada é falsamente marcada como concluída para liberar F
 declarado e hash opcional do conflito; FK RESTRICT e updates proibidos. Sem
 cópia de telefone/texto/token. Índices de elegibilidade e ordem por telefone.
 Down P0019 protege dados incompatíveis. [Detalhes](INBOX_RECOVERY.md).
+
+# Adição 020 — mídia temporária e trilha de transporte
+
+channel_media_events liga exatamente um registro ao inbound_id (UNIQUE/RESTRICT),
+com fingerprint do evento/hash da mídia, MIME/duração, BYTEA até3MiB, expires_at,
+purged_at/reason, status, lease/token, attempt_count≤3, transcrição/provider,
+result_token_hash e notice_outbound_id único. Inbox ganha media_pending para
+não ultrapassar áudio ainda pendente. Outbox ganha channel_notice,
+delivery_held_at e administrative_closed_at; destinatário/texto não são editáveis
+pela administração. channel_transport_events guarda requests/evidências/resultado,
+com chaves idempotentes e trigger que rejeita UPDATE/DELETE. Sem PII no diagnóstico.
+Índices parciais para fila e expurgo. Down protegido P0020; 001–019 intactas.
+Retenção operacional e limites de WAL/backups: [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).

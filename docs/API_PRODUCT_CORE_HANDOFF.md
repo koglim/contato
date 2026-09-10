@@ -279,3 +279,16 @@ executadas. Não recriar notificações bilaterais: recuperação e replay usam 
 mesmos efeitos transacionais, selectionKey, consentimento e Outbox existentes.
 Aplicar todas as migrations pendentes (017/018/019 incluídas) antes da nova API,
 sem réplicas antigas processando durante a troca. B2 continua desligada.
+
+# Continuidade: durabilidade de áudio e intervenção 020
+
+Partindo de9b4646e, foram implementados admissão antes do ACK, transcrição durável,
+consumer de áudio inativo, aviso channel_notice pelo Shared Delivery, admin
+confirm/retry/close/retain com auditoria e diagnóstico agregado sem PII. Rotas e
+limites em [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).
+Migration020 é necessária; aplicar todas as pendentes, inclusive017/018/019/020,
+antes da API. Sem variável/credential nova. Não houve merge, deploy, importação,
+ativação, WhatsApp ou transcrição real. B2 off. Próximo checkpoint: homologação
+manual autorizada do transporte e retenção; depois avaliação B2 real autorizada.
+Núcleo bilateral preservado; V1 comercial ainda tem identidade, avaliações,
+cobrança, políticas e operação pública pendentes na matriz de aceite.

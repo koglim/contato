@@ -245,3 +245,12 @@ O corpus B2 continua congelado, sem ajuste de labels/prompts ou execução paga.
 Falhas de CI intermediárias foram registradas: inferência SQL do parâmetro de erro,
 fixtures que ultrapassavam FIFO e validação de fallback determinístico como texto
 de IA. As correções mantêm constraints e acrescentam regressão específica.
+
+## Interação com mídia durável020
+
+Inbox media_pending não é elegível e bloqueia entradas posteriores do telefone.
+A transcrição libera o mesmo registro; avisos técnicos fecham o placeholder sem
+chamar o domínio. Divergência coloca-o em quarentena preservando resultado e
+contexto. API e migrations até020 devem preceder os consumidores. Ver
+[TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md); não usar retry administrativo
+genérico para inventar uma transcrição ou remover o bloqueio de mídia.

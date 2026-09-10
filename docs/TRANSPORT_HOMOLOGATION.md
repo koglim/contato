@@ -108,39 +108,18 @@ O recibo fica no banco quando `/sent` chega. Se toda a API cair, nem hold nem
 recibo podem ser persistidos: **parar consumidores e reconciliar antes da lease
 ser reutilizada**. Não existe garantia exactly-once fora do banco/provider.
 
-### Áudio e exceção explícita
+### Áudio durável (020)
 
-120 segundos no máximo, duração numérica positiva obrigatória, MIME permitido,
-base64 válido até 4 MiB (~3 MiB binário), envelope até 5 MiB. Duração declarada
-pela origem não substitui inspeção real de mídia; validar no ensaio controlado.
-Groq `whisper-large-v3-turbo` primário; falha/timeout/texto vazio ou >500 caracteres
-usa OpenAI `gpt-4o-mini-transcribe`. Multipart file + model + language=pt +
-response_format=json, timeout 10s por tentativa, sem retry automático.
-Contrato do fallback conferido no [guia oficial OpenAI](https://developers.openai.com/api/docs/guides/speech-to-text);
-nenhuma transcrição externa foi executada. Binário original é religado por item,
-sem fanout/Merge que possa emitir duas transcrições para a Inbox.
-
-Transcrição válida entra na mesma Inbox com o ID original. Áudio longo/inválido
-ou falha total gera aviso fixo, **não uma mensagem fictícia para o domínio**.
-A API não possui enqueue de aviso de transporte. Para não criar finalidade/schema
-ou alterar contratos de negócio aqui, o aviso é a única exceção direta:
-ACK antes de uma tentativa, sem retry, mesma classificação conservadora do
-transporte; resultado incerto interrompe para reconciliação. Não cria contato,
-busca nem Outbox. Nenhum dos ramos de falha dispara dois avisos na mesma execução.
-
-**Limitação importante:** esse aviso não tem recibo/deduplicação durável. Outra
-entrega do mesmo webhook pode repetir o aviso; queda após ACK pode perdê-lo.
-Reentrega de áudio válido também pode transcrever novamente e produzir texto
-diferente, que a Inbox rejeita como conflito (não duplica efeitos, mas exige
-reconciliação). Não usar staticData do n8n como lock distribuído nem prometer
-exactly-once. Antes de operação pública: aceitar formalmente a exceção ou criar
-admissão durável de mídia/transcrição/avisos em etapa específica. O runbook de
-homologação deve coletar esses casos; este checkpoint não remove esse risco.
+A exceção one-shot foi removida. Gateway persiste mídia/aviso na API antes do ACK;
+consumer separado transcreve sob lease; Inbox Recovery processa o resultado;
+Shared Delivery entrega o notice. Limites, quarentena, expurgo e intervenção em
+[TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md). Transcrição real permanece
+pendente. Nenhum workflow foi importado/ativado.
 
 ## Configuração futura (nenhuma aplicada)
 
-**API/EasyPanel:** nenhuma variável ou migration nova. Aplicar todas as pendentes,
-inclusive **017, 018, 019**, antes da API compatível. Manter B2=false. Lease existente
+**API/EasyPanel:** nenhuma variável nova; nova migration020. Aplicar todas as pendentes,
+inclusive **017, 018, 019, 020**, antes da API compatível. Manter B2=false. Lease existente
 da Outbox >=60s. Os exports precisam de API com holds/recibos/fencing da branch.
 
 **Variables n8n** (nenhuma é segredo; obrigatório, sem default):
@@ -177,9 +156,10 @@ não a reativação indiscriminada de dumps. Política de retenção exige respo
 
 Timeouts: envio 15s; confirmações 5s, até três tentativas; shared 55s. Dispatcher
 10 itens/45s para iniciar, execução até105s; recovery HTTP70s/execução120s;
-gateway transcrição até20s + Inbox70s + claim15s + shared55s, execução165s.
+gateway Inbox70s + claim15s + shared55s, execução140s; áudio usa admissão15s.
+Consumer de mídia: transcrição até20s + persistência5s×3, execução55s/lease60s.
 O timeout do webhook na origem/proxy deve comportar o ACK (antes do envio, até
-~90s com áudio); a Evolution padrão pode repetir em 30s. Homologar configuração
+70s para texto ou15s para admissão de áudio); a Evolution padrão pode repetir em30s. Homologar configuração
 de timeout/retries sem assumir que o ambiente já a alterou. Não desativar
 idempotência para contornar reentregas.
 
@@ -188,8 +168,8 @@ idempotência para contornar reentregas.
 1. Confirmar ambiente controlado, versões, SHA/CI, backup criptografado dos
    workflows/credentials/config e banco restaurável; bloquear números não autorizados.
 2. Rotacionar as chaves do export compartilhado. Pausar gateway/consumidores antigos
-   no ambiente do ensaio. Conferir migrations 001–019 e API/B2 desligada.
-3. Importar **inativos** shared-delivery, outbox-dispatcher, inbox-recovery e gateway.
+   no ambiente do ensaio. Conferir migrations 001–020 e API/B2 desligada.
+3. Importar **inativos** shared-delivery, outbox-dispatcher, inbox-recovery, media-consumer e gateway.
    Não ligar gateway antigo e novo ao mesmo tempo.
 4. Criar Variables/credentials da tabela. Associar o ID real do shared nos dois
    consumidores. Conferir nomes/IDs de credentials, origem e todas as URLs.
@@ -204,16 +184,16 @@ idempotência para contornar reentregas.
    desconexão e perda da confirmação. Conferir holds/recibos/sem reenvio.
 8. Disputar gateway e dispatcher, repetir webhook, reiniciar consumidor e consultar
    diagnósticos. Conferir shown_at somente após sent; seleção/consentimento intactos.
-9. Reconciliar hold: somente se houver evidência da Evolution, repetir sent com
-   token original e provider_message_id; resultado incerto permanece retido.
-   Não limpar evidências/leases. Administração de nova tentativa ainda pendente.
+9. Reconciliar hold com `/outbound/:id/disposition` e evidência verificada na Evolution:
+   confirm/retry/close/retain, request_id e operator_id. Resultado incerto permanece
+   retido. Não limpar evidências/leases; ação administrativa revoga o token antigo.
 10. Coletar SHA, versões, caso, horários, status, IDs opacos e contagens; guardar
     evidências sensíveis separadamente. Revisão humana do áudio/WhatsApp é obrigatória.
 11. Rollback de workflow: pausar ingresso/consumidores, reconciliar trabalho em voo,
     restaurar backup **inativo**, revisar antes de ligar. Não restaurar a política
     antiga de retry de qualquer erro nem fazer downgrade do banco para perder holds.
 12. Só autorizar ativação após matriz crítica aprovada, segredos rotacionados,
-    alertas/timeout/rede validados e decisão explícita sobre durabilidade do áudio.
+    alertas/timeout/rede e durabilidade do áudio020 validados no ambiente de ensaio.
     Sem esse gate, manter inativo. O ensaio não autoriza B2 real nem lançamento V1.
 
 | Caso | Ação no ensaio | WhatsApp | Inbox | Outbox | Evidência / aprovação |
@@ -234,8 +214,8 @@ idempotência para contornar reentregas.
 | Confirmação perdida | Perder resposta de sent | Uma entrega | Processed | Sent via replay ou hold | Repetir confirmação, nunca envio |
 | Recovery | Queda após persistência Inbox | Entrega posterior | Retomada/FIFO/fencing | Shared pelo dispatcher | Mesmos efeitos/resultados |
 | Áudio válido | Até120s, primary/fallback | Uma resposta do domínio | Uma transcrição/ID | Uma customer_reply | Binário sem logs, conteúdo validado por humano |
-| Áudio longo/falha total | >120s ou dois transcritores falham | Um aviso one-shot | Nenhuma entrada fictícia | Nenhuma (exceção) | Sem dois avisos no mesmo fluxo; sem retry |
-| Reentrega de áudio | Repetir evento/derrubar antes do ACK | Medir risco de repetição/aviso | Mesmo ID ou conflito se nova transcrição divergir | Sem novo efeito de negócio | Registrar limitação; decisão sobre fila de mídia antes do público |
+| Áudio longo/falha total | >120s ou dois transcritores falham | Um aviso durável da API | Placeholder fechado sem domínio | channel_notice único | Shared Delivery, hold e replay sem duplicação |
+| Reentrega de áudio | Repetir evento/derrubar antes/depois do ACK | Mesmo evento durável | Mesmo ID e transcrição persistida; divergência em quarentena | Sem novo efeito de negócio | Homologar consumer e expurgo da020 |
 | Notificação profissional | Outbox independente em teste | Destinatário da própria Outbox | Sem inbound necessário | Purpose/recibo preservados | Não usa telefone do gateway |
 
 ## Evidência automatizada e próximo checkpoint
@@ -253,8 +233,8 @@ criptográfica no motor, envio real, áudio real e exactly-once externo não sã
 comprovados por simulação. Quantidades/CI final pertencem ao relatório de entrega
 e ao run do SHA, não à versão de um export instalado.
 
-Próximo checkpoint: homologação controlada e alertas/recibos operacionais, decisão
-de durabilidade da mídia/avisos, reconciliação administrativa Outbox, depois
+Próximo checkpoint: homologação controlada da durabilidade/reconciliação implementadas
+na020 e alertas/recibos operacionais, depois
 avaliação B2 paga somente com autorização. Identidade/onboarding e demais etapas
 da V1 continuam pendentes; este transporte não as conclui.
 
@@ -280,3 +260,15 @@ descartável (sem Docker/psql local). Exports reproduzíveis e diff sem erros.
 Nenhum segredo do export original encontrado nos arquivos do repositório pelo
 scan local, que não imprime valores. Isto não elimina a necessidade de rotação
 das chaves que já estavam no arquivo compartilhado.
+
+
+## Checkpoint 020 — durabilidade de áudio e intervenção
+
+Implementação e critérios de aceite em [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).
+Nova migration020; áudio/aviso antes do ACK, resultado persistido, leases/quarentena,
+retenção, disposição auditada e diagnóstico agregado. CI inclui PostgreSQL real,
+rollback protegido/compatível020–008 e reaplicação até020. Serviços externos
+simulados; versões fixadas e exports inativos. Nenhuma variável/credential nova.
+Publicação futura: todas as migrations pendentes (017–020 quando aplicável) antes
+da API; depois cinco workflows ainda inativos e homologação autorizada. B2 off.
+Não houve deploy/merge/envio/avaliação paga. V1 comercial continua incompleta.

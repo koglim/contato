@@ -17,7 +17,7 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | Resposta profissional e retomada | Implementado | Migration 015, recusa preserva outra busca |
 | Inbox / Outbox | Implementação de recuperação disponível; homologação pendente | 017/019: recibos, leases, FIFO, backoff, fencing, quarentena/admin e diagnóstico; consumidor agendado inativo |
 | Revalidação da primeira escolha | Corrigida (F04) | Status, serviço/catálogo, contato canônico e cobertura obrigatórios em nova seleção/apresentação |
-| Entrega n8n | Candidato preparado / homologação pendente | Quatro exports inativos, gateway JWT/texto/áudio e shared; versões 1.123.21/2.3.7 conferidas no código; avisos de áudio e execução real pendentes |
+| Entrega n8n | Candidato preparado / homologação pendente | Cinco exports inativos; áudio/avisos duráveis020, administração e Shared Delivery; versões1.123.21/2.3.7; execução real pendente |
 | Conversa contextual híbrida | Implementação B2 disponível, desligada | Memória/hipóteses, controlador, perguntas fundamentadas, persistência e corpus 300; modelo real/revisão humana pendentes |
 | Identidade e onboarding | Ausente | Acesso demonstrativo com profissional fixo |
 | Painel | Parcial | Allowlist no BFF fecha F02; status/telefone somente leitura; falta ownership individual |
@@ -99,13 +99,13 @@ seu aceite conversacional real ainda está pendente. D–I não foram concluída
 ## Onde continuar
 
 1. Homologar o candidato em [TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md):
-   versões/export foram fornecidos e analisados; quatro exports inativos preparados.
+   versões/export foram fornecidos e analisados; cinco exports inativos preparados.
    Rotacionar segredos encontrados no export original, validar JWT/rede/áudio,
-   shared e recovery. Resolver/aceitar explicitamente a exceção de durabilidade
-   dos avisos e reentregas de áudio antes de operação pública. Não reescrever a API bilateral.
+   shared, recovery e consumer de mídia. Validar durabilidade, expurgo e reentregas
+   implementados na020 antes de operação pública. Não reescrever a API bilateral.
 2. Homologar recuperação Inbox/admin implementada na 019, incluindo reinício do
-   consumidor e casos em quarentena. Completar administração da Outbox e política
-   de obsolescência por finalidade; não liberar retenção apagando evidência.
+   consumidor e casos em quarentena. Homologar administração da Outbox020 e definir
+   política de obsolescência por finalidade; não liberar retenção apagando evidência.
    Instrumentar alertas e validar carga/duração dos locks legados.
 3. Homologar B2: autorizar modelos/orçamento, executar comparação no development,
    congelar configuração e avaliar heldout com revisão humana. Corpus e runner
@@ -120,14 +120,14 @@ seu aceite conversacional real ainda está pendente. D–I não foram concluída
 
 Release manual, configuração n8n, incidente/rollback e ensaio de backup estão em
 [OPERATIONS.md](OPERATIONS.md) e [workflows/n8n/README.md](../workflows/n8n/README.md).
-Para B2/Inbox, conferir e aplicar todas as migrations pendentes, incluindo 017, 018 e 019
+Para B2/Inbox, conferir e aplicar todas as migrations pendentes, incluindo 017, 018, 019 e 020
 quando ausentes, antes da API; não supor que o ambiente já aplicou a 017.
 Variáveis já introduzidas pela B2: `CONTEXTUAL_CONVERSATION_ENABLED=false` e
 `CONTEXTUAL_CONVERSATION_MODEL` (sem default); `OPENAI_API_KEY` é reutilizada.
 Publicar primeiro com B2 desligada, avaliar/homologar e só ativar mediante decisão
 manual. Nenhuma dessas ações em produção foi executada.
 O checkpoint Inbox não acrescenta variáveis nem dependências. Pausar ingresso e
-consumidores durante a troca para 019; não manter réplicas antigas sem fencing.
+consumidores durante a troca para 020; não manter réplicas antigas sem fencing.
 
 ## Decisões e dependências externas
 
@@ -152,7 +152,8 @@ HTTP fullResponse text para 204, testes do grafo e integração PostgreSQL com
 consumidores concorrentes. Export original não foi versionado por conter secrets.
 Nova Variable **n8n**: EVOLUTION_WEBHOOK_ORIGIN; nenhuma variável API/EasyPanel.
 As demais Variables/credentials e riscos estão no runbook do transporte.
-Homologação manual, durabilidade de mídia/avisos e alertas continuam gates,
+Homologação manual e alertas continuam gates; durabilidade de mídia/avisos está
+implementada na020, com validação e limites em TRANSPORT_DURABILITY.md,
 não resultados comprovados pelo CI. B2 permanece desligada.
 
 Código validado em `860c3048e0c2ea838ef45e91fc09f4568c654c06`: lint, typecheck,
@@ -160,3 +161,15 @@ build, 303 testes API + 12 web + 40 workflows; 300 casos B2 e 18 readiness
 simulados; 127 integrações PostgreSQL antes e depois do rollback/reaplicação
 até019, sem falhas. CI vinculado na tabela; a consolidação documental posterior
 também exige CI do próprio HEAD. Nenhuma execução paga ou transporte real.
+
+
+## Checkpoint 020 — durabilidade de áudio e intervenção
+
+Implementação e critérios de aceite em [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).
+Nova migration020; áudio/aviso antes do ACK, resultado persistido, leases/quarentena,
+retenção, disposição auditada e diagnóstico agregado. CI inclui PostgreSQL real,
+rollback protegido/compatível020–008 e reaplicação até020. Serviços externos
+simulados; versões fixadas e exports inativos. Nenhuma variável/credential nova.
+Publicação futura: todas as migrations pendentes (017–020 quando aplicável) antes
+da API; depois cinco workflows ainda inativos e homologação autorizada. B2 off.
+Não houve deploy/merge/envio/avaliação paga. V1 comercial continua incompleta.
