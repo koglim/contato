@@ -1,0 +1,704 @@
+{
+  "version": "b2-readiness-1",
+  "catalog": [
+    {
+      "key": "eletricista",
+      "name": "Eletricista",
+      "description": null
+    },
+    {
+      "key": "encanador",
+      "name": "Encanador",
+      "description": null
+    },
+    {
+      "key": "ar-condicionado",
+      "name": "Ar-condicionado",
+      "description": null
+    },
+    {
+      "key": "montador-de-moveis",
+      "name": "Montador de móveis",
+      "description": null
+    },
+    {
+      "key": "diarista",
+      "name": "Diarista",
+      "description": null
+    },
+    {
+      "key": "pintor",
+      "name": "Pintor",
+      "description": null
+    },
+    {
+      "key": "chaveiro",
+      "name": "Chaveiro",
+      "description": null
+    },
+    {
+      "key": "pequenos-reparos",
+      "name": "Pequenos reparos",
+      "description": null
+    }
+  ],
+  "cases": [
+    {
+      "id": "readiness-01",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Pode procurar um encanador em Sinop?"
+      ],
+      "initial": "empty",
+      "message": "Pode procurar um encanador em Sinop?",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [],
+        "location": {
+          "text": "Sinop",
+          "evidence": "Sinop"
+        },
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-02",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Preciso de eletricista em Vera, consegue me ajudar?"
+      ],
+      "initial": "empty",
+      "message": "Preciso de eletricista em Vera, consegue me ajudar?",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [],
+        "location": {
+          "text": "Vera",
+          "evidence": "Vera"
+        },
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": "Eletricista",
+        "location": "Vera",
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-03",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Vocês trabalham com encanadores?"
+      ],
+      "initial": "empty",
+      "message": "Vocês trabalham com encanadores?",
+      "oracle": {
+        "intent": "catalog_info",
+        "speech_act": "information",
+        "services": [
+          {
+            "key": "encanador",
+            "evidence": "encanadores"
+          }
+        ],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "catalog_info",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-04",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Talvez eu precise de encanador"
+      ],
+      "initial": "empty",
+      "message": "Talvez eu precise de encanador",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "hypothetical",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "clarify",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-05",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Preciso de encanador",
+        "Não quero mais encanador"
+      ],
+      "initial": "empty",
+      "message": "Não quero mais encanador",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "negated",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "clarify",
+      "failure": null,
+      "setup": [
+        {
+          "message": "Preciso de encanador",
+          "oracle": {
+            "intent": "search",
+            "speech_act": "request",
+            "services": [],
+            "location": null,
+            "uncertain": false
+          },
+          "explicit_service": null
+        }
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-06",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Minha descarga não para de correr"
+      ],
+      "initial": "empty",
+      "message": "Minha descarga não para de correr",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [
+          {
+            "key": "encanador",
+            "evidence": "descarga não para de correr"
+          }
+        ],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "clarify",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      },
+      "composition": "valid",
+      "expected_target": "service_confirmation"
+    },
+    {
+      "id": "readiness-07",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Preciso de encanador em Sinop",
+        "Pode mandar meu contato?"
+      ],
+      "initial": "empty",
+      "message": "Pode mandar meu contato?",
+      "oracle": {
+        "intent": "selection",
+        "speech_act": "request",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "delegate",
+      "failure": null,
+      "setup": [
+        {
+          "message": "Preciso de encanador em Sinop",
+          "oracle": {
+            "intent": "search",
+            "speech_act": "request",
+            "services": [],
+            "location": {
+              "text": "Sinop",
+              "evidence": "Sinop"
+            },
+            "uncertain": false
+          },
+          "explicit_service": null
+        }
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-08",
+      "category": "composition",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Pode buscar um encanador?"
+      ],
+      "initial": "empty",
+      "message": "Pode buscar um encanador?",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      },
+      "composition": "valid",
+      "expected_target": "location"
+    },
+    {
+      "id": "readiness-09",
+      "category": "composition",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Pode buscar um encanador?"
+      ],
+      "initial": "empty",
+      "message": "Pode buscar um encanador?",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      },
+      "composition": "invalid",
+      "expected_target": "location"
+    },
+    {
+      "id": "readiness-10",
+      "category": "composition",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Pode buscar um encanador?"
+      ],
+      "initial": "empty",
+      "message": "Pode buscar um encanador?",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      },
+      "composition": "unavailable",
+      "expected_target": "location"
+    },
+    {
+      "id": "readiness-11",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "É em Sinop"
+      ],
+      "initial": "empty",
+      "message": "É em Sinop",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [],
+        "location": {
+          "text": "Sinop",
+          "evidence": "Sinop"
+        },
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": "Sinop",
+        "hypotheses": []
+      },
+      "composition": "valid",
+      "expected_target": "service"
+    },
+    {
+      "id": "readiness-12",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Preciso de encanador em Sinop",
+        "Na verdade é em Vera"
+      ],
+      "initial": "empty",
+      "message": "Na verdade é em Vera",
+      "oracle": {
+        "intent": "correct_location",
+        "speech_act": "request",
+        "services": [],
+        "location": {
+          "text": "Vera",
+          "evidence": "Vera"
+        },
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [
+        {
+          "message": "Preciso de encanador em Sinop",
+          "oracle": {
+            "intent": "search",
+            "speech_act": "request",
+            "services": [],
+            "location": {
+              "text": "Sinop",
+              "evidence": "Sinop"
+            },
+            "uncertain": false
+          },
+          "explicit_service": null
+        }
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Vera",
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-13",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Preciso de encanador em Sinop",
+        "Na verdade preciso de eletricista"
+      ],
+      "initial": "empty",
+      "message": "Na verdade preciso de eletricista",
+      "oracle": {
+        "intent": "correct_service",
+        "speech_act": "request",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [
+        {
+          "message": "Preciso de encanador em Sinop",
+          "oracle": {
+            "intent": "search",
+            "speech_act": "request",
+            "services": [],
+            "location": {
+              "text": "Sinop",
+              "evidence": "Sinop"
+            },
+            "uncertain": false
+          },
+          "explicit_service": null
+        }
+      ],
+      "expected_slots": {
+        "service": "Eletricista",
+        "location": "Sinop",
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-14",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Minha pia está vazando",
+        "Quanto custa usar?"
+      ],
+      "initial": "empty",
+      "message": "Quanto custa usar?",
+      "oracle": {
+        "intent": "faq_cost",
+        "speech_act": "information",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "faq_cost",
+      "failure": null,
+      "setup": [
+        {
+          "message": "Minha pia está vazando",
+          "oracle": {
+            "intent": "search",
+            "speech_act": "request",
+            "services": [
+              {
+                "key": "encanador",
+                "evidence": "pia está vazando"
+              }
+            ],
+            "location": null,
+            "uncertain": false
+          },
+          "explicit_service": null
+        }
+      ],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-15",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Preciso de encanador",
+        "Me conte uma piada"
+      ],
+      "initial": "empty",
+      "message": "Me conte uma piada",
+      "oracle": {
+        "intent": "out_of_scope",
+        "speech_act": "request",
+        "services": [],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "out_of_scope",
+      "failure": null,
+      "setup": [
+        {
+          "message": "Preciso de encanador",
+          "oracle": {
+            "intent": "search",
+            "speech_act": "request",
+            "services": [],
+            "location": null,
+            "uncertain": false
+          },
+          "explicit_service": null
+        }
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-16",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Preciso de encanador",
+        "Ainda preciso de ajuda"
+      ],
+      "initial": "empty",
+      "message": "Ainda preciso de ajuda",
+      "oracle": null,
+      "explicit_service": null,
+      "expected": "fallback",
+      "failure": "unavailable",
+      "setup": [
+        {
+          "message": "Preciso de encanador",
+          "oracle": {
+            "intent": "search",
+            "speech_act": "request",
+            "services": [],
+            "location": null,
+            "uncertain": false
+          },
+          "explicit_service": null
+        }
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      },
+      "expected_target": null
+    },
+    {
+      "id": "readiness-17",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "A pia vaza e a tomada queimou"
+      ],
+      "initial": "empty",
+      "message": "A pia vaza e a tomada queimou",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [
+          {
+            "key": "encanador",
+            "evidence": "pia vaza"
+          },
+          {
+            "key": "eletricista",
+            "evidence": "tomada queimou"
+          }
+        ],
+        "location": null,
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "clarify",
+      "failure": null,
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador",
+          "Eletricista"
+        ]
+      },
+      "composition": "valid",
+      "expected_target": "service_confirmation"
+    },
+    {
+      "id": "readiness-18",
+      "category": "readiness",
+      "source": "synthetic-authored",
+      "transcript": [
+        "Preciso de encanador",
+        "Quanto custa usar?",
+        "É em Vera"
+      ],
+      "initial": "empty",
+      "message": "É em Vera",
+      "oracle": {
+        "intent": "search",
+        "speech_act": "request",
+        "services": [],
+        "location": {
+          "text": "Vera",
+          "evidence": "Vera"
+        },
+        "uncertain": false
+      },
+      "explicit_service": null,
+      "expected": "search",
+      "failure": null,
+      "setup": [
+        {
+          "message": "Preciso de encanador",
+          "oracle": {
+            "intent": "search",
+            "speech_act": "request",
+            "services": [],
+            "location": null,
+            "uncertain": false
+          },
+          "explicit_service": null
+        },
+        {
+          "message": "Quanto custa usar?",
+          "oracle": {
+            "intent": "faq_cost",
+            "speech_act": "information",
+            "services": [],
+            "location": null,
+            "uncertain": false
+          },
+          "explicit_service": null
+        }
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Vera",
+        "hypotheses": []
+      },
+      "expected_target": null
+    }
+  ]
+}

@@ -18,14 +18,14 @@ import { parseGlobalConversationCommand, parseSelectionConversationCommand } fro
 import { presentSelectionMessage } from "../selection-message/selection-message.presenter.js";
 import { presentGlobalConversationMessage } from "../global-conversation-commands/global-conversation-message.presenter.js";
 import { presentMatches } from "../message-presentation/message-presentation.service.js";
-import { safeOpportunityText, parseBilateralConfirmation } from "../bilateral-contact/bilateral-contact.policy.js";
+import { parseBilateralConfirmation } from "../bilateral-contact/bilateral-contact.policy.js";
 import { resolveProfessionalSelection } from "../selection-command/professional-selection.resolver.js";
-import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider, type ContextualReplyContext } from "./contextual.contract.js";
+import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider } from "./contextual.contract.js";
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
+import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText } from "./contextual.reply.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
-export const CONTEXTUAL_COST_POLICY = "Usar o ContatoCerto é gratuito para o cliente. O valor do serviço é combinado e pago diretamente ao profissional. Sua busca continua de onde parou.";
-const FALLBACK = "Não consegui entender sua mensagem com segurança agora. Sua busca foi preservada. Pode me dizer o que precisa ou o que quer corrigir?";
+export { CONTEXTUAL_COST_POLICY } from "./contextual.reply.js";
 const stripPrivate = (text: string) => text.replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/giu, "[email omitido]").replace(/\+?\d[\d\s().-]{7,}\d/gu, "[número omitido]").replace(/https?:\/\/\S+/gu, "[link omitido]");
 
 export class ContextualConversationService implements ContextualInboxHandler {
@@ -109,21 +109,24 @@ export class ContextualConversationService implements ContextualInboxHandler {
       }
       const captured = snapshot;
       let question = snapshot.draft;
-      const target: ContextualReplyContext["target"] | null = fallback ? null : decision.memory.hypotheses.length ? "service_confirmation"
-        : decision.kind === "search" && service?.status !== "resolved" ? "service"
-        : decision.kind === "search" && location?.status !== "resolved" ? "location" : null;
-      if (target && !question && this.provider.composeQuestion) {
+      const questionContext = fallback ? null : contextualQuestionContext(decision, service?.status === "resolved", location?.status === "resolved");
+      if (questionContext && !question && this.provider.composeQuestion) {
         try {
           await this.repository.reserveBudget(snapshot.customerId);
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             question = validateContextualQuestion(await Promise.race([
-              this.provider.composeQuestion({ target, services: decision.memory.hypotheses.length ? decision.memory.hypotheses.map(item => item.name) : decision.memory.service ? [decision.memory.service.value] : [], location: decision.memory.location?.value ?? null }),
+              this.provider.composeQuestion(questionContext),
               new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("contextual_question_timeout")), CONTEXTUAL_POLICY.timeoutMs); }),
-            ]));
+            ]), questionContext);
           } finally { clearTimeout(timer); }
           await this.repository.saveDraft(record, snapshot, question);
-        } catch (error) { if (error instanceof ContextualBusyError) throw error; question = null; }
+        } catch (error) {
+          if (error instanceof ContextualBusyError) throw error;
+          // A failed composer is also a completed wording decision. Reuse its fallback after a DB retry.
+          question = contextualClarificationText(questionContext);
+          await this.repository.saveDraft(record, snapshot, question);
+        }
       }
       return await this.repository.commit(record, captured, async client => {
         const execute = client.query.bind(client);
@@ -136,7 +139,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
         let matchIds: string[] = [];
         let status: Extract<ChannelInboundMessageResponse["result"], { route: "contextual" }>["status"] = "clarification";
         let result: CustomerSearchMessageResponse | ReturnType<typeof contextualMessageSchema.parse> | undefined;
-        let text = fallback ? FALLBACK : "Pode esclarecer o que você quer mudar ou qual opção quer escolher?";
+        let text = fallback ? CONTEXTUAL_FALLBACK : CONTEXTUAL_CLARIFY;
 
         if (!fallback && decision.kind === "delegate") {
           const router = new DefaultCustomerSearchRouter({ findOrCreateByPhoneE164: async () => ({ id: captured.customerId }) }, conversations,
@@ -156,13 +159,12 @@ export class ContextualConversationService implements ContextualInboxHandler {
           }
         } else if (!fallback && decision.kind === "faq_cost") {
           text = CONTEXTUAL_COST_POLICY; status = "information";
+        } else if (!fallback && decision.kind === "catalog_info") {
+          text = contextualCatalogText(decision.catalogServices ?? []); status = "information";
         } else if (!fallback && decision.kind === "out_of_scope") {
-          text = "Posso ajudar você a encontrar e escolher profissionais de serviços na sua região. Sua busca continua salva. Qual atendimento você precisa?"; status = "information";
+          text = CONTEXTUAL_SCOPE; status = "information";
         } else if (!fallback && memory.hypotheses.length) {
-          text = memory.hypotheses.length === 1
-            ? `Você precisa de ${safeOpportunityText(memory.hypotheses[0].name, 120)} para esse problema? Pode confirmar ou explicar melhor.`
-            : `Esse pedido pode envolver ${memory.hypotheses.map(item => safeOpportunityText(item.name, 120)).join(" ou ")}. Qual desses atendimentos você precisa?`;
-          text = question ?? text;
+          text = question ?? contextualClarificationText(questionContext!);
         } else if (!fallback && decision.kind === "search") {
           // Never change context underneath a pending consent or a page not yet acknowledged as sent.
           const pending = conversationId ? await execute(`SELECT c.id FROM search_conversations c WHERE c.id = $1 AND
@@ -180,12 +182,10 @@ export class ContextualConversationService implements ContextualInboxHandler {
                 processing_token = NULL, processing_started_at = NULL WHERE id = $1`, [conversationId]);
             }
             if (!memory.service || service?.status !== "resolved" || !service.match) {
-              status = "needs_service"; text = "Qual serviço você precisa? Pode me contar o que aconteceu.";
-              text = question ?? text;
+              status = "needs_service"; text = question ?? contextualClarificationText(questionContext!);
             } else if (!memory.location || location?.status !== "resolved" || !location.match) {
               status = "needs_location";
-              text = memory.location ? "Essa localização ainda não ficou clara. Pode informar a cidade e o estado ou um bairro de referência?" : `Em qual cidade você precisa de ${safeOpportunityText(memory.service.value, 120)}?`;
-              text = question ?? text;
+              text = question ?? contextualClarificationText(questionContext!);
             } else {
               const match = location.match;
               const matching = await new PostgresMatchingRepository(transaction).search({ raw_text: record.rawText,

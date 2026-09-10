@@ -60,7 +60,18 @@ jobs:
           git diff --exit-code -- workflows/n8n/shared-delivery.json workflows/n8n/outbox-dispatcher.json
 
       - name: B2 300 synthetic cases (mocked proposals, not model quality)
-        run: pnpm --filter @contatocerto/api eval:b2 --split=all
+        run: pnpm --filter @contatocerto/api eval:b2 --split=all --summary --report=b2-frozen-report.json
+
+      - name: B2 readiness interpretation and composition (mocked)
+        run: pnpm --filter @contatocerto/api eval:b2 --suite=readiness --summary --report=b2-readiness-report.json
+
+      - name: Save B2 synthetic evaluation traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b2-synthetic-evaluation-${{ github.sha }}
+          path: apps/api/b2-*-report.json
+          retention-days: 14
 
       - name: Apply all migrations
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up

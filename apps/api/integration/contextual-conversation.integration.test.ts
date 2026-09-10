@@ -15,9 +15,10 @@ const headers = { "x-internal-key": "b2-integration" };
 const basic = (overrides: Partial<ContextualProposal> = {}): ContextualProposal => ({ intent: "search", services: [], location: null, uncertain: false, ...overrides });
 
 test("B2 natural clarification is persisted before effects; retry does not regenerate", async () => {
+  for (const unavailable of [false, true]) {
   const f = await fixture();
   try {
-    f.setCompose(async input => { assert.equal(input.target, "location"); return { question: "Em qual cidade você precisa desse atendimento?" }; });
+    f.setCompose(async input => { assert.equal(input.target, "location"); if (unavailable) throw new Error("composer unavailable"); return { target: input.target, question: "Em qual cidade você precisa desse atendimento?" }; });
     await query(`CREATE FUNCTION b2_fail_outbound() RETURNS trigger AS $$ BEGIN
       IF NEW.recipient_phone_e164 = '${f.phone}' THEN RAISE EXCEPTION 'injected B2 outbox failure'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
     await query("CREATE TRIGGER b2_fail_outbound BEFORE INSERT ON channel_outbound_messages FOR EACH ROW EXECUTE FUNCTION b2_fail_outbound()");
@@ -27,7 +28,7 @@ test("B2 natural clarification is persisted before effects; retry does not regen
     const calls = f.calls(), compositions = f.compositions();
     await query("DROP TRIGGER b2_fail_outbound ON channel_outbound_messages"); await query("DROP FUNCTION b2_fail_outbound()");
     const retry = await f.receive(text, id); assert.equal(retry.statusCode, 200, retry.body);
-    assert.equal(retry.json().reply_text, "Em qual cidade você precisa desse atendimento?");
+    assert.equal(retry.json().reply_text, unavailable ? `Em qual cidade você precisa de ${f.name}?` : "Em qual cidade você precisa desse atendimento?");
     assert.equal(f.calls(), calls); assert.equal(f.compositions(), compositions);
     await f.sent(retry.json().outbound.id);
     const replay = await f.receive(text, id); assert.equal(replay.json().outbound.status, "sent");
@@ -35,6 +36,7 @@ test("B2 natural clarification is persisted before effects; retry does not regen
   } finally {
     await query("DROP TRIGGER IF EXISTS b2_fail_outbound ON channel_outbound_messages"); await query("DROP FUNCTION IF EXISTS b2_fail_outbound()");
     await f.cleanup();
+  }
   }
 });
 
@@ -106,6 +108,7 @@ test("B2 arrival FIFO includes an earlier inbound before its contextual handler 
 
 async function fixture() {
   const serviceId = randomUUID(), categoryId = randomUUID();
+  const serviceIds = [serviceId];
   const name = `Encanador${serviceId.replaceAll("-", "")}`;
   const phone = `+5566${BigInt(`0x${randomUUID().replaceAll("-", "").slice(0, 8)}`).toString().padStart(10, "0")}`;
   const professionalIds = [randomUUID(), randomUUID()];
@@ -151,17 +154,24 @@ async function fixture() {
       await client.query("DELETE FROM channel_inbound_messages WHERE phone_e164=$1", [phone]);
       await client.query("DELETE FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
       await client.query("DELETE FROM search_conversations WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
-      await client.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE service_id=$1)", [serviceId]);
-      await client.query("DELETE FROM search_requests WHERE service_id=$1", [serviceId]);
+      await client.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE service_id=ANY($1::uuid[]))", [serviceIds]);
+      await client.query("DELETE FROM search_requests WHERE service_id=ANY($1::uuid[])", [serviceIds]);
       await client.query("DELETE FROM customers WHERE phone_e164=$1", [phone]);
       await client.query("DELETE FROM professional_service_areas WHERE professional_id=ANY($1::uuid[])", [professionalIds]);
-      await client.query("DELETE FROM professional_services WHERE service_id=$1", [serviceId]);
+      await client.query("DELETE FROM professional_services WHERE service_id=ANY($1::uuid[])", [serviceIds]);
       await client.query("DELETE FROM professionals WHERE id=ANY($1::uuid[])", [professionalIds]);
-      await client.query("DELETE FROM services WHERE id=$1", [serviceId]);
+      await client.query("DELETE FROM services WHERE id=ANY($1::uuid[])", [serviceIds]);
       await client.query("DELETE FROM service_categories WHERE id=$1", [categoryId]);
     });
   };
-  return { name, phone, serviceId, app, receive, sent, state, cleanup, calls: () => calls, geoCalls: () => geoCalls, compositions: () => compositions,
+  const addService = async () => {
+    const id = randomUUID(), name = `Eletricista${id.replaceAll("-", "")}`;
+    serviceIds.push(id);
+    await query("INSERT INTO services(id,category_id,name,slug) VALUES ($1,$2,$3,$3)", [id, categoryId, name]);
+    for (const professionalId of professionalIds) await query("INSERT INTO professional_services(professional_id,service_id) VALUES ($1,$2)", [professionalId, id]);
+    return { id, name };
+  };
+  return { name, phone, serviceId, app, receive, sent, state, cleanup, addService, calls: () => calls, geoCalls: () => geoCalls, compositions: () => compositions,
     set: (fn: typeof next) => { next = fn; }, setCompose: (fn: NonNullable<typeof compose>) => { compose = fn; }, setGeo: (fn: typeof resolveLocation) => { resolveLocation = fn; } };
 }
 
@@ -187,6 +197,110 @@ test("B2 accepts city before service and no_matches keeps a valid active convers
       assert.equal(replay.statusCode, 200, replay.body); assert.equal(replay.json().duplicate, true);
       assert.equal(replay.json().outbound.id, service.json().outbound.id);
     } finally { await disabled.close(); }
+  } finally { await f.cleanup(); }
+});
+
+test("B2 polite questions use real catalog and location, but contact questions cannot bypass consent", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const result = await f.receive(`Pode procurar um ${f.name} em Sinop?`);
+    assert.equal(result.statusCode, 200, result.body); assert.equal(result.json().result.status, "matched");
+    assert.equal((await f.state()).memory.service.value, f.name); assert.equal((await f.state()).memory.location.value, "Sinop");
+    const calls = f.calls();
+    f.set(async () => basic({ intent: "selection", speech_act: "request" }));
+    for (const sent of [false, true]) {
+      if (sent) await f.sent(result.json().outbound.id);
+      const response = await f.receive("Pode mandar meu contato?"); assert.equal(response.statusCode, 200, response.body);
+      assert.doesNotMatch(response.json().reply_text, /\+55|enviei seu contato/i);
+      assert.equal((await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows.length, 0);
+    }
+    assert.ok(f.calls() >= calls); assert.equal(f.geoCalls(), 1);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 catalog questions and cost/scope interruptions preserve hypotheses without unnecessary composition", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ intent: "catalog_info", speech_act: "information", services: [{ key: f.name, evidence: f.name }] }));
+    const info = await f.receive(`Vocês trabalham com ${f.name}?`);
+    assert.equal(info.statusCode, 200, info.body); assert.equal(info.json().result.status, "information");
+    assert.match(info.json().reply_text, /O catálogo inclui/); assert.match(info.json().reply_text, /não confirma profissionais/);
+    assert.equal((await f.state()).id, null); assert.equal(f.geoCalls(), 0); assert.equal(f.compositions(), 0);
+    f.set(async () => basic({ services: [{ key: f.name, evidence: "pia vaza" }], speech_act: "request" }));
+    await f.receive("Minha pia vaza");
+    const before = await f.state(), compositions = f.compositions();
+    for (const intent of ["faq_cost", "out_of_scope", "catalog_info"] as const) {
+      f.set(async () => basic({ intent, speech_act: "information" }));
+      const response = await f.receive(intent === "faq_cost" ? "Quanto custa usar?" : "Uma dúvida antes de continuar");
+      assert.equal(response.statusCode, 200, response.body); assert.equal(response.json().result.status, "information");
+      assert.deepEqual((await f.state()).memory, before.memory); assert.equal(f.compositions(), compositions);
+    }
+    assert.equal(f.geoCalls(), 0);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 full Inbox journey asks missing fields, resumes after FAQ and corrects service and location", async () => {
+  const f = await fixture();
+  try {
+    const second = await f.addService();
+    f.setCompose(async input => { assert.equal(input.target, "location"); assert.equal(input.location, null); return { target: input.target, question: "Em qual cidade precisa desse atendimento?" }; });
+    f.set(async () => basic({ speech_act: "request" }));
+    const first = await f.receive(`Preciso de ${f.name}, consegue me ajudar?`);
+    assert.equal(first.json().result.status, "needs_location"); assert.equal(first.json().reply_text, "Em qual cidade precisa desse atendimento?");
+    const before = await f.state(), compositions = f.compositions();
+    f.set(async () => basic({ intent: "faq_cost", speech_act: "information" }));
+    const faq = await f.receive("Quanto custa usar?"); assert.match(faq.json().reply_text, /gratuito/);
+    assert.deepEqual((await f.state()).memory, before.memory); assert.equal(f.compositions(), compositions);
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const city = await f.receive("Em Sinop"); assert.equal(city.statusCode, 200, city.body); assert.equal(city.json().result.status, "matched");
+    await f.sent(city.json().outbound.id);
+    f.set(async () => basic({ intent: "correct_service", speech_act: "request" }));
+    const service = await f.receive(`Na verdade preciso de ${second.name}`); assert.equal(service.statusCode, 200, service.body);
+    assert.equal(service.json().result.status, "matched"); await f.sent(service.json().outbound.id);
+    const current = await f.state(); assert.equal(current.memory.service.value, second.name); assert.equal(current.memory.location.value, "Sinop");
+    assert.equal((await query("SELECT service_id FROM search_requests WHERE id=$1", [current.search_request_id])).rows[0].service_id, second.id);
+    f.set(async () => basic({ intent: "correct_location", speech_act: "request", location: { text: "Vera", evidence: "Vera" } }));
+    const key = randomUUID(), changed = await f.receive("Na verdade é em Vera", key);
+    assert.equal(changed.statusCode, 200, changed.body); assert.equal((await f.state()).memory.location.value, "Vera");
+    assert.equal((await f.state()).memory.service.value, second.name);
+    const calls = f.calls(), replay = await f.receive("Na verdade é em Vera", key);
+    assert.equal(replay.json().outbound.id, changed.json().outbound.id); assert.equal(f.calls(), calls); assert.equal(f.compositions(), compositions);
+    assert.equal(f.geoCalls(), 3);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 invalid or unavailable composition falls back without losing interpretation and persists once", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request" }));
+    for (const compose of [async () => ({ target: "location", question: "Já enviei seu contato, pode aguardar?" }),
+      async () => ({ target: "service", question: "Qual serviço você precisa?" }),
+      async () => { throw new Error("private composer outage"); }]) {
+      f.setCompose(compose);
+      const key = randomUUID(), text = `Preciso de ${f.name}`;
+      const result = await f.receive(text, key); assert.equal(result.statusCode, 200, result.body);
+      assert.equal(result.json().result.status, "needs_location"); assert.match(result.json().reply_text, /Em qual cidade/);
+      assert.doesNotMatch(result.json().reply_text, /private|enviei|\+55/);
+      assert.equal((await f.state()).memory.service.value, f.name);
+      const calls = f.calls(), compositions = f.compositions();
+      const replay = await f.receive(text, key); assert.equal(replay.json().outbound.id, result.json().outbound.id);
+      assert.equal(replay.json().reply_text, result.json().reply_text); assert.equal(f.calls(), calls); assert.equal(f.compositions(), compositions);
+    }
+    assert.equal(f.geoCalls(), 0);
+    assert.equal((await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 ambiguous location asks clarification instead of claiming matches", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", location: { text: "Centro", evidence: "Centro" } }));
+    f.setGeo(async input => ({ status: "unresolved", query: input.query, country_code: "BR", provider: "fake", candidates: [], match: null }));
+    f.setCompose(async input => { assert.equal(input.target, "location"); assert.equal(input.reason, "ambiguous"); assert.equal(input.location, "Centro"); return { target: input.target, question: "Esse centro fica em qual cidade e estado?" }; });
+    const response = await f.receive(`Preciso de ${f.name} no Centro?`); assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().result.status, "needs_location"); assert.equal(response.json().reply_text, "Esse centro fica em qual cidade e estado?");
+    assert.equal((await query("SELECT id FROM search_requests WHERE service_id=$1", [f.serviceId])).rows.length, 0);
   } finally { await f.cleanup(); }
 });
 
