@@ -18,13 +18,13 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | Inbox / Outbox | Parcial, estabilizada | Recibo/retenção 017, limite de abandono, FIFO independente e diagnóstico; recuperação Inbox/admin ainda pendentes |
 | Revalidação da primeira escolha | Corrigida (F04) | Status, serviço/catálogo, contato canônico e cobertura obrigatórios em nova seleção/apresentação |
 | Entrega n8n | Parcial / homologação pendente | Dois exports inativos testados; gateway de produção/versões ainda não fornecidos |
-| Conversa contextual híbrida | Parcial | Parser e fallback de localização; sem B2 completa |
+| Conversa contextual híbrida | Implementação B2 disponível, desligada | Memória/hipóteses, controlador, perguntas fundamentadas, persistência e corpus 300; modelo real/revisão humana pendentes |
 | Identidade e onboarding | Ausente | Acesso demonstrativo com profissional fixo |
 | Painel | Parcial | Allowlist no BFF fecha F02; status/telefone somente leitura; falta ownership individual |
 | Conclusão / avaliações | Ausente como jornada | Tabelas existem; estados e interfaces não |
 | Assinatura / cobrança | Ausente | Gateway, preço e políticas ainda pendentes de decisão |
 | Administração / operação | Parcial | Diagnóstico sem PII, logs sanitizados e runbook; papéis/alertas/recuperação auditada pendentes |
-| QA | Parcial | 276 API, 12 web, 7 workflows e 80 integrações; falta browser, carga e transporte real |
+| QA | Parcial | Baseline ampliado pela suíte B2 e corpus; resultados/SHA exatos no relatório B2; falta browser, carga, modelo e transporte reais |
 
 ## Entregas publicadas e evidência
 
@@ -37,14 +37,21 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | `41cea96` | Limite de autosserviço no servidor e formulário | [34403801659](https://github.com/koglim/contato/actions/runs/34403801659) |
 | `209bda7` | Diagnóstico agregado da fila | [34404276101](https://github.com/koglim/contato/actions/runs/34404276101) |
 | `1cd80a6` | Sanitização de logs e runbook operacional | [34404857753](https://github.com/koglim/contato/actions/runs/34404857753) |
+| `ba57af4` | B2: contexto, hipóteses, perguntas fundamentadas, recuperação, FIFO e corpus 300 | [34475297400](https://github.com/koglim/contato/actions/runs/34475297400) |
 
-Último checkpoint de código acima: `1cd80a6e699dbabdc64199a7b62026e72062e60a`.
+Checkpoint anterior à B2: `1cd80a6e699dbabdc64199a7b62026e72062e60a`.
 Lint, typecheck, build, 276 testes API + 12 web + 7 workflows passaram localmente
 e no CI. As 80 integrações PostgreSQL/PostGIS passaram duas vezes no CI: antes e
 depois de down compatível 017–008 e reaplicação 008–017. Rollbacks protegidos
 014/015/016/017 verificam preservação e falha esperada, não limpeza de evidências.
 Nenhuma migration foi executada em produção. O relatório da execução informa o
 SHA/CI final do HEAD, incluindo a consolidação documental posterior.
+
+Checkpoint de código B2: `ba57af48ae6db63806ff0adce488791c479cfa6b`.
+CI aprovado com 287 testes API, 12 web, 7 workflows, 300 casos simulados e 91
+integrações PostgreSQL antes/depois da reaplicação. Evidências, limites e gates
+estão em [B2_DELIVERY_REPORT.md](B2_DELIVERY_REPORT.md). Isto conclui a entrega
+técnica independente desta rodada, não a homologação conversacional ou a V1.
 
 ## Checkpoints e ordem
 
@@ -68,7 +75,8 @@ execução. Publicar commits para revisão/CI na branch de execução.
 
 [V1_ACCEPTANCE.md](V1_ACCEPTANCE.md) registra cada cenário T01–T60 com estado e
 evidência/pendência. A fase A foi concluída; B/C e a proteção F02 avançaram, mas
-essas fases não estão integralmente homologadas. B2 e D–I não foram concluídas.
+essas fases não estão integralmente homologadas. A implementação B2 foi adicionada;
+seu aceite conversacional real ainda está pendente. D–I não foram concluídas.
 
 ## Onde continuar
 
@@ -77,10 +85,11 @@ essas fases não estão integralmente homologadas. B2 e D–I não foram conclu�
    durável sem duplicar o envio imediato. Não reescrever a API bilateral pronta.
 2. Completar recuperação de Inbox/admin e política de obsolescência por finalidade;
    uma retenção não pode ser liberada apagando evidência. Instrumentar alertas.
-3. Iniciar B2 conforme o plano: memória confirmada separada de inferência, proposta
-   estruturada validada por controlador e candidatos reais, resposta persistida,
-   dataset de 300 casos com divisão reservada e avaliação autorizada. Nenhuma nova
-   chamada de IA nem seleção automática foi ativada neste checkpoint.
+3. Homologar B2: autorizar modelos/orçamento, executar comparação no development,
+   congelar configuração e avaliar heldout com revisão humana. Corpus e runner
+   estão em `apps/api/evaluations/b2`; controles e limites em
+   [B2_CONTEXTUAL_CONVERSATION.md](B2_CONTEXTUAL_CONVERSATION.md).
+   Não houve chamada paga nem ativação nesta execução.
 4. Identidade/onboarding: decidir canal e proteção de transporte OTP, então contas,
    sessões e ownership. O profissional fixo continua impedindo uso multiusuário.
 5. Prosseguir E–I: atendimento/avaliação, entitlement, gateway aprovado, painéis,
@@ -89,7 +98,11 @@ essas fases não estão integralmente homologadas. B2 e D–I não foram conclu�
 
 Release manual, configuração n8n, incidente/rollback e ensaio de backup estão em
 [OPERATIONS.md](OPERATIONS.md) e [workflows/n8n/README.md](../workflows/n8n/README.md).
-Não há nova variável API/web; migration 017 deve preceder a API deste checkpoint.
+Para B2, migration 018 deve preceder a API com a funcionalidade habilitada.
+Novas variáveis: `CONTEXTUAL_CONVERSATION_ENABLED=false` e
+`CONTEXTUAL_CONVERSATION_MODEL` (sem default); `OPENAI_API_KEY` é reutilizada.
+Publicar primeiro com B2 desligada, avaliar/homologar e só ativar mediante decisão
+manual. Nenhuma dessas ações em produção foi executada.
 
 ## Decisões e dependências externas
 

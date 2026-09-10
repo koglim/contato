@@ -32,7 +32,8 @@ confirmada como enviada ou consentimento pendente; não descarta silenciosamente
 
 Migration **018_add_contextual_conversation** cria memória confirmada com origem
 e inbound de evidência, hipóteses separadas, revisão, lease, turnos idempotentes e
-orçamentos. `down` bloqueia com `P0018` se existirem memórias/turnos; nunca apaga
+orçamentos. `down` bloqueia com `P0018` se existirem memórias/turnos ou inbounds
+marcados `contextual_queue=true`; nunca apaga
 histórico para permitir downgrade. Migrations 001–017 não foram editadas.
 
 O inbound novo recebe `contextual_queue=true` no INSERT original, antes do handler.

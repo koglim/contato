@@ -1,4 +1,4 @@
-# Matriz de aceite V1 — checkpoint de estabilização
+# Matriz de aceite V1 — estabilização e B2
 
 IDs do plano fornecido por Ricardo. **Aprovado (automatizado)** significa teste
 do escopo descrito, não homologação de n8n/WhatsApp nem aprovação comercial.
@@ -12,8 +12,8 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 
 | ID | Cenário | Estado e evidência/pendência |
 | --- | --- | --- |
-| T01 | Serviço e cidade juntos | Parcial: fluxo determinístico existente; interpretação B2 pendente |
-| T02 | Falta serviço/cidade | Parcial: conversas existentes; redação contextual pendente |
+| T01 | Serviço e cidade juntos | Aprovado no controlador/Inbox B2 com provider simulado e PostgreSQL; qualidade do modelo real pendente |
+| T02 | Falta serviço/cidade | Aprovado automatizado: slots independentes e pergunta somente sobre o campo faltante; revisão humana da redação pendente |
 | T03 | Aspas/emoji/multiline | Aprovado no contrato puro de transporte; homologação do gateway pendente |
 | T04 | Texto/resposta citada | Parcial: normalização testada; gateway instalado não executado |
 | T05 | Áudio/limites/falhas | Não executado; falta export/versão do gateway e transporte de mídia |
@@ -55,23 +55,23 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T41 | Anonimização/retenção | Parcial: logs sanitizados; política de expurgo/dados imutáveis pendente |
 | T42 | Backup/restauração | Não executado; runbook sem alegação de ensaio realizado |
 | T43 | Carga/providers lentos | Parcial: testes de corrida/leases; carga e SLOs não medidos |
-| T44 | Migrations/rollback | Aprovado no CI até 017, protegido com fingerprints, down compatível e reaplicação |
-| T45 | Regionalismos/abreviações | Não executado como avaliação B2 |
-| T46 | Problema sem profissão | Parcial: aliases/fallback atuais; sem compreensão contextual B2 |
-| T47 | Dados fora de ordem | Não executado como B2 |
-| T48 | Correção de contexto | Não implementado como B2 |
-| T49 | FAQ no meio da busca | Não implementado |
-| T50 | Rajada durante processamento | Parcial: leases/conflitos; fila contextual de entradas pendente |
-| T51 | Paráfrases de comandos | Parcial: resolvedores determinísticos atuais; B2 pendente |
-| T52 | Negação/hipótese/citação | Parcial: regressões de seleção existentes; avaliação semântica B2 pendente |
-| T53 | Prompt injection contextual | Não executado como B2; nenhuma nova IA ativada nesta rodada |
-| T54 | Redação com fatos críticos | Parcial: presenter determinístico preservado; geração contextual pendente |
-| T55 | IA lenta/indisponível | Parcial: fallback atual testado; controlador B2 pendente |
-| T56 | Replay depois de geração | Parcial: texto da Outbox persistido; decisão B2 ainda não existe |
-| T57 | Fora do escopo/suporte | Não implementado como B2 |
-| T58 | Local ambíguo | Parcial: resolução conservadora existente; avaliação B2 pendente |
-| T59 | Comparar modelos/prompts | Não executado; dataset 300 e avaliação autorizada pendentes |
-| T60 | Naturalidade contextual | Não executado; requer implementação B2 e revisão humana |
+| T44 | Migrations/rollback | CI B2 cobre 018, down protegido P0018, rollback compatível 018–008 e reaplicação; SHA exato no relatório |
+| T45 | Regionalismos/abreviações | Corpus B2 inclui casos sintéticos; execução com propostas simuladas não mede compreensão real |
+| T46 | Problema sem profissão | Aprovado automatizado: hipótese ligada ao catálogo real, confirmação antes da promoção; modelo real pendente |
+| T47 | Dados fora de ordem | Teste PostgreSQL B2 de cidade antes do serviço; preservação de slots e no_matches |
+| T48 | Correção de contexto | Aprovado automatizado: troca de cidade, nova busca, serviço/histórico preservados; revalidação geográfica simulada |
+| T49 | FAQ no meio da busca | Aprovado automatizado: política de gratuidade cadastrada em código, busca intacta e replay sem IA |
+| T50 | Rajada durante processamento | Fila durável, lease, fencing e retry ordenado testados; reprocessamento autônomo/admin permanece pendência operacional |
+| T51 | Paráfrases de comandos | Número/nome/comandos exatos reutilizam controlador existente, sem IA; paráfrases sensíveis não reconhecidas pedem esclarecimento |
+| T52 | Negação/hipótese/citação | Regressões determinísticas + corpus adversarial; recusa não equivale a descrição de defeito negado; avaliação real pendente |
+| T53 | Prompt injection contextual | Schema/evidência/catálogo, limites e ações restritas testados; resistência semântica universal não comprovada |
+| T54 | Redação com fatos críticos | Perguntas naturais limitadas a esclarecimento; preço/contato/opções/consentimento permanecem determinísticos; revisão humana pendente |
+| T55 | IA lenta/indisponível | Timeout, saída inválida, quota, fallback e memória preservada testados; nenhuma chamada externa real |
+| T56 | Replay depois de geração | Aprovado automatizado: proposta/rascunho persistidos antes dos efeitos, rollback forçado e retry sem regeneração |
+| T57 | Fora do escopo/suporte | Redirecionamento ao marketplace preserva estado; entendimento real de intenções ainda não avaliado |
+| T58 | Local ambíguo | Geocoder conserva decisão de ambiguidade; controlador não inventa UF/coordenadas; redação/geocoder reais pendentes |
+| T59 | Comparar modelos/prompts | Corpus 300 (210 dev/90 heldout) e runner pagos opt-in disponíveis; comparação real NÃO executada |
+| T60 | Naturalidade contextual | NÃO comprovada: requer avaliação real autorizada e revisão humana, separadas de testes de software |
 
 Nenhuma parte simulada acima autoriza lançamento comercial ou alteração automática
 de fluxos em produção. Não há assinatura, identidade individual ou avaliações
