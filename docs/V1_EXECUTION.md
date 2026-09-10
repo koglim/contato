@@ -17,7 +17,7 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | Resposta profissional e retomada | Implementado | Migration 015, recusa preserva outra busca |
 | Inbox / Outbox | Implementação de recuperação disponível; homologação pendente | 017/019: recibos, leases, FIFO, backoff, fencing, quarentena/admin e diagnóstico; consumidor agendado inativo |
 | Revalidação da primeira escolha | Corrigida (F04) | Status, serviço/catálogo, contato canônico e cobertura obrigatórios em nova seleção/apresentação |
-| Entrega n8n | Parcial / homologação pendente | Três exports inativos testados: entrega compartilhada, dispatcher Outbox e recovery Inbox; gateway/versões reais pendentes |
+| Entrega n8n | Candidato preparado / homologação pendente | Quatro exports inativos, gateway JWT/texto/áudio e shared; versões 1.123.21/2.3.7 conferidas no código; avisos de áudio e execução real pendentes |
 | Conversa contextual híbrida | Implementação B2 disponível, desligada | Memória/hipóteses, controlador, perguntas fundamentadas, persistência e corpus 300; modelo real/revisão humana pendentes |
 | Identidade e onboarding | Ausente | Acesso demonstrativo com profissional fixo |
 | Painel | Parcial | Allowlist no BFF fecha F02; status/telefone somente leitura; falta ownership individual |
@@ -97,9 +97,11 @@ seu aceite conversacional real ainda está pendente. D–I não foram concluída
 
 ## Onde continuar
 
-1. Obter versões de n8n/Evolution e export sanitizado do gateway atual. Conectar
-   em homologação o transporte compartilhado, autenticação, texto/áudio e entrada
-   durável sem duplicar o envio imediato. Não reescrever a API bilateral pronta.
+1. Homologar o candidato em [TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md):
+   versões/export foram fornecidos e analisados; quatro exports inativos preparados.
+   Rotacionar segredos encontrados no export original, validar JWT/rede/áudio,
+   shared e recovery. Resolver/aceitar explicitamente a exceção de durabilidade
+   dos avisos e reentregas de áudio antes de operação pública. Não reescrever a API bilateral.
 2. Homologar recuperação Inbox/admin implementada na 019, incluindo reinício do
    consumidor e casos em quarentena. Completar administração da Outbox e política
    de obsolescência por finalidade; não liberar retenção apagando evidência.
@@ -128,7 +130,8 @@ consumidores durante a troca para 019; não manter réplicas antigas sem fencing
 
 ## Decisões e dependências externas
 
-- Confirmar versões e exports atuais de n8n/Evolution antes de homologar transporte.
+- Versões informadas: n8n 1.123.21, Evolution 2.3.7, community node 1.0.4.
+  Conferidas estaticamente; execução do motor/credenciais/rede reais ainda pendente.
 - Gateway e preço de assinatura, trial/carência e legado exigem decisão comercial.
 - Canal real de OTP, modalidade WhatsApp, opt-in/templates e credenciais devem ser
   configurados pelo operador; não usar entrega fictícia em produção.
@@ -138,3 +141,15 @@ consumidores durante a troca para 019; não manter réplicas antigas sem fencing
   disponíveis neste computador. Produção nunca é ambiente de teste.
 
 Classificação atual: núcleo funcional; **V1 comercial ainda não concluída**.
+
+## Checkpoint de transporte versionado
+
+Parte de `4dca0216a74714987a33a6ac856ce1b0e353d6f6`; sem mudanças de produção,
+corpus, API de negócio ou migrations. Acrescenta gateway inativo, JWT nativo,
+preservação texto/áudio, limites, confirmação conservadora da Evolution 2.3.7,
+HTTP fullResponse text para 204, testes do grafo e integração PostgreSQL com
+consumidores concorrentes. Export original não foi versionado por conter secrets.
+Nova Variable **n8n**: EVOLUTION_WEBHOOK_ORIGIN; nenhuma variável API/EasyPanel.
+As demais Variables/credentials e riscos estão no runbook do transporte.
+Homologação manual, durabilidade de mídia/avisos e alertas continuam gates,
+não resultados comprovados pelo CI. B2 permanece desligada.

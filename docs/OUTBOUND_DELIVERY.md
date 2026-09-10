@@ -57,7 +57,7 @@ ativo continua protegido pelos endpoints internos; o hash não é devolvido.
 Recibos legados ausentes não são inventados: claim de mensagem antiga `sent`
 encerra, mas uma confirmação antiga sem recibo não ganha autorização retroativa.
 
-Aplicar 017 manualmente antes desta versão da API. Não executar migrations no
+Aplicar todas as migrations pendentes, inclusive 017, 018 e 019, antes da API. Não executar migrations no
 startup. Down bloqueia com `P0017 / OUTBOUND_RECEIPT_ROLLBACK_BLOCKED` se houver
 recibo ou retenção. Usar roll-forward ou restauração integral validada; nunca
 limpar evidências de produção para liberar rollback.
@@ -79,5 +79,23 @@ Consultar a semântica dos contadores em [API.md](API.md). Começar a investiga�
 quando houver retenção/dead-letter ou crescimento persistente da idade/pendências;
 não disparar um novo envio apenas com base nessas contagens.
 
-Alertas, dashboard operacional, obsolescência, recuperação de Inbox e homologação
-n8n continuam pendentes na matriz [V1_EXECUTION.md](V1_EXECUTION.md).
+Recuperação da Inbox está implementada na 019, com consumidor inativo. Alertas,
+dashboard operacional, obsolescência e homologação n8n continuam pendentes na
+matriz [V1_EXECUTION.md](V1_EXECUTION.md).
+
+## Transporte fixado em Evolution 2.3.7 / n8n 1.123.21
+
+Quatro exports inativos preparados; gateway e dispatcher usam Shared Outbox
+Delivery. HTTP completo como text/body evita erro no 204 vazio. Sucesso exige
+key.id/fromMe/remoteJid; 400 genérico pode ocorrer **após** envio nessa versão.
+Somente rejeição de autenticação comprovada pelo envelope do authGuard vira
+failed; demais erros incertos, inclusive 429 sem prova, ficam em hold. Não
+classificar timeout como rejeição. Todas as finalidades continuam preservadas.
+
+Aviso técnico de áudio não transcrito é exceção one-shot fora da Outbox, sem
+retry automático; não é mensagem de negócio. Durabilidade/deduplicação desse
+aviso exige decisão antes do público. Detalhes, fontes, riscos e runbook em
+[TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md). Execuções n8n não guardam
+payloads; não depender de um dump para reconciliar. Se a API cair antes de gravar
+recibo/hold, pausar consumidores e coletar evidência restrita na origem; persiste
+o risco de queda na janela de envio externo, sem garantia exactly-once.

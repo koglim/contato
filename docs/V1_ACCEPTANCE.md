@@ -16,9 +16,9 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T02 | Falta serviço/cidade | Aprovado automatizado: slots independentes e pergunta somente sobre o campo faltante; revisão humana da redação pendente |
 | T03 | Aspas/emoji/multiline | Aprovado no contrato puro de transporte; homologação do gateway pendente |
 | T04 | Texto/resposta citada | Parcial: normalização testada; gateway instalado não executado |
-| T05 | Áudio/limites/falhas | Não executado; falta export/versão do gateway e transporte de mídia |
+| T05 | Áudio/limites/falhas | Contratos/grafo simulados: até120s, Groq/OpenAI, saída única; áudio real e durabilidade dos avisos/reentregas pendentes, ver TRANSPORT_HOMOLOGATION.md |
 | T06 | Próprio/grupo/evento inválido | Parcial: normalizador ignora; integração no webhook pendente |
-| T07 | Autenticidade do webhook | Não executado; chave interna da API não autentica origem Evolution |
+| T07 | Autenticidade do webhook | Gateway inativo usa JWT HS256 nativo compatível com tags 2.3.7/1.123.21; claims/envelope testados; prova criptográfica no motor/rede real pendente. JWT não assina o body |
 | T08 | Replay do inbound | Aprovado automatizado: Inbox, contato/Outbox únicos e conteúdo persistido |
 | T09 | ID com payload conflitante | Conflito sem sobrescrita, quarentena/auditoria e FIFO bloqueado até disposição; evidência 019 em INBOX_RECOVERY.md |
 | T10 | Fila vazia | Aprovado automatizado: 204 na API e gate não autoriza transporte |
@@ -76,3 +76,10 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 Nenhuma parte simulada acima autoriza lançamento comercial ou alteração automática
 de fluxos em produção. Não há assinatura, identidade individual ou avaliações
 prontas para usuários finais neste checkpoint.
+
+Checkpoint transporte: gateway/dispatcher disputam a mesma Outbox em teste
+PostgreSQL; hold impede retry mesmo após lease expirada. Exports sem secrets e
+sem gravação de dados de execução. Compatibilidade estática por tag e matriz dos
+32 casos em [TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md). Simulação
+de grafo não é motor n8n. Exceção de aviso de áudio direto não oferece recibo
+durável; não contar como aprovação de exactly-once. Nenhum envio real realizado.

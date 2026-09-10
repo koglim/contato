@@ -4,6 +4,12 @@ Base: `916dbf6d004ab85e816be554cec0095457da0e9a`, branch
 `codex/marketplace-v1-completion`. Implementação independente de n8n instalado,
 B2 desligada por padrão. Não significa homologação do transporte nem V1 pronta.
 
+Atualização de transporte: gateway JWT inativo foi preparado para n8n 1.123.21 /
+Evolution 2.3.7. O consumidor recovery conserva endpoints/budget e não envia
+mensagens; HTTP completo usa text/body para aceitar 204 vazio. O dispatcher
+compartilhado entrega saídas recuperadas. Ver [TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md).
+Nenhuma alteração na API de recuperação ou migration 019 neste checkpoint.
+
 ## Evidência do checkpoint
 
 Código validado: `103a7cb76bdef3d16a6e752bb170e7196d9eed4b`,

@@ -5,6 +5,15 @@ tenham sido executados. A matriz [V1_ACCEPTANCE.md](V1_ACCEPTANCE.md) registra a
 evidência disponível. Nenhuma operação deste documento deve usar produção como
 ambiente de teste.
 
+O próximo ensaio de transporte já tem candidato versionado para **n8n 1.123.21 /
+Evolution 2.3.7**, quatro exports inativos e runbook específico em
+[TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md). Antes de importar,
+rotacionar segredos encontrados no export original; configurar JWT dedicado,
+Variables/credentials, borda/TLS e alertas sanitizados. Não salvar dados de
+execução/binary/headers. A exceção de aviso de áudio direto não é durável entre
+webhooks; exige decisão explícita antes da operação pública. Nenhuma variável
+API ou migration nova; nova Variable n8n: EVOLUTION_WEBHOOK_ORIGIN.
+
 ## Logs e diagnóstico
 
 A API registra request ID gerado no servidor, método, padrão de rota (não URL
@@ -94,7 +103,8 @@ iniciais e significados estão em [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
    telefone somente leitura; isso ainda não oferece identidade multiusuário.
 5. Importar exports **inativos** e configurar credenciais/parâmetros conforme
    [workflows/n8n/README.md](../workflows/n8n/README.md). Conferir versão e export do
-   gateway antes de substituir seu ramo de transporte.
+   gateway antes de substituir seu ramo de transporte; usar o novo gateway
+   inativo e o runbook específico, preservando instance:key.id histórico.
 6. Homologar gateway + dispatcher + recovery, números distintos, queda/lease/FIFO,
    quarentena/admin e ausência de duplicação lógica. Ativar somente com autorização.
 
