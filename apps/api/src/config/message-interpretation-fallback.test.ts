@@ -15,6 +15,12 @@ test("message interpretation fallback configuration is disabled by default", () 
   });
 });
 
+test("blank optional OpenAI key from env example does not prevent disabled startup", () => {
+  for (const OPENAI_API_KEY of ["", "   "]) {
+    assert.deepEqual(readMessageInterpretationFallbackConfig({ OPENAI_API_KEY }), readMessageInterpretationFallbackConfig({}));
+  }
+});
+
 test("message interpretation fallback permits enabled startup without an API key", () => {
   assert.deepEqual(readMessageInterpretationFallbackConfig({
     MESSAGE_INTERPRETATION_FALLBACK_ENABLED: "TRUE",

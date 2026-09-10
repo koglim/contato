@@ -9,6 +9,19 @@ type MediaRow={id:string;inbound_id:string;event_fingerprint:string;media_hash:s
   result_token_hash:string|null;notice_outbound_id:string|null};
 const summary=(row:MediaRow,duplicate=false)=>mediaSummarySchema.parse({id:row.id,status:row.status,duplicate});
 
+// Lock order is always media then Inbox. A text/payload conflict or an operator
+// decision fences transcription as well as domain processing. Retention must
+// still purge bytes, but cannot close/reopen the Inbox or manufacture a notice.
+async function livePlaceholder(db:DatabaseClient,row:MediaRow) {
+  const inbound=(await db.query<{status:string;recovery_state:string;media_pending:boolean}>(
+    'SELECT status,recovery_state,media_pending FROM channel_inbound_messages WHERE id=$1 FOR UPDATE',[row.inbound_id])).rows[0];
+  if(inbound?.status==='received' && inbound.recovery_state==='active' && inbound.media_pending) return true;
+  await db.query(`UPDATE channel_media_events SET status='quarantined',processing_token=NULL,lease_expires_at=NULL,
+    media_bytes=NULL,purged_at=COALESCE(purged_at,clock_timestamp()),purge_reason=COALESCE(purge_reason,'quarantined'),
+    last_error_code='inbound_unavailable' WHERE id=$1`,[row.id]);
+  return false;
+}
+
 async function quarantine(db:DatabaseClient,row:MediaRow,reason:'payload_conflict'|'transcript_conflict',hash:string) {
   await db.query(`UPDATE channel_media_events SET status='quarantined',processing_token=NULL,lease_expires_at=NULL,
     media_bytes=NULL,purged_at=COALESCE(purged_at,clock_timestamp()),purge_reason=COALESCE(purge_reason,'quarantined'),last_error_code=$2 WHERE id=$1`,[row.id,reason]);
@@ -19,6 +32,7 @@ async function quarantine(db:DatabaseClient,row:MediaRow,reason:'payload_conflic
 }
 
 async function notice(db:DatabaseClient,row:MediaRow,reason:keyof typeof MEDIA_NOTICES,purgeReason='completed') {
+  if(!await livePlaceholder(db,row)) return summary({...row,status:'quarantined'});
   const inbound=(await db.query<{provider:string;phone_e164:string}>(`SELECT provider,phone_e164 FROM channel_inbound_messages WHERE id=$1`,[row.inbound_id])).rows[0];
   const outbound=await createIndependentOutbound(db,{businessKey:`channel-media:${row.id}`,purpose:'channel_notice',provider:inbound.provider,
     recipientPhoneE164:inbound.phone_e164,textContent:MEDIA_NOTICES[reason]});
@@ -60,6 +74,7 @@ export class ChannelMediaService {
         AND (status='pending' OR (status='processing' AND lease_expires_at<=clock_timestamp()))
         ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`,[MEDIA_MAX_ATTEMPTS])).rows[0];
       if (!row) return null;
+      if(!await livePlaceholder(db,row)) return null;
       const token=randomUUID();
       await db.query(`UPDATE channel_media_events SET status='processing',processing_token=$2,
         lease_expires_at=clock_timestamp()+($3*INTERVAL '1 second'),attempt_count=attempt_count+1 WHERE id=$1`,[row.id,token,MEDIA_LEASE_SECONDS]);
@@ -84,6 +99,7 @@ export class ChannelMediaService {
         return {response:summary(row,true)};
       }
       if (row.status!=='processing' || row.processing_token!==input.processing_token || !row.lease_expires_at || row.lease_expires_at.getTime()<=Date.now()) return {error:'media_claim_invalid'};
+      if(!await livePlaceholder(db,row)) return {error:'media_claim_invalid'};
       await db.query('UPDATE channel_media_events SET result_token_hash=$2 WHERE id=$1',[id,tokenHash]);
       if (input.result.status==='failed') return {response:await notice(db,row,'transcription_unavailable')};
       const changed=await db.query(`UPDATE channel_inbound_messages SET raw_text=$2,media_pending=FALSE WHERE id=$1 AND media_pending AND status='received' AND recovery_state='active' RETURNING id`,[row.inbound_id,input.result.text]);

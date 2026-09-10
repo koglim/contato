@@ -24,7 +24,7 @@ export function classifyMedia(input:{audio_base64:string;mime_type:string;durati
     'audio/mpeg':signature?.toString('ascii',0,3)==='ID3' || (!!signature && signature[0]===255 && (signature[1]&224)===224),
   };
   if (!input.duration_seconds || input.duration_seconds>120) reason='audio_too_long';
-  else if (!(mime in valid)) reason='unsupported_format';
+  else if (!Object.hasOwn(valid,mime)) reason='unsupported_format';
   else if (!bytes || !bytes.length || bytes.length>MEDIA_MAX_BYTES || bytes.toString('base64')!==base64 || !valid[mime as keyof typeof valid]) reason='media_invalid';
   return {reason,mime,bytes:reason?null:bytes,hash:bytes?createHash('sha256').update(bytes).digest('hex'):fingerprint(base64)};
 }

@@ -24,7 +24,7 @@ export function readMessageInterpretationFallbackConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): MessageInterpretationFallbackConfig {
   const parsed = environmentSchema.safeParse({
-    OPENAI_API_KEY: environment.OPENAI_API_KEY,
+    OPENAI_API_KEY: environment.OPENAI_API_KEY?.trim() || undefined,
     MESSAGE_INTERPRETATION_FALLBACK_ENABLED:
       environment.MESSAGE_INTERPRETATION_FALLBACK_ENABLED?.trim().toLowerCase() ?? "false",
     MESSAGE_INTERPRETATION_FALLBACK_MODEL:

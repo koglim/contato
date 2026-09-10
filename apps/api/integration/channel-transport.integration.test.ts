@@ -39,6 +39,7 @@ async function fixture(){
 for(const [label,changes,reason] of [
   ['long',{duration_seconds:121},'audio_too_long'],['base64',{audio_base64:'@@@='},'media_invalid'],
   ['MIME',{mime_type:'text/html'},'unsupported_format'],['signature',{audio_base64:Buffer.from('not ogg').toString('base64')},'media_invalid'],
+  ['inherited MIME',{mime_type:'constructor'},'unsupported_format'],
 ] as const) test(`durable ${label} notice survives webhook replay, lost ACK and concurrent admission`,async()=>{
   const f=await fixture();try{
     const payload={...f.input,...changes};
@@ -158,6 +159,42 @@ test('abandoned media is bounded by three claims and retires with one notice',as
     for(let i=0;i<3;i++){assert.equal((await media.claimNext())?.id,id);await query("UPDATE channel_media_events SET lease_expires_at=clock_timestamp()-INTERVAL '1 second' WHERE id=$1",[id]);}
     assert.equal(await media.claimNext(),null);assert.equal((await f.state(id)).attempt_count,3);
     assert.equal((await f.state(id)).status,'failed');assert.equal((await f.state(id)).media_bytes,null);
+  }finally{await f.cleanup();}
+});
+
+for (const stage of ['claim','failed_result','transcribed_result','purge','closed_purge'] as const) test(`audio ${stage} cannot release an Inbox payload-conflict quarantine`,async()=>{
+  const f=await fixture();try{
+    const id=(await media.admit(f.input)).response!.id;
+    const claimed=stage.endsWith('_result')?await media.claimNext():null;
+    const row=await f.state(id);
+    const later=await inbox.createOrFind({...f.input,provider_message_id:randomUUID(),raw_text:'ajuda'});
+    const conflict=await f.post('/inbound/messages',{provider:f.provider,provider_message_id:f.input.provider_message_id,
+      phone_e164:f.phone,country_code:'BR',limit:3,raw_text:'texto conflitante'});
+    assert.equal(conflict.statusCode,409,conflict.body);
+    if(stage==='closed_purge') {
+      const closed=await f.post(`/inbound/${row.inbound_id}/disposition`,{request_id:randomUUID(),operator_id:randomUUID(),action:'close',reason:'unrecoverable'});
+      assert.equal(closed.statusCode,200,closed.body);
+    }
+    const before=(await query('SELECT * FROM channel_inbound_messages WHERE id=$1',[row.inbound_id])).rows[0];
+    assert.equal(before.recovery_state,stage==='closed_purge'?'closed':'quarantined');
+    if(stage==='claim') assert.equal(await media.claimNext(),null);
+    if(stage==='failed_result') await media.complete(id,transcriptionDecision({statusCode:503},claimed,true).payload);
+    if(stage==='transcribed_result') assert.equal((await media.complete(id,transcriptionDecision({statusCode:200,body:{text:'ajuda'}},claimed,false).payload)).error,'media_claim_invalid');
+    if(stage.endsWith('purge')) {
+      await query("UPDATE channel_media_events SET expires_at=clock_timestamp()-INTERVAL '1 second' WHERE id=$1",[id]);
+      assert.deepEqual(await media.purge(),{purged:1});
+    }
+    assert.deepEqual((await query('SELECT * FROM channel_inbound_messages WHERE id=$1',[row.inbound_id])).rows[0],before);
+    const after=await f.state(id);assert.equal(after.status,'quarantined');assert.equal(after.media_bytes,null);
+    assert.equal(after.notice_outbound_id,null);
+    assert.equal((await query('SELECT id FROM channel_outbound_messages WHERE provider=$1',[f.provider])).rows.length,0);
+    if(stage==='closed_purge') assert.ok(await inbox.claim(later.record.id,randomUUID(),60));
+    else {
+      assert.equal(await inbox.claim(later.record.id,randomUUID(),60),null);
+      const retry=await f.post(`/inbound/${row.inbound_id}/disposition`,{request_id:randomUUID(),operator_id:randomUUID(),action:'retry',reason:'payload_reviewed'});
+      assert.equal(retry.statusCode,409,retry.body);assert.equal(retry.json().error,'inbound_retry_unsafe');
+    }
+    assert.equal((await media.admit(f.input)).response?.status,'quarantined');
   }finally{await f.cleanup();}
 });
 

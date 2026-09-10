@@ -4,6 +4,23 @@ import { test } from 'node:test';
 import { buildApp } from '../../app.js';
 import { outboundDispositionSchema, mediaAdmissionSchema } from '@contatocerto/shared';
 
+test('transport parser errors retain safe 400, 413 and 415 responses without database access',async()=>{
+  const app=buildApp({internalApiKey:'transport-test'});
+  try {
+    for (const [contentType,payload,status] of [
+      ['application/json','{"private_audio":',400],
+      ['application/json',JSON.stringify({audio_base64:'A'.repeat(5*1024*1024)}),413],
+      ['application/x-private','private_audio',415],
+    ] as const) {
+      const response=await app.inject({method:'POST',url:'/internal/channel/media/events',
+        headers:{'x-internal-key':'transport-test','content-type':contentType},payload});
+      assert.equal(response.statusCode,status,response.body);
+      assert.deepEqual(response.json(),{error:'transport_input_invalid'});
+      assert.equal(response.headers['cache-control'],'no-store');
+    }
+  } finally {await app.close();}
+});
+
 test('all transport administration and media endpoints require the internal key before persistence',async()=>{
   const app=buildApp({internalApiKey:'transport-test'});
   try {

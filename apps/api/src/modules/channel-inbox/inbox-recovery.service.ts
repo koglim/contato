@@ -30,8 +30,8 @@ export class InboxRecoveryService {
 
   async dispose(id: string, input: InboxDisposition) {
     return withTransaction(async db => {
-      const record = (await db.query<{ status: string; recovery_state: string; recovery_reason: string; result: unknown }>(
-        "SELECT status,recovery_state,recovery_reason,result FROM channel_inbound_messages WHERE id=$1 FOR UPDATE", [id])).rows[0];
+      const record = (await db.query<{ status: string; recovery_state: string; recovery_reason: string; result: unknown; media_pending: boolean }>(
+        "SELECT status,recovery_state,recovery_reason,result,media_pending FROM channel_inbound_messages WHERE id=$1 FOR UPDATE", [id])).rows[0];
       if (!record) return { error: "inbound_not_found" as const };
       const prior = (await db.query<{ action: string; reason: string; operator_id: string }>(
         "SELECT action,reason,operator_id FROM channel_inbound_recovery_events WHERE inbound_id=$1 AND event_key=$2", [id, input.request_id])).rows[0];
@@ -41,7 +41,7 @@ export class InboxRecoveryService {
       }
       if (record.recovery_state !== "quarantined") return { error: "inbound_not_quarantined" as const };
       // No retry of completed/corrupt results or uncertain legacy effects; reconcile then close explicitly.
-      if (input.action === "retry" && (record.status === "processed" || record.result !== null
+      if (input.action === "retry" && (record.media_pending || record.status === "processed" || record.result !== null
         || ["legacy_effects_uncertain", "channel_message_result_invalid", "persisted_proposal_invalid", "persisted_draft_invalid"].includes(record.recovery_reason))) {
         return { error: "inbound_retry_unsafe" as const };
       }

@@ -3,6 +3,13 @@ import { test } from 'node:test';
 import { classifyMedia, MEDIA_NOTICES } from './channel-media.policy.js';
 
 const audio = { audio_base64: Buffer.from('OggS synthetic audio').toString('base64'), mime_type: 'audio/ogg', duration_seconds: 10 };
+test('MIME allowlist never accepts inherited object properties', () => {
+  for (const mime_type of ['constructor', '__proto__', 'toString']) {
+    const result = classifyMedia({...audio,mime_type});
+    assert.equal(result.reason,'unsupported_format',mime_type);
+    assert.equal(result.bytes,null);
+  }
+});
 test('media policy admits bounded audio and owns every notice', () => {
   assert.equal(classifyMedia(audio).reason, null);
   for (const [input, reason] of [
