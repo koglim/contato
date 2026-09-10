@@ -187,3 +187,27 @@ Próximo checkpoint é homologação manual, não V1 concluída. Permanecem pend
 motor n8n e mídia reais, fonte/duração real, carga/armazenamento/backups, alertas,
 reconciliação humana de transcrição divergente e eventual garantia de transporte
 do provider. B2 real somente mediante autorização, seguida de revisão humana.
+
+### Evidência de validação versionada
+
+Implementação ampliada validada em `25f1995e15e6e77d5d88bad06499cd77d0a383fb`,
+[Actions34505279126](https://github.com/koglim/contato/actions/runs/34505279126):
+instalação congelada, lint, typecheck, builds shared/API/Next.js, **306 testes API,
+12 web, 40 workflows, 144 integrações PostgreSQL antes e depois da reaplicação**.
+Migrations001–020, down protegidoP0020/P0016 e proteções anteriores, down compatível
+020→008 e reaplicação008→020 passaram. Exports reprodutíveis. B2: **300/300 +18/18
+simulados**, sem mudanças no corpus e sem custo/chamada de modelo.
+
+O primeiro run34504432263 expôs inferência incompatível do parâmetro SQL de status
+nas ações retry/close; a tipagem explícita foi corrigida, mantendo constraints.
+Run34504956564 passou143 integrações duas vezes; a ampliação posterior acima passou144.
+Revisão final acrescenta regressão para iniciar idade de um novo hold após retry,
+sem apagar o evento antigo. O commit dessa revisão deve ter seu próprio CI aprovado;
+a entrega informa o SHA/run exatos, não atribui o run acima a um HEAD diferente.
+
+Local: lint/typecheck/build/testes e avaliações simuladas passaram; PostgreSQL não
+está disponível neste computador e foi validado no serviço descartável do Actions.
+`git diff --check` e comparação da geração dos cinco JSONs passaram. Migrations
+anteriores, frontend, lockfile e variáveis de ambiente permaneceram intactos.
+Revisão de segurança orientou fencing, evidência obrigatória, auditoria imutável,
+limites de mídia e respostas sem PII. Nenhuma certificação de segurança é alegada.

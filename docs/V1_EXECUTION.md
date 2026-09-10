@@ -173,3 +173,9 @@ simulados; versões fixadas e exports inativos. Nenhuma variável/credential nov
 Publicação futura: todas as migrations pendentes (017–020 quando aplicável) antes
 da API; depois cinco workflows ainda inativos e homologação autorizada. B2 off.
 Não houve deploy/merge/envio/avaliação paga. V1 comercial continua incompleta.
+
+Evidência da020: `25f1995e15e6e77d5d88bad06499cd77d0a383fb`,
+[Actions34505279126](https://github.com/koglim/contato/actions/runs/34505279126),
+success: API306/web12/workflows40; PostgreSQL144×2, migrations/down/reaplicação020,
+B2 simulado300 e readiness18. Consolidação posterior deve conferir CI do próprio
+SHA; ver registro no runbook de durabilidade. Homologação real continua pendente.

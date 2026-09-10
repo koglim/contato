@@ -188,7 +188,11 @@ for(const action of ['confirm','retry','close','retain'] as const) test(`adminis
     if(action==='retry'){
       assert.ok(row.next_attempt_at>Date.now());
       await query("UPDATE channel_outbound_messages SET next_attempt_at=clock_timestamp()-INTERVAL '1 second' WHERE id=$1",[id]);
-      assert.equal((await outbox.claim(id,randomUUID(),60))?.attemptCount,2);
+      const retry=await outbox.claim(id,randomUUID(),60);assert.equal(retry?.attemptCount,2);
+      await query("UPDATE channel_outbound_messages SET delivery_held_at=clock_timestamp()-INTERVAL '1 hour' WHERE id=$1",[id]);
+      await outbox.holdDelivery(id,{processing_token:retry!.processingToken!,reason:'transport_outcome_unknown'});
+      const age=(await query('SELECT extract(epoch FROM clock_timestamp()-delivery_held_at)::float8 AS seconds FROM channel_outbound_messages WHERE id=$1',[id])).rows[0].seconds;
+      assert.ok(age<10,'a new hold measures its own age, while the prior hold remains in immutable audit');
     }
     const history=(await query('SELECT * FROM channel_transport_events WHERE outbound_id=$1 AND action=$2',[id,action])).rows;
     assert.equal(history.length,1);assert.equal(history[0].operator_id,payload.operator_id);

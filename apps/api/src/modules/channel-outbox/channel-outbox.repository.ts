@@ -355,7 +355,8 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
 
   async holdDelivery(id: string, input: { processing_token: string; reason: "transport_outcome_unknown" | "confirmation_pending"; provider_message_id?: string }) {
     const result = await this.execute<{ id: string }>(`WITH held AS (UPDATE channel_outbound_messages
-      SET delivery_hold_reason = $3, last_error_code = $3, delivery_held_at=COALESCE(delivery_held_at,clock_timestamp()),
+      SET delivery_hold_reason = $3, last_error_code = $3,
+        delivery_held_at=CASE WHEN delivery_hold_reason IS NULL THEN clock_timestamp() ELSE COALESCE(delivery_held_at,clock_timestamp()) END,
         provider_message_id=COALESCE(provider_message_id,$4)
       WHERE id = $1 AND status = 'processing' AND processing_token = $2
         AND (delivery_hold_reason IS NULL OR delivery_hold_reason = $3)
