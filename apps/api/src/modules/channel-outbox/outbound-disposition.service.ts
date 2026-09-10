@@ -34,9 +34,9 @@ export class OutboundDispositionService {
       } else if (input.action==='retain') {
         await db.query('UPDATE channel_outbound_messages SET processing_token=$2 WHERE id=$1',[id,token]);
       } else {
-        await db.query(`UPDATE channel_outbound_messages SET status=$2,delivery_hold_reason=NULL,processing_token=NULL,processing_started_at=NULL,
-          next_attempt_at=CASE WHEN $2='pending' THEN clock_timestamp()+($3*INTERVAL '1 second') ELSE NULL END,
-          administrative_closed_at=CASE WHEN $2='failed' THEN clock_timestamp() ELSE NULL END WHERE id=$1`,[id,status,outboxRetryBackoffSeconds(row.attempt_count)]);
+        await db.query(`UPDATE channel_outbound_messages SET status=$2::text::channel_outbound_message_status,delivery_hold_reason=NULL,processing_token=NULL,processing_started_at=NULL,
+          next_attempt_at=CASE WHEN $2::text='pending' THEN clock_timestamp()+($3*INTERVAL '1 second') ELSE NULL END,
+          administrative_closed_at=CASE WHEN $2::text='failed' THEN clock_timestamp() ELSE NULL END WHERE id=$1`,[id,status,outboxRetryBackoffSeconds(row.attempt_count)]);
       }
       await db.query(`INSERT INTO channel_transport_events(outbound_id,event_key,action,reason,operator_id,payload_hash,evidence_hash,provider_message_id,result)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,[id,input.request_id,input.action,input.reason,input.operator_id,hash,input.evidence_hash??null,input.provider_message_id??null,JSON.stringify(response)]);

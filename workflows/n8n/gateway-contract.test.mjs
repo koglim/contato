@@ -131,17 +131,17 @@ test("gateway export is authenticated, inactive, no duplicate delivery branch or
 // Small graph simulator: executes the generated Code/If nodes and item links.
 // HTTP, JWT verification, ConvertToFile, Respond and ExecuteWorkflow are mocked.
 // This does not claim to be the n8n engine or cryptographic authentication QA.
-function simulateGateway(input, responses = {}) {
-  const workflow=JSON.parse(readFileSync(new URL("gateway.json",import.meta.url),"utf8"));
+function simulateGateway(input, responses = {}, filename="gateway.json", start="Evolution webhook") {
+  const workflow=JSON.parse(readFileSync(new URL(filename,import.meta.url),"utf8"));
   const outputs=new Map(); const calls=[]; const acknowledgements=[];
-  let name="Evolution webhook", item={json:input};
+  let name=start, item={json:input};
   const vars={EVOLUTION_INSTANCE:config.instance,EVOLUTION_PROVIDER:config.provider,EVOLUTION_WEBHOOK_ORIGIN:config.origin};
   const evaluate=expression=>runInNewContext(expression.slice(3,-2),{$json:item.json});
   for(let steps=0;name && steps<60;steps++) {
     const node=workflow.nodes.find(n=>n.name===name); assert.ok(node,name);
     let port=0;
     if(node.type.endsWith(".code")) item=runInNewContext(`(() => { ${node.parameters.jsCode} })()`,{
-      $json:item.json,$vars:vars,$:n=>({item:outputs.get(n)}),Buffer,Date:class extends Date {static now(){return now*1000;}},
+      $json:item.json,$input:{all:()=>[item]},$vars:vars,$:n=>({item:outputs.get(n)}),Buffer,Date:class extends Date {static now(){return now*1000;}},
     });
     else if(node.type.endsWith(".if")) port=evaluate(node.parameters.conditions.conditions[0].leftValue)?0:1;
     else if(node.type.endsWith(".httpRequest")) {
@@ -150,6 +150,7 @@ function simulateGateway(input, responses = {}) {
     } else if(node.type.endsWith(".convertToFile")) item={json:{},binary:{data:{data:item.json.audio_base64}}};
     else if(node.type.endsWith(".respondToWebhook")) acknowledgements.push(typeof node.parameters.options.responseCode==="number"?node.parameters.options.responseCode:evaluate(node.parameters.options.responseCode));
     else if(node.type.endsWith(".executeWorkflow")) { calls.push({name,json:item.json}); item={json:claimDecision(item.json,config.provider)}; }
+    if(Array.isArray(item)){if(!item.length){name=undefined;break;}assert.equal(item.length,1);item=item[0];}
     outputs.set(name,item);
     const edges=workflow.connections[name]?.main?.[port]??[];
     assert.ok(edges.length<=1,"no fanout may duplicate audio/business messages");
@@ -176,6 +177,28 @@ test("generated audio path acknowledges only durable API admission, never sends 
     assert.deepEqual(result.acknowledgements,[503]);
     assert.deepEqual(result.calls.map(c=>c.name),["Persist media"]);
   }
+});
+
+for(const [label,primary,fallback,result] of [
+  ['primary',{statusCode:200,body:{text:'ajuda'}},null,'completed'],
+  ['fallback timeout',{error:'timeout'},{statusCode:200,body:{text:'ajuda'}},'completed'],
+  ['fallback empty',{statusCode:200,body:{text:''}},{statusCode:200,body:{text:'ajuda'}},'completed'],
+  ['both failed',{statusCode:503},{statusCode:500},'failed'],
+]) test(`generated durable media consumer ${label} persists exactly once and never sends`,()=>{
+  const claim={id:randomUUID(),processing_token:randomUUID(),media_hash:'a'.repeat(64),mime_type:'audio/ogg',audio_base64:Buffer.from('OggS fixture').toString('base64')};
+  const run=simulateGateway({}, {'Claim media':{statusCode:200,body:claim},'Transcribe Groq':primary,'Transcribe OpenAI fallback':fallback,
+    'Persist transcript':{statusCode:200,body:{id:claim.id,status:result,duplicate:false}}},'media-consumer.json','Schedule');
+  assert.equal(run.calls.filter(c=>c.name==='Persist transcript').length,1);
+  const submitted=run.calls.find(c=>c.name==='Persist transcript').json.payload;
+  assert.equal(submitted.processing_token,claim.processing_token);assert.equal(submitted.media_hash,claim.media_hash);
+  assert.equal(submitted.result.status,result==='completed'?'transcribed':'failed');
+  if(fallback)assert.ok(run.calls.find(c=>c.name==='Transcribe OpenAI fallback').binary.data);
+  assert.ok(!run.calls.some(c=>/Evolution|Inbox|Deliver/.test(c.name)));
+  assert.doesNotMatch(JSON.stringify(run.item),/audio_base64|phone|token|ajuda/);
+});
+test('generated media consumer stops at empty claim without external work',()=>{
+  const run=simulateGateway({}, {'Claim media':{statusCode:204,body:''}},'media-consumer.json','Schedule');
+  assert.deepEqual(run.calls.map(c=>c.name),['Claim media']);
 });
 
 test("generated gateway never claims on Inbox errors, conflict or missing Outbox",()=>{
