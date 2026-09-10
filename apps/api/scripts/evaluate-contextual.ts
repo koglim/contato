@@ -9,15 +9,17 @@ import { OpenAIContextualProvider } from "../src/modules/contextual-conversation
 
 const step = z.object({ message: z.string(), oracle: z.unknown(), explicit_service: z.string().nullable() });
 const caseSchema = z.object({ id: z.string(), category: z.string(), source: z.literal("synthetic-authored"), transcript: z.array(z.string()),
-  initial: z.string(), message: z.string(), oracle: z.unknown(), explicit_service: z.string().nullable(), expected: z.string(), failure: z.string().nullable(), setup: z.array(step) });
+  initial: z.string(), message: z.string(), oracle: z.unknown(), explicit_service: z.string().nullable(), expected: z.string(), failure: z.string().nullable(), setup: z.array(step),
+  expected_slots: z.object({ service: z.string().nullable(), location: z.string().nullable(), hypotheses: z.array(z.string()) }) });
 const schema = z.object({ version: z.literal("b2-eval-1"), split: z.enum(["development", "heldout"]), cases: z.array(caseSchema) });
 const args = process.argv.slice(2);
 const real = args.includes("--real");
 const selected = args.find(arg => arg.startsWith("--split="))?.slice(8) ?? "development";
 if (!["development", "heldout", "all"].includes(selected)) throw new Error("Unknown evaluation split");
 const model = args.find(arg => arg.startsWith("--model="))?.slice(8);
-if (real && (!args.includes("--authorize-paid-evaluation") || !model || !process.env.OPENAI_API_KEY)) {
-  throw new Error("Real evaluation requires explicit authorization flag, model and OPENAI_API_KEY; no request was made");
+const maxCalls = Number(args.find(arg => arg.startsWith("--max-calls="))?.slice(12));
+if (real && (!args.includes("--authorize-paid-evaluation") || !model || !process.env.OPENAI_API_KEY || !Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 1000)) {
+  throw new Error("Real evaluation requires authorization, model, OPENAI_API_KEY and --max-calls=1..1000; no request was made");
 }
 // No DB, search, selection, WhatsApp, or environment-default model invocation in this evaluator.
 const provider: ContextualProvider | null = real ? new OpenAIContextualProvider(model!, process.env.OPENAI_API_KEY!) : null;
@@ -32,6 +34,8 @@ const catalog = [{ key: "encanador", name: "Encanador", description: "Serviços 
   { key: "eletricista", name: "Eletricista", description: "Instalações elétricas" },
   { key: "pedreiro", name: "Pedreiro", description: "Alvenaria" }];
 const rows = [];
+let totalCalls = 0;
+const deadline = Date.now() + 15 * 60_000;
 for (const source of sources.filter(s => selected === "all" || s.split === selected)) {
   for (const sample of source.cases) {
     let memory = emptyMemory();
@@ -39,6 +43,8 @@ for (const source of sources.filter(s => selected === "all" || s.split === selec
     const started = Date.now();
     const interpret = async (message: string, oracle: unknown) => {
       if (!provider) return oracle;
+      if (totalCalls >= maxCalls || Date.now() >= deadline) throw new Error("evaluation_budget_exhausted");
+      totalCalls++;
       calls++;
       return provider.interpret({ message, service: memory.service?.value ?? null, location: memory.location?.value ?? null,
         pending: memory.location ? "selection" : "location", hypotheses: memory.hypotheses.map(h => h.name), catalog });
@@ -48,13 +54,15 @@ for (const source of sources.filter(s => selected === "all" || s.split === selec
       for (const setup of sample.setup) {
         memory = controlContextualProposal(setup.message, randomUUID(), await interpret(setup.message, setup.oracle), memory, catalog, setup.explicit_service).memory;
       }
-      if (sample.failure) throw new Error("injected_provider_unavailable");
-      const proposal = await interpret(sample.message, sample.oracle);
+      if (sample.failure === "unavailable") throw new Error("injected_provider_unavailable");
+      const proposal = sample.failure === "invalid_output" ? sample.oracle : await interpret(sample.message, sample.oracle);
       const explicit = (` ${normalizeContextualText(sample.message)} `).includes(" encanador ") ? "Encanador" : null;
       const result = controlContextualProposal(sample.message, randomUUID(), proposal, memory, catalog, explicit);
       actual = result.kind; memory = result.memory;
     } catch { error = "provider_or_contract_failure"; }
-    rows.push({ id: sample.id, category: sample.category, split: source.split, passed: actual === sample.expected, expected: sample.expected,
+    const slots = { service: memory.service?.value ?? null, location: memory.location?.value ?? null, hypotheses: memory.hypotheses.map(h => h.name) };
+    const slotsPassed = JSON.stringify(slots) === JSON.stringify(sample.expected_slots);
+    rows.push({ id: sample.id, category: sample.category, split: source.split, passed: actual === sample.expected && slotsPassed, slots_passed: slotsPassed, injected_failure: sample.failure, expected: sample.expected,
       actual, error, calls, duration_ms: Date.now() - started, confirmed_service: memory.service?.value ?? null, confirmed_location: memory.location?.value ?? null });
   }
 }

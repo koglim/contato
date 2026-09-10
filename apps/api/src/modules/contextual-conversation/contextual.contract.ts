@@ -45,7 +45,8 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   if (proposal.intent === "faq_cost" || proposal.intent === "out_of_scope") return { kind: proposal.intent, memory, correction: false };
   if (proposal.intent === "clarify" || proposal.uncertain) return { kind: "clarify", memory, correction: false };
   if (!proposal.services.length && !proposal.location && !explicitService) return { kind: "clarify", memory, correction: false };
-  if (/\?|\b(?:se|talvez|nao|ignore|prompt|instrucoes|sistema)\b/u.test(raw.includes("?") ? "?" : text)) return { kind: "clarify", memory, correction: false };
+  // A negated defect ("a descarga não para") is not a refusal ("não quero").
+  if (/\?|\b(?:se precisar|talvez|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(raw.includes("?") ? "?" : text)) return { kind: "clarify", memory, correction: false };
   if (proposal.services.some(item => !catalog.some(c => c.key === item.key) || !evidenceExists(item.evidence))
     || (proposal.location && (!evidenceExists(proposal.location.evidence) || !evidenceExists(proposal.location.text)))) {
     return { kind: "clarify", memory, correction: false };

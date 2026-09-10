@@ -23,14 +23,15 @@ significa 100% de entendimento da IA**, nem mede custo/latência do provedor.
 
 ## Execução real, somente após autorização específica
 
-`pnpm --filter @contatocerto/api eval:b2 --real --authorize-paid-evaluation --model=MODELO_APROVADO --split=development`
+`pnpm --filter @contatocerto/api eval:b2 --real --authorize-paid-evaluation --model=MODELO_APROVADO --max-calls=50 --split=development`
 
-Exige OPENAI_API_KEY, modelo explícito e flag de autorização. Definir antes um
+Exige OPENAI_API_KEY, modelo explícito, teto de chamadas e flag de autorização. Definir antes um
 orçamento e os modelos aprovados. Nunca executar automaticamente no CI. A flag
 é barreira técnica, não substitui a autorização do responsável. Cada conversa
 pode chamar o modelo em seus turnos de preparação; portanto, o total de chamadas
 é maior que o número de casos. Requisições têm timeout e limite de tokens, sem
-retry do SDK. Não há DB, WhatsApp, criação de contato ou ação de produção.
+retry do SDK, teto de 1.000 chamadas e janela máxima de 15 minutos por execução.
+Não há DB, WhatsApp, criação de contato ou ação de produção.
 
 O catálogo do avaliador é uma fixture curta de serviços existentes no seed, não
 um snapshot do catálogo inteiro de produção. Avaliação real final precisa também

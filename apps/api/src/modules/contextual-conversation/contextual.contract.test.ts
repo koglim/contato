@@ -21,6 +21,11 @@ test("B2 semantic catalog mapping is a hypothesis, not confirmed memory", () => 
   assert.equal(result.kind, "clarify"); assert.equal(result.memory.service, null);
   assert.equal(result.memory.hypotheses[0].name, "Encanador");
 });
+test("B2 describing a negated defect is not a refusal or cancellation", () => {
+  const result = run("A descarga não para de correr", proposal({ services: [{ key: "encanador", evidence: "A descarga não para de correr" }] }));
+  assert.equal(result.kind, "clarify"); assert.equal(result.memory.service, null);
+  assert.equal(result.memory.hypotheses[0].name, "Encanador");
+});
 test("B2 rejects invented service, evidence and inferred UF", () => {
   for (const value of [proposal({ services: [{ key: "inventado", evidence: "pia" }] }), proposal({ services: [{ key: "encanador", evidence: "cano furado" }] }), proposal({ location: { text: "Sinop, MT", evidence: "Sinop" } })]) {
     assert.equal(run("pia em Sinop", value).kind, "clarify");

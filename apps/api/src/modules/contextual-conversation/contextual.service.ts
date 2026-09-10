@@ -44,10 +44,12 @@ export class ContextualConversationService implements ContextualInboxHandler {
     try {
       snapshot = await this.repository.acquire(record, this.provider.model);
       const global = parseGlobalConversationCommand(record.rawText);
+      const recoveredSelection = !global && await new DefaultSelectionCommandService({ selectionMatchRepository: new PostgresSelectionMatchRepository() })
+        .recoverSelection(snapshot.customerId, record.id);
       const command = parseSelectionConversationCommand(record.rawText);
       const confirmation = normalizeContextualText(record.rawText);
       let namedSelection = false;
-      if (!global && snapshot.pendingSlot === "selection" && snapshot.conversationId) {
+      if (!global && !recoveredSelection && snapshot.pendingSlot === "selection" && snapshot.conversationId) {
         const current = await new PostgresSearchConversationRepository().findById(snapshot.conversationId);
         if (current?.searchRequestId) {
           const shown = await new PostgresSelectionMatchRepository().listShown(current.searchRequestId);
@@ -56,7 +58,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
       }
       let decision: ContextualDecision = { kind: "clarify", memory: snapshot.memory, correction: false };
       let fallback = false;
-      if (global || (snapshot.pendingSlot === "selection" && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null))) {
+      if (global || recoveredSelection || (snapshot.pendingSlot === "selection" && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null))) {
         decision = { kind: "delegate", memory: snapshot.memory, correction: false };
       } else if (snapshot.memory.hypotheses.length === 1 && /^(sim|isso|isso mesmo|confirmo)$/.test(confirmation)) {
         const hypothesis = snapshot.memory.hypotheses[0];
@@ -141,7 +143,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
             { start: async () => { throw new Error("Contextual delegation cannot start a search"); }, continueConversation: async () => { throw new Error("Contextual delegation cannot continue a search"); } },
             new DefaultSelectionCommandService({ selectionMatchRepository: new PostgresSelectionMatchRepository(execute, transaction) }),
             new DefaultGlobalConversationCommandService(new PostgresGlobalConversationCommandRepository(execute)));
-          if (global || captured.pendingSlot === "selection") {
+          if (global || recoveredSelection || captured.pendingSlot === "selection") {
             const routed = await router.route({ phone_e164: record.phoneE164, raw_text: record.rawText, country_code: record.countryCode, limit: record.limitValue, selectionKey: record.id });
             if (routed.kind !== "response") throw new ContextualBusyError();
             if (routed.response.route !== "selection" && routed.response.route !== "global_command") throw new Error("Unexpected contextual delegation");

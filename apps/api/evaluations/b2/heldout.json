@@ -23,7 +23,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-016",
@@ -46,7 +51,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-017",
@@ -69,7 +79,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-018",
@@ -92,7 +107,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-019",
@@ -115,7 +135,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-020",
@@ -138,7 +163,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-035",
@@ -158,7 +188,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-036",
@@ -178,7 +213,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-037",
@@ -198,7 +238,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-038",
@@ -218,7 +263,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-039",
@@ -238,7 +288,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-040",
@@ -258,7 +313,12 @@
       "explicit_service": "Encanador",
       "expected": "search",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-055",
@@ -307,7 +367,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Vera",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-056",
@@ -356,7 +421,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Vera",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-057",
@@ -405,7 +475,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Vera",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-058",
@@ -454,7 +529,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Vera",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-059",
@@ -503,7 +583,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Vera",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-060",
@@ -552,7 +637,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Vera",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-075",
@@ -577,7 +667,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-076",
@@ -602,7 +699,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-077",
@@ -627,7 +731,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-078",
@@ -652,7 +763,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-079",
@@ -677,7 +795,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-080",
@@ -702,7 +827,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-095",
@@ -748,7 +880,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-096",
@@ -794,7 +931,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-097",
@@ -840,7 +982,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-098",
@@ -886,7 +1033,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-099",
@@ -932,7 +1084,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-100",
@@ -978,7 +1135,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-115",
@@ -1024,7 +1186,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-116",
@@ -1070,7 +1237,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-117",
@@ -1116,7 +1288,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-118",
@@ -1162,7 +1339,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-119",
@@ -1208,7 +1390,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-120",
@@ -1254,7 +1441,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-135",
@@ -1274,7 +1466,12 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-136",
@@ -1294,7 +1491,12 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-137",
@@ -1314,7 +1516,12 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-138",
@@ -1334,7 +1541,12 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-139",
@@ -1354,7 +1566,12 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-140",
@@ -1374,7 +1591,12 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-155",
@@ -1420,7 +1642,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-156",
@@ -1466,7 +1693,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-157",
@@ -1512,7 +1744,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-158",
@@ -1558,7 +1795,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-159",
@@ -1604,7 +1846,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-160",
@@ -1650,7 +1897,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-175",
@@ -1696,7 +1948,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-176",
@@ -1742,7 +1999,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-177",
@@ -1788,7 +2050,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-178",
@@ -1834,7 +2101,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-179",
@@ -1880,7 +2152,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-180",
@@ -1926,7 +2203,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-195",
@@ -1972,7 +2254,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-196",
@@ -2018,7 +2305,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-197",
@@ -2064,7 +2356,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-198",
@@ -2110,7 +2407,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-199",
@@ -2156,7 +2458,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-200",
@@ -2202,7 +2509,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-215",
@@ -2248,7 +2560,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-216",
@@ -2294,7 +2611,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-217",
@@ -2340,7 +2662,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-218",
@@ -2386,7 +2713,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-219",
@@ -2432,7 +2764,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-220",
@@ -2478,7 +2815,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-235",
@@ -2503,7 +2845,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-236",
@@ -2528,7 +2877,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-237",
@@ -2553,7 +2909,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-238",
@@ -2578,7 +2941,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-239",
@@ -2603,7 +2973,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-240",
@@ -2628,7 +3005,14 @@
       "explicit_service": null,
       "expected": "clarify",
       "failure": null,
-      "setup": []
+      "setup": [],
+      "expected_slots": {
+        "service": null,
+        "location": null,
+        "hypotheses": [
+          "Encanador"
+        ]
+      }
     },
     {
       "id": "b2-255",
@@ -2688,7 +3072,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-256",
@@ -2748,7 +3137,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-257",
@@ -2808,7 +3202,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-258",
@@ -2868,7 +3267,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-259",
@@ -2928,7 +3332,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-260",
@@ -2988,7 +3397,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-275",
@@ -3010,7 +3424,7 @@
       },
       "explicit_service": null,
       "expected": "fallback",
-      "failure": null,
+      "failure": "invalid_output",
       "setup": [
         {
           "message": "Preciso de encanador",
@@ -3035,7 +3449,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-276",
@@ -3057,7 +3476,7 @@
       },
       "explicit_service": null,
       "expected": "fallback",
-      "failure": null,
+      "failure": "invalid_output",
       "setup": [
         {
           "message": "Preciso de encanador",
@@ -3082,7 +3501,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-277",
@@ -3104,7 +3528,7 @@
       },
       "explicit_service": null,
       "expected": "fallback",
-      "failure": null,
+      "failure": "invalid_output",
       "setup": [
         {
           "message": "Preciso de encanador",
@@ -3129,7 +3553,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-278",
@@ -3151,7 +3580,7 @@
       },
       "explicit_service": null,
       "expected": "fallback",
-      "failure": null,
+      "failure": "invalid_output",
       "setup": [
         {
           "message": "Preciso de encanador",
@@ -3176,7 +3605,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-279",
@@ -3198,7 +3632,7 @@
       },
       "explicit_service": null,
       "expected": "fallback",
-      "failure": null,
+      "failure": "invalid_output",
       "setup": [
         {
           "message": "Preciso de encanador",
@@ -3223,7 +3657,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-280",
@@ -3245,7 +3684,7 @@
       },
       "explicit_service": null,
       "expected": "fallback",
-      "failure": null,
+      "failure": "invalid_output",
       "setup": [
         {
           "message": "Preciso de encanador",
@@ -3270,7 +3709,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-295",
@@ -3316,7 +3760,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-296",
@@ -3362,7 +3811,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-297",
@@ -3408,7 +3862,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-298",
@@ -3454,7 +3913,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-299",
@@ -3500,7 +3964,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     },
     {
       "id": "b2-300",
@@ -3546,7 +4015,12 @@
           },
           "explicit_service": null
         }
-      ]
+      ],
+      "expected_slots": {
+        "service": "Encanador",
+        "location": "Sinop",
+        "hypotheses": []
+      }
     }
   ]
 }

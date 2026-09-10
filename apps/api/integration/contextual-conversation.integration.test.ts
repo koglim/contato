@@ -8,6 +8,7 @@ import { PostgresContextualRepository } from "../src/modules/contextual-conversa
 import { type ContextualProvider, type ContextualProposal } from "../src/modules/contextual-conversation/contextual.contract.js";
 import { PostgresChannelInboundMessageRepository } from "../src/modules/channel-inbox/channel-inbox.repository.js";
 import { rollbackThrough } from "./rollback-helper.js";
+import type { LocationResolutionService } from "../src/modules/location-resolution/location-resolution.types.js";
 
 after(closeDatabaseConnection);
 const headers = { "x-internal-key": "b2-integration" };
@@ -103,11 +104,11 @@ async function fixture() {
   let compositions = 0;
   const provider: ContextualProvider = { model: "unit-fake-no-model-call", async interpret(input) { calls++; return next(input.message); },
     async composeQuestion(input) { compositions++; if (!compose) throw new Error("no fake composer configured"); return compose(input); } };
-  const contextual = new ContextualConversationService(provider, { async resolve(input) {
-    geoCalls++;
+  let resolveLocation: LocationResolutionService["resolve"] = async input => {
     return { status: "resolved", query: input.query, country_code: "BR", provider: "fake", candidates: [],
       match: { label: input.query, latitude: -11.86, longitude: -55.5, city: input.query, state: "MT", country_code: "BR", neighborhood: null, confidence: 1, layer: "locality" } };
-  } });
+  };
+  const contextual = new ContextualConversationService(provider, { async resolve(input) { geoCalls++; return resolveLocation(input); } });
   const app = buildApp({ internalApiKey: "b2-integration", contextualConversation: contextual });
   const receive = (text: string, id = randomUUID()) => app.inject({ method: "POST", url: "/internal/channel/inbound/messages", headers,
     payload: { provider: "b2-test", provider_message_id: id, phone_e164: phone, raw_text: text } });
@@ -142,8 +143,33 @@ async function fixture() {
     });
   };
   return { name, phone, serviceId, app, receive, sent, state, cleanup, calls: () => calls, geoCalls: () => geoCalls, compositions: () => compositions,
-    set: (fn: typeof next) => { next = fn; }, setCompose: (fn: NonNullable<typeof compose>) => { compose = fn; } };
+    set: (fn: typeof next) => { next = fn; }, setCompose: (fn: NonNullable<typeof compose>) => { compose = fn; }, setGeo: (fn: typeof resolveLocation) => { resolveLocation = fn; } };
 }
+
+test("B2 accepts city before service and no_matches keeps a valid active conversation", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ location: { text: "Vera", evidence: "Vera" } }));
+    const city = await f.receive("É em Vera"); assert.equal(city.statusCode, 200, city.body);
+    assert.equal(city.json().result.status, "needs_service"); assert.equal((await f.state()).memory.location.value, "Vera");
+    assert.equal(f.geoCalls(), 0);
+    f.set(async () => basic());
+    f.setGeo(async input => ({ status: "resolved", query: input.query, country_code: "BR", provider: "fake", candidates: [],
+      match: { label: "Vera", latitude: -20, longitude: -50, city: "Vera", state: "MT", country_code: "BR", neighborhood: null, confidence: 1, layer: "locality" } }));
+    const service = await f.receive(f.name); assert.equal(service.statusCode, 200, service.body);
+    assert.equal(service.json().result.status, "no_matches");
+    const current = await f.state(); assert.equal(current.pending_slot, "location"); assert.equal(current.search_request_id, null);
+    assert.equal(current.memory.location.value, "Vera"); assert.equal(current.memory.service.value, f.name);
+    const disabled = buildApp({ internalApiKey: "b2-integration" });
+    try {
+      const inbound = (await query<{ provider_message_id: string }>("SELECT provider_message_id FROM channel_inbound_messages WHERE id=$1", [service.json().message_id])).rows[0];
+      const replay = await disabled.inject({ method: "POST", url: "/internal/channel/inbound/messages", headers,
+        payload: { provider: "b2-test", provider_message_id: inbound.provider_message_id, phone_e164: f.phone, raw_text: f.name } });
+      assert.equal(replay.statusCode, 200, replay.body); assert.equal(replay.json().duplicate, true);
+      assert.equal(replay.json().outbound.id, service.json().outbound.id);
+    } finally { await disabled.close(); }
+  } finally { await f.cleanup(); }
+});
 
 test("B2 real Inbox retains both slots, FAQ preserves context, correction revalidates and replay uses one Outbox", async () => {
   const f = await fixture();
@@ -185,6 +211,14 @@ test("B2 semantic hypothesis requires confirmation; selection uses shown candida
     assert.equal(chosen.json().result.result.kind, "selected");
     const replay = await f.receive("quero o segundo", selectionId);
     assert.equal(replay.json().outbound.id, chosen.json().outbound.id); assert.equal(replay.json().duplicate, true);
+    assert.equal((await query("SELECT COUNT(*)::int count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 1);
+    // Legacy partial processing can predate B2's atomic commit: selectionKey recovery must precede any interpretation.
+    await query("DELETE FROM channel_outbound_messages WHERE id=$1", [chosen.json().outbound.id]);
+    await query("UPDATE channel_inbound_messages SET status='failed', result=NULL WHERE id=$1", [chosen.json().message_id]);
+    const beforeRecoveryCalls = f.calls();
+    const recovered = await f.receive("quero o segundo", selectionId);
+    assert.equal(recovered.statusCode, 200, recovered.body); assert.equal(recovered.json().result.result.kind, "selected");
+    assert.equal(f.calls(), beforeRecoveryCalls);
     assert.equal((await query("SELECT COUNT(*)::int count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 1);
   } finally { await f.cleanup(); }
 });
