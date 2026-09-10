@@ -125,7 +125,8 @@ for (const candidateCount of [0, 1, 2, 3, 4, 6, 20, 25]) {
         return;
       }
       // While the initial page is pending, no second page may leapfrog it.
-      const premature = await current.receive("mostrar mais");
+      const prematureId = randomUUID();
+      const premature = await current.receive("mostrar mais", prematureId);
       assert.equal(premature.statusCode, 409, premature.body);
       await current.send(first.outbound.id, candidateCount === 20);
       assert.equal((await reader.getState(searchId)).shownMatchCount, Math.min(candidateCount, 3));
@@ -134,19 +135,27 @@ for (const candidateCount of [0, 1, 2, 3, 4, 6, 20, 25]) {
       assert.equal(replay.json().outbound.id, first.outbound.id);
       assert.equal(replay.json().reply_text, first.reply_text);
       const firstShown = (await reader.listShown(searchId)).map((match) => match.shownAt?.getTime());
+      await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE provider_message_id=$1 AND phone_e164=$2 AND next_attempt_at IS NOT NULL", [prematureId, current.phone]);
 
       if (candidateCount > 3) {
-        const pageId = randomUUID();
-        const [a, b] = await Promise.all([current.receive("mostrar mais", pageId), current.receive("mostrar mais")]);
+        const [a, b] = await Promise.all([current.receive("mostrar mais", prematureId), current.receive("mostrar mais")]);
         const success = [a, b].find((response) => response.statusCode === 200);
         const pending = [a, b].find((response) => response.statusCode === 409);
         assert.ok(success, `${a.body}\n${b.body}`);
-        assert.equal(pending?.json().error, "selection_show_more_pending");
+        assert.ok(["selection_show_more_pending", "channel_message_processing"].includes(pending?.json().error));
         const page = success.json();
         assert.deepEqual(page.result.result.matches.map((match: { position: number }) => match.position), Array.from({ length: Math.min(candidateCount - 3, 3) }, (_, i) => i + 4));
         assert.equal((await reader.getState(searchId)).shownMatchCount, 3);
         await current.send(page.outbound.id, candidateCount === 20);
         assert.deepEqual((await reader.listShown(searchId)).slice(0, 3).map((match) => match.shownAt?.getTime()), firstShown);
+        await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE phone_e164=$1 AND next_attempt_at IS NOT NULL", [current.phone]);
+        const queued = await current.app.inject({ method: "POST", url: "/internal/channel/inbound/next/process", headers });
+        assert.equal(queued.statusCode, 200, queued.body);
+        assert.equal(queued.json().status, "processed");
+      } else {
+        const queued = await current.receive("mostrar mais", prematureId);
+        assert.equal(queued.statusCode, 200, queued.body);
+        assert.equal(queued.json().result.result.kind, "no_more_options");
       }
       const end = await reader.getState(searchId);
       assert.equal(end.shownMatchCount, Math.min(candidateCount, 6));

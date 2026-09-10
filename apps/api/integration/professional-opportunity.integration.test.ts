@@ -66,6 +66,25 @@ async function fixture(other = false) {
     assert.equal(response.statusCode, 200, `Inbox failed with ${response.statusCode}`);
     return channelInboundMessageResponseSchema.parse(response.json());
   }
+  async function concurrentDecisions(texts: string[]) {
+    const deliveries = texts.map(raw_text => ({ provider: "test", provider_message_id: randomUUID(), phone_e164: professionalPhone, raw_text, country_code: "BR", limit: 3 }));
+    const responses = await Promise.all(deliveries.map(payload => app.inject({ method: "POST", url: "/internal/channel/inbound/messages", headers: { "x-internal-key": key }, payload })));
+    assert.ok(responses.some(response => response.statusCode === 200));
+    for (const response of responses) {
+      assert.ok([200, 409].includes(response.statusCode), response.body);
+      if (response.statusCode === 409) assert.equal(response.json().error, "channel_message_processing");
+    }
+    // FIFO can queue the later delivery. Complete it through the real autonomous consumer, not by bypassing its claim.
+    for (const response of responses.filter(response => response.statusCode === 409)) {
+      assert.equal(response.json().error, "channel_message_processing");
+      const recovered = await app.inject({ method: "POST", url: "/internal/channel/inbound/next/process", headers: { "x-internal-key": key } });
+      assert.equal(recovered.statusCode, 200, recovered.body);
+      assert.equal(recovered.json().status, "processed");
+    }
+    const replayed = await Promise.all(deliveries.map(payload => send(payload.raw_text, professionalPhone, payload.provider_message_id)));
+    assert.ok(replayed.every(response => response.duplicate));
+    return replayed;
+  }
   const conversations = async () => (await query<{ id: string; status: string; resume_slot: string | null }>(
     "SELECT id, status, resume_slot FROM search_conversations WHERE customer_id=$1 ORDER BY id", [customerId])).rows;
   const countEvents = async () => Number((await query("SELECT count(*) FROM opportunity_response_events WHERE contact_id=$1", [contactId])).rows[0].count);
@@ -101,7 +120,7 @@ async function fixture(other = false) {
       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)`, [professionalId,customerId,search,selectionKey,publicCode,JSON.stringify({...snapshot,public_code:publicCode,choice_inbound_id:selectionKey}),conversation]);
     return { conversation, publicCode };
   }
-  return { app, choiceId, customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, conversations, countEvents, cleanup, addOpportunity };
+  return { app, choiceId, customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, concurrentDecisions, conversations, countEvents, cleanup, addOpportunity };
 }
 
 test("decline reopens without another active search; events, replies and replay are atomic", async () => {
@@ -162,7 +181,7 @@ test("expired prior search does not replace current context or reuse options", a
 test("accept versus decline concurrent decisions have one event and one stable outcome", async () => {
   const f = await fixture();
   try {
-    const results = await Promise.all([f.send(`aceito ${f.code}`), f.send(`recuso ${f.code}`)]);
+    const results = await f.concurrentDecisions([`aceito ${f.code}`, `recuso ${f.code}`]);
     assert.deepEqual(results[0].outbound, results[1].outbound);
     assert.deepEqual(results[0].result, results[1].result);
     assert.equal(await f.countEvents(), 1);
@@ -193,7 +212,7 @@ for (const command of ["aceito", "recuso"]) {
   test(`two simultaneous ${command} deliveries produce one transition`, async () => {
     const f = await fixture();
     try {
-      const results = await Promise.all([f.send(`${command} ${f.code}`), f.send(`${command} ${f.code}`)]);
+      const results = await f.concurrentDecisions([`${command} ${f.code}`, `${command} ${f.code}`]);
       assert.equal(results[0].outbound.id, results[1].outbound.id);
       assert.equal(await f.countEvents(), 1);
     } finally { await f.cleanup(); }

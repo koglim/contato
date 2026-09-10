@@ -656,7 +656,8 @@ test("legacy refusal and wrong-customer confirmation never share phones or creat
     if (prompt.kind !== "response") throw new Error("expected prompt");
     await markFixtureMessageSent(prompt.response.outbound.id);
     const repo = new PostgresSelectionMatchRepository();
-    const wrong = await repo.selectShownMatch({ ...fixture, customerId: randomUUID(), position: 1, lastMessageText: "sim", selectionKey: await fixture.inboundKey("sim"), confirmBilateral: true });
+    // Use the existing delivery key: a repository-only ownership probe must not enqueue an unprocessed message for the real client.
+    const wrong = await repo.selectShownMatch({ ...fixture, customerId: randomUUID(), position: 1, lastMessageText: "sim", selectionKey: prompt.response.message_id, confirmBilateral: true });
     assert.equal(wrong.kind, "conversation_customer_mismatch");
     const refusalId = randomUUID();
     const refused = await channel.receive("não quero", refusalId);

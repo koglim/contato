@@ -201,11 +201,11 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
     const code = inboxErrorCode(errorCode);
     const result = await this.execute<{ id: string }>(
       `WITH failed AS (UPDATE channel_inbound_messages
-       SET status = 'failed', error_code = $3, processing_token = NULL, processing_started_at = NULL, lease_expires_at = NULL,
+       SET status = 'failed', error_code = $3::text, processing_token = NULL, processing_started_at = NULL, lease_expires_at = NULL,
          recovery_state = CASE WHEN $4 OR attempt_count >= $5 THEN 'quarantined' ELSE 'active' END,
          next_attempt_at = CASE WHEN NOT $4 AND attempt_count < $5 THEN clock_timestamp() + (30 * power(2,GREATEST(attempt_count,1)-1)) * INTERVAL '1 second' END,
          quarantined_at = CASE WHEN $4 OR attempt_count >= $5 THEN clock_timestamp() END,
-         recovery_reason = CASE WHEN $4 THEN $3 WHEN attempt_count >= $5 THEN 'attempts_exhausted' END
+         recovery_reason = CASE WHEN $4 THEN $3::text WHEN attempt_count >= $5 THEN 'attempts_exhausted' END
        WHERE id = $1 AND processing_token = $2 AND ${liveInboxLeaseSql}
        RETURNING id,recovery_state,recovery_reason,total_attempts), audit AS (
          INSERT INTO channel_inbound_recovery_events(inbound_id,event_key,action,reason)
