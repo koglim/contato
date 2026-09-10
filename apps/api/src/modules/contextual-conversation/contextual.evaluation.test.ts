@@ -35,3 +35,8 @@ test("B2 evaluation traces interpretation, composition, fallback and human revie
 test("B2 real evaluation refuses missing authorization before any provider call", () => {
   assert.throws(() => run("--real", "--suite=readiness", "--model=not-authorized", "--max-calls=1"), /Real evaluation requires authorization/);
 });
+test("B2 evaluation can resume a bounded case window without replaying earlier cases", () => {
+  const report = run("--suite=readiness", "--offset=1", "--limit=3");
+  assert.equal(report.cases, 3); assert.equal(report.failed, 0); assert.equal(report.results[0].id, "readiness-02");
+  assert.equal(report.results.at(-1).id, "readiness-04"); assert.equal(report.model_calls, 0);
+});

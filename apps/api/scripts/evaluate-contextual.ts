@@ -24,6 +24,10 @@ if (!["frozen", "readiness"].includes(suite)) throw new Error("Unknown evaluatio
 const real = args.includes("--real");
 const selected = args.find(arg => arg.startsWith("--split="))?.slice(8) ?? "development";
 if (!["development", "heldout", "all"].includes(selected)) throw new Error("Unknown evaluation split");
+const offset = Number(args.find(arg => arg.startsWith("--offset="))?.slice(9) ?? 0);
+const limit = Number(args.find(arg => arg.startsWith("--limit="))?.slice(8) ?? 300);
+if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 300) throw new Error("Invalid case window");
+if (selected === "all" && offset) throw new Error("Select one split when resuming at an offset");
 const model = args.find(arg => arg.startsWith("--model="))?.slice(8);
 const maxCalls = Number(args.find(arg => arg.startsWith("--max-calls="))?.slice(12));
 if (real && (!args.includes("--authorize-paid-evaluation") || !model || !process.env.OPENAI_API_KEY || !Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 1000)) {
@@ -51,7 +55,7 @@ const rows = [];
 let totalCalls = 0;
 const deadline = Date.now() + 15 * 60_000;
 for (const source of selectedSources) {
-  for (const sample of source.cases) {
+  for (const sample of source.cases.slice(offset, offset + limit)) {
     let memory = emptyMemory();
     let calls = 0;
     const started = Date.now();
@@ -130,6 +134,7 @@ for (const source of selectedSources) {
 const report = {
   mode: real ? "real-model-interpretation-and-composition-with-domain-fixtures" : "mocked-interpretation-and-composition", model: model ?? null,
   version: CONTEXTUAL_VERSION, suite, prompt_sha256: createHash("sha256").update(CONTEXTUAL_INSTRUCTIONS + CONTEXTUAL_COMPOSITION_INSTRUCTIONS).digest("hex"),
+  selection: { split: selected, offset, limit },
   catalog_sha256: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"),
   corpus: selectedSources.map(s => ({ version: s.version, split: s.split, sha256: s.digest, cases: s.cases.length })), cases: rows.length,
   passed: rows.filter(r => r.passed).length, failed: rows.filter(r => !r.passed && r.actual !== "not_evaluated").length,

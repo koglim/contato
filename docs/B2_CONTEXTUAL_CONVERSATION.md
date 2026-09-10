@@ -19,12 +19,19 @@ Uma profissão explicitamente reconhecida pode ser confirmada; uma associação
 semântica sugerida pelo modelo permanece hipótese até confirmação do cliente.
 O geocoder continua sendo a autoridade para coordenadas e ambiguidade geográfica.
 
+Em b2.2, novas interpretações incluem `speech_act`: request, information,
+hypothetical, negated ou unclear. Interrogação sozinha não bloqueia pedidos.
+`catalog_info` responde sobre serviços usando catálogo/evidências, sem iniciar
+busca nem alterar slots. Propostas b2.1 persistidas continuam legíveis.
+O contrato público da Inbox não mudou.
+
 Comandos globais exatos têm prioridade e não chamam IA. Seleção e consentimento
 reutilizam a mensagem original, os repositórios e a transação existentes. A IA
 não pode escolher posição, consentir ou compartilhar telefone em seu schema.
 FAQ de custo usa política versionada em código: cliente gratuito e serviço
 combinado/pago diretamente ao profissional. FAQ/fora de escopo/falhas não alteram
-os slots. Correção conserva serviço e registros antigos, reexecuta matching e
+os slots. Correção de localização conserva serviço e registros antigos; correção
+explícita de serviço conserva localização. Ambas reexecutam matching e
 troca somente a busca da conversa ativa. Correção aguarda se houver lista não
 confirmada como enviada ou consentimento pendente; não descarta silenciosamente.
 
@@ -44,6 +51,8 @@ Concorrente recebe o contrato recuperável `channel_message_processing`;
 nenhum conteúdo é descartado. O transporte/operador precisa repetir inbounds
 recuperáveis; ainda não existe worker autônomo de reprocessamento de Inbox.
 Uma entrada abandonada pode bloquear as seguintes até sua recuperação.
+Checkpoint de recuperação obrigatória antes da operação pública, com limite de
+tentativas, quarentena e FIFO: [plano de homologação](B2_HOMOLOGATION_PLAN.md).
 
 Interpretação validada é persistida antes de efeitos. Na transação curta final:
 fencing do token Inbox, lock do cliente, fencing da memória e fingerprint da
@@ -54,7 +63,7 @@ proposta anterior. Rollback não deixa busca ou contato sem Outbox.
 
 ## Limites e operação
 
-Política `b2.1`: 6 s por chamada, sem retry do SDK, 900 tokens máximos de
+Política `b2.2`: 6 s por chamada, sem retry do SDK, 900 tokens máximos de
 interpretação e 300 de composição, até duas chamadas por turno,
 20 chamadas/cliente/hora, 1.000 globais/hora, lease 30 s. Quotas são
 reservadas no banco antes da chamada e compartilhadas entre réplicas; até erros
@@ -65,7 +74,8 @@ Quotas antigas ainda exigem política operacional de retenção.
 Variáveis novas: `CONTEXTUAL_CONVERSATION_ENABLED` (default false) e
 `CONTEXTUAL_CONVERSATION_MODEL` (sem modelo escolhido por conveniência). Reutiliza
 `OPENAI_API_KEY`; não adicionar chave ao Git. Ordem futura, sempre manual:
-aplicar 018 → publicar API com flag desligada → avaliar e revisar → ativação
+aplicar todas as migrations pendentes, incluindo 017 e 018 quando ausentes →
+publicar API com flag desligada → avaliar e revisar → ativação
 autorizada. Desligar flag não desfaz efeitos nem perde replay.
 
 ## Evidência e limitações
@@ -77,6 +87,9 @@ Perguntas de esclarecimento são geradas a partir do resultado real da resoluç�
 e campos faltantes, com schema/limites e rejeição de afirmações financeiras,
 contatos e ações concluídas. Rascunho validado é persistido antes dos efeitos;
 falha de composição usa pergunta determinística sem perder a interpretação.
+Em b2.2, também esse fallback é persistido antes dos efeitos. O plano de pergunta
+é compartilhado com o avaliador; `target` retornado precisa coincidir com o campo
+faltante/ambíguo. FAQ/interrupções não disparam composição sobre hipóteses lembradas.
 Não se permite reescrever livremente preços, consentimento ou listas de pessoas.
 Guardas textuais não são prova de segurança semântica universal: revisão humana
 de perguntas e avaliação adversarial real continuam obrigatórias antes de ativar.

@@ -38,6 +38,7 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | `209bda7` | Diagnóstico agregado da fila | [34404276101](https://github.com/koglim/contato/actions/runs/34404276101) |
 | `1cd80a6` | Sanitização de logs e runbook operacional | [34404857753](https://github.com/koglim/contato/actions/runs/34404857753) |
 | `ba57af4` | B2: contexto, hipóteses, perguntas fundamentadas, recuperação, FIFO e corpus 300 | [34475297400](https://github.com/koglim/contato/actions/runs/34475297400) |
+| `883544c` | B2.2: pedidos interrogativos, catálogo informativo, composição e jornadas Inbox | [34478125708](https://github.com/koglim/contato/actions/runs/34478125708) |
 
 Checkpoint anterior à B2: `1cd80a6e699dbabdc64199a7b62026e72062e60a`.
 Lint, typecheck, build, 276 testes API + 12 web + 7 workflows passaram localmente
@@ -52,6 +53,13 @@ CI aprovado com 287 testes API, 12 web, 7 workflows, 300 casos simulados e 91
 integrações PostgreSQL antes/depois da reaplicação. Evidências, limites e gates
 estão em [B2_DELIVERY_REPORT.md](B2_DELIVERY_REPORT.md). Isto conclui a entrega
 técnica independente desta rodada, não a homologação conversacional ou a V1.
+
+Revisão B2.2: `883544c79872ca87d08f385fc4847ab89bf97fe9`, CI aprovado com 297
+testes API + 12 web + 7 workflows, 96 integrações duas vezes, 300 casos congelados
+e 18 adicionais. A retomada por janela do avaliador acrescenta um teste no próximo
+checkpoint. [B2_HOMOLOGATION_PLAN.md](B2_HOMOLOGATION_PLAN.md) propõe modelos,
+catálogo, orçamento e gates; nenhuma chamada paga executada. A recuperação
+autônoma da Inbox está especificada ali e continua pendente antes da operação pública.
 
 ## Checkpoints e ordem
 
@@ -98,7 +106,8 @@ seu aceite conversacional real ainda está pendente. D–I não foram concluída
 
 Release manual, configuração n8n, incidente/rollback e ensaio de backup estão em
 [OPERATIONS.md](OPERATIONS.md) e [workflows/n8n/README.md](../workflows/n8n/README.md).
-Para B2, migration 018 deve preceder a API com a funcionalidade habilitada.
+Para B2, conferir e aplicar todas as migrations pendentes, incluindo 017 e 018
+quando ausentes, antes da API; não supor que o ambiente já aplicou a 017.
 Novas variáveis: `CONTEXTUAL_CONVERSATION_ENABLED=false` e
 `CONTEXTUAL_CONVERSATION_MODEL` (sem default); `OPENAI_API_KEY` é reutilizada.
 Publicar primeiro com B2 desligada, avaliar/homologar e só ativar mediante decisão
