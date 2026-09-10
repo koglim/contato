@@ -4,7 +4,7 @@ import { after, test } from "node:test";
 import { buildApp } from "../src/app.js";
 import { query, withTransaction, closeDatabaseConnection } from "../src/database/connection.js";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
-import { normalizeGatewayEvent, inboxDecision, transcriptionDecision } from "../../../workflows/n8n/gateway-contract.mjs";
+import { normalizeGatewayEvent, inboxDecision } from "../../../workflows/n8n/gateway-contract.mjs";
 import { claimDecision, transportDecision, confirmationDecision } from "../../../workflows/n8n/delivery-contract.mjs";
 
 after(closeDatabaseConnection);
@@ -21,12 +21,14 @@ async function fixture(audio = false) {
       data: { key: { fromMe: false, id: randomUUID(), remoteJid: `${phone.slice(1)}@s.whatsapp.net` },
         message: audio ? { audioMessage: { seconds: 10, mimetype: "audio/ogg" }, base64: Buffer.from("OggS synthetic").toString("base64") } : { conversation: "ajuda" } } },
   }, config, now);
-  const input = audio ? transcriptionDecision({ statusCode:200, body: { text:"ajuda" } }, normalized, true).inbound : normalized.inbound;
+  // Legacy text Inbox compatibility; durable audio admission is exercised separately.
+  const input = audio ? {...normalized.inbound,raw_text:'ajuda'} : normalized.inbound;
   const receive = (payload = input) => app.inject({ method:"POST", url:"/internal/channel/inbound/messages", headers, payload });
   const claim = (id = "next") => app.inject({ method:"POST", url:`/internal/channel/outbound/${id}/claim`, headers });
   const cleanup = async () => {
     await app.close();
     await withTransaction(async db => {
+      await db.query('TRUNCATE channel_transport_events'); // Disposable serial test database only.
       await db.query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider=$1)",[provider]);
       await db.query("DELETE FROM channel_inbound_messages WHERE provider=$1",[provider]);
       await db.query("DELETE FROM customers WHERE phone_e164=$1",[phone]);

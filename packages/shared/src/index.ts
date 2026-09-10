@@ -142,3 +142,4 @@ export type { ChannelOutboundQueueStatus } from "./types/channel-outbound.js";
 export { contextualMessageSchema } from "./schemas/contextual-message.js";
 export { inboxRecoveryResponseSchema, inboxDispositionSchema, inboxDispositionResponseSchema, inboxQueueStatusSchema } from "./schemas/inbox-recovery.js";
 export type { InboxDisposition } from "./schemas/inbox-recovery.js";
+export * from './schemas/channel-transport.js';

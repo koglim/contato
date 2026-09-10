@@ -1,0 +1,496 @@
+{
+  "name": "ContatoCerto - Durable Audio Consumer",
+  "active": false,
+  "nodes": [
+    {
+      "id": "schedule",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "claim-media",
+      "name": "Claim media",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/next/claim' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "validate-media-claim",
+      "name": "Validate media claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction mediaClaimDecision(response) {\n  response=httpResponse(response);\n  if (response?.statusCode===204) return [];\n  const m=response?.body, uuid=/^[0-9a-f]{8}-[0-9a-f-]{27}$/iu;\n  const ext={'audio/ogg':'ogg','audio/mpeg':'mp3','audio/mp4':'m4a','audio/wav':'wav','audio/webm':'webm'};\n  if (response?.statusCode!==200 || !uuid.test(m?.id??'') || !uuid.test(m?.processing_token??'')\n    || !/^[a-f0-9]{64}$/u.test(m?.media_hash??'') || !ext[m?.mime_type] || typeof m?.audio_base64!=='string'\n    || !m.audio_base64.length || m.audio_base64.length>4*1024*1024) throw new Error('media_claim_invalid');\n  return [{json:{...m,file_name:`audio.${ext[m.mime_type]}`}}];\n}\nreturn mediaClaimDecision($input.all()[0]?.json);"
+      }
+    },
+    {
+      "id": "audio-binary",
+      "name": "Audio binary",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "audio_base64",
+        "binaryPropertyName": "data",
+        "options": {
+          "fileName": "={{ $json.file_name }}",
+          "mimeType": "={{ $json.mime_type }}"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "transcribe-groq",
+      "name": "Transcribe Groq",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            },
+            {
+              "name": "language",
+              "value": "pt"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Groq Transcription"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "primary-transcript",
+      "name": "Primary transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction transcriptionDecision(response, context, finalAttempt) {\n  response = httpResponse(response);\n  const text = response?.body?.text;\n  if (response?.statusCode === 200 && typeof text === \"string\" && text.trim().length > 0 && text.trim().length <= 500) {\n    return { action: \"persist\", id:context.id, payload:{processing_token:context.processing_token,media_hash:context.media_hash,\n      result:{status:'transcribed',provider:finalAttempt?'openai':'groq',text:text.trim()}} };\n  }\n  if (!finalAttempt) return { action: \"fallback\" };\n  return { action: \"persist\", id:context.id, payload:{processing_token:context.processing_token,media_hash:context.media_hash,\n    result:{status:'failed',error_code:'transcription_unavailable'}} };\n}\nreturn {json:transcriptionDecision($json,$('Validate media claim').item.json,false)};"
+      }
+    },
+    {
+      "id": "primary-succeeded",
+      "name": "Primary succeeded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Primary succeeded",
+              "leftValue": "={{ $json.action === 'persist' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "restore-audio-for-fallback",
+      "name": "Restore audio for fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst source=$('Audio binary').item; return {json:{},...(source.binary?{binary:source.binary}:{})};"
+      }
+    },
+    {
+      "id": "transcribe-openai-fallback",
+      "name": "Transcribe OpenAI fallback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "gpt-4o-mini-transcribe"
+            },
+            {
+              "name": "language",
+              "value": "pt"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto OpenAI Transcription"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "fallback-transcript",
+      "name": "Fallback transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction transcriptionDecision(response, context, finalAttempt) {\n  response = httpResponse(response);\n  const text = response?.body?.text;\n  if (response?.statusCode === 200 && typeof text === \"string\" && text.trim().length > 0 && text.trim().length <= 500) {\n    return { action: \"persist\", id:context.id, payload:{processing_token:context.processing_token,media_hash:context.media_hash,\n      result:{status:'transcribed',provider:finalAttempt?'openai':'groq',text:text.trim()}} };\n  }\n  if (!finalAttempt) return { action: \"fallback\" };\n  return { action: \"persist\", id:context.id, payload:{processing_token:context.processing_token,media_hash:context.media_hash,\n    result:{status:'failed',error_code:'transcription_unavailable'}} };\n}\nreturn {json:transcriptionDecision($json,$('Validate media claim').item.json,true)};"
+      }
+    },
+    {
+      "id": "persist-transcript",
+      "name": "Persist transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/' + $json.id + '/result' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.payload }}",
+        "options": {
+          "timeout": 5000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "check-persistence",
+      "name": "Check persistence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst response=httpResponse($json); if(response.statusCode!==200 || !['completed','failed','quarantined'].includes(response.body?.status)) throw new Error('media_result_not_confirmed'); return {json:{status:response.body.status}};"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "Claim media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim media": {
+      "main": [
+        [
+          {
+            "node": "Validate media claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate media claim": {
+      "main": [
+        [
+          {
+            "node": "Audio binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio binary": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Groq",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Groq": {
+      "main": [
+        [
+          {
+            "node": "Primary transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Primary transcript": {
+      "main": [
+        [
+          {
+            "node": "Primary succeeded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Primary succeeded": {
+      "main": [
+        [
+          {
+            "node": "Persist transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Restore audio for fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore audio for fallback": {
+      "main": [
+        [
+          {
+            "node": "Transcribe OpenAI fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe OpenAI fallback": {
+      "main": [
+        [
+          {
+            "node": "Fallback transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback transcript": {
+      "main": [
+        [
+          {
+            "node": "Persist transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist transcript": {
+      "main": [
+        [
+          {
+            "node": "Check persistence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 55,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": false
+  },
+  "pinData": {},
+  "tags": []
+}

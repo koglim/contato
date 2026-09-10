@@ -34,18 +34,14 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
     phone_e164: `+${jid.split("@")[0]}`, country_code: "BR", limit: 3 };
   const message = body.data.message;
   if (!message || typeof message !== "object" || Array.isArray(message)) return reject("webhook_message_invalid");
-  const notice = (reason, text) => ({ action: "notice", inbound, reason, text, http_status: 200 });
   if (message.audioMessage) {
     const audio = message.audioMessage;
-    if (!Number.isFinite(audio.seconds) || audio.seconds <= 0 || audio.seconds > 120) return notice("audio_duration_invalid", "Envie um áudio de até 2 minutos ou escreva o que você precisa.");
-    const base64 = message.base64;
-    const mime = typeof audio.mimetype === "string" ? audio.mimetype.split(";")[0].trim() : "";
-    const extensions = { "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/wav": "wav", "audio/webm": "webm" };
-    if (!extensions[mime] || typeof base64 !== "string" || !base64.length || base64.length > 4 * 1024 * 1024
-      || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(base64)) {
-      return notice("audio_content_invalid", "Não consegui ler esse áudio. Pode escrever o pedido ou enviar um novo áudio de até 2 minutos?");
-    }
-    return { action: "audio", inbound, audio_base64: base64, mime_type: mime, file_name: `audio.${extensions[mime]}` };
+    // The API classifies, fingerprints and persists every audio event BEFORE ACK.
+    // No notice text and no transcription decision belongs to this gateway.
+    return { action: "audio", inbound, media: { ...inbound,
+      audio_base64: typeof message.base64 === 'string' ? message.base64 : '',
+      mime_type: typeof audio.mimetype === 'string' ? audio.mimetype.slice(0,100) : '',
+      duration_seconds: Number.isFinite(audio.seconds) && audio.seconds>=0 ? audio.seconds : null } };
   }
   const text = message.conversation ?? message.extendedTextMessage?.text;
   if (text === undefined) return ignore("unsupported_message");
@@ -57,11 +53,31 @@ export function transcriptionDecision(response, context, finalAttempt) {
   response = httpResponse(response);
   const text = response?.body?.text;
   if (response?.statusCode === 200 && typeof text === "string" && text.trim().length > 0 && text.trim().length <= 500) {
-    return { action: "inbox", inbound: { ...context.inbound, raw_text: text.trim() } };
+    return { action: "persist", id:context.id, payload:{processing_token:context.processing_token,media_hash:context.media_hash,
+      result:{status:'transcribed',provider:finalAttempt?'openai':'groq',text:text.trim()}} };
   }
   if (!finalAttempt) return { action: "fallback" };
-  return { action: "notice", inbound: context.inbound, http_status: 200, reason: "transcription_unavailable",
-    text: "Não consegui entender esse áudio. Pode escrever o pedido ou enviar um novo áudio de até 2 minutos?" };
+  return { action: "persist", id:context.id, payload:{processing_token:context.processing_token,media_hash:context.media_hash,
+    result:{status:'failed',error_code:'transcription_unavailable'}} };
+}
+
+export function mediaAdmissionDecision(response) {
+  response=httpResponse(response);
+  if (response?.statusCode===200 && /^[0-9a-f]{8}-[0-9a-f-]{27}$/iu.test(response.body?.id??'')
+    && ['pending','processing','completed','failed','quarantined'].includes(response.body?.status) && typeof response.body?.duplicate==='boolean')
+    return {http_status:200,reason:'media_persisted'};
+  return {http_status:response?.statusCode===409?409:503,reason:'media_not_acknowledged'};
+}
+
+export function mediaClaimDecision(response) {
+  response=httpResponse(response);
+  if (response?.statusCode===204) return [];
+  const m=response?.body, uuid=/^[0-9a-f]{8}-[0-9a-f-]{27}$/iu;
+  const ext={'audio/ogg':'ogg','audio/mpeg':'mp3','audio/mp4':'m4a','audio/wav':'wav','audio/webm':'webm'};
+  if (response?.statusCode!==200 || !uuid.test(m?.id??'') || !uuid.test(m?.processing_token??'')
+    || !/^[a-f0-9]{64}$/u.test(m?.media_hash??'') || !ext[m?.mime_type] || typeof m?.audio_base64!=='string'
+    || !m.audio_base64.length || m.audio_base64.length>4*1024*1024) throw new Error('media_claim_invalid');
+  return [{json:{...m,file_name:`audio.${ext[m.mime_type]}`}}];
 }
 
 export function inboxDecision(response) {

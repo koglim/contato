@@ -36,7 +36,7 @@ export type CreateChannelOutboundMessage = {
 
 export type CreateIndependentChannelOutboundMessage = {
   businessKey: string;
-  purpose: "professional_contact_notification";
+  purpose: "professional_contact_notification" | "channel_notice";
   provider: string;
   recipientPhoneE164: string;
   textContent: string;
@@ -78,6 +78,7 @@ export interface ChannelOutboundService {
 export type HoldOutboundInput = {
   processing_token: string;
   reason: "transport_outcome_unknown" | "confirmation_pending";
+  provider_message_id?: string;
 };
 
 export type ChannelOutboundHoldOutcome =

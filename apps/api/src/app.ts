@@ -72,6 +72,9 @@ import type { ChannelOutboundMessageRepository, ChannelOutboundService } from ".
 import { readChannelOutboundConfig, type ChannelOutboundConfig } from "./config/channel-outbound.js";
 import { InboxRecoveryService } from "./modules/channel-inbox/inbox-recovery.service.js";
 import { inboxRecoveryRoutes } from "./modules/channel-inbox/inbox-recovery.routes.js";
+import { channelTransportRoutes } from './modules/channel-media/channel-transport.routes.js';
+import { ChannelMediaService } from './modules/channel-media/channel-media.service.js';
+import { OutboundDispositionService } from './modules/channel-outbox/outbound-disposition.service.js';
 
 type AppDependencies = {
   contextualConversation?: ContextualInboxHandler;
@@ -289,6 +292,8 @@ export function buildApp({
     service: new InboxRecoveryService(resolvedChannelInboxService, (channelInboxConfig ?? readChannelInboxConfig()).processingLeaseSeconds,
       Boolean(contextualConversation) || readContextualConfig().enabled) });
   app.register(channelOutboundRoutes, { prefix: "/internal/channel/outbound", service: resolvedChannelOutboundService, internalApiKey });
+  app.register(channelTransportRoutes,{prefix:'/internal/channel',internalApiKey,
+    media:new ChannelMediaService(Boolean(contextualConversation)||readContextualConfig().enabled),admin:new OutboundDispositionService()});
 
   return app;
 }

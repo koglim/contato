@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { runInNewContext } from "node:vm";
 import { Buffer } from "node:buffer";
 import { URL } from "node:url";
-import { normalizeGatewayEvent, transcriptionDecision, inboxDecision } from "./gateway-contract.mjs";
+import { normalizeGatewayEvent, transcriptionDecision, inboxDecision, mediaClaimDecision } from "./gateway-contract.mjs";
 import { transportDecision, claimDecision, confirmationDecision } from "./delivery-contract.mjs";
 
 const config = { instance: "test-instance", provider: "evolution", origin: "https://evolution.example.invalid" };
@@ -59,30 +59,34 @@ test("LID uses authenticated remoteJidAlt only; conflicting phones are rejected"
   assert.equal(normalize(input).action, "reject");
 });
 const audio = seconds => event({ audioMessage: { seconds, mimetype: "audio/ogg; codecs=opus" }, base64: Buffer.from("OggS synthetic audio").toString("base64") });
-test("valid audio has one immutable inbound identity and bounded binary", () => {
-  const result = normalize(audio(120));
-  assert.equal(result.action, "audio");
-  assert.equal(result.inbound.raw_text, undefined);
-  const transcript = transcriptionDecision({ statusCode: 200, body: { text: "  minha pia vazou  " } }, result, false);
-  assert.equal(transcript.action, "inbox");
-  assert.equal(transcript.inbound.raw_text, "minha pia vazou");
-  assert.equal(transcript.inbound.provider_message_id, result.inbound.provider_message_id);
-  assert.equal(transcript.audio_base64, undefined);
-});
-test("long or unbounded audio is not transcribed", () => {
-  for (const duration of [121, 0, -1, undefined, "20"]) assert.equal(normalize(audio(duration)).action, "notice");
-  const input = audio(20); input.body.data.message.base64 = "not base64";
-  assert.equal(normalize(input).action, "notice");
-});
-test("primary failure or empty/invalid text uses fallback; total failure yields one controlled notice", () => {
-  const context = normalize(audio(20));
-  for (const response of [{}, { error: "timeout" }, { statusCode: 503 }, { statusCode: 200, body: { text: " " } }, { statusCode: 200, body: { text: "x".repeat(501) } }]) {
-    assert.equal(transcriptionDecision(response, context, false).action, "fallback");
-    const failed = transcriptionDecision(response, context, true);
-    assert.equal(failed.action, "notice"); assert.equal(failed.inbound.raw_text, undefined);
+test("gateway persists valid, long and invalid audio under the original event identity without invented text",()=>{
+  for(const duration of [120,121,0,-1,undefined,"20"]) {
+    const result=normalize(audio(duration));
+    assert.equal(result.action,"audio");
+    assert.equal(result.media.provider_message_id,"test-instance:SYNTHETIC001");
+    assert.equal(result.text,undefined);
+    assert.equal(result.inbound.raw_text,undefined);
   }
-  assert.equal(transcriptionDecision({ statusCode: 200, body: { text: "encanador em Sinop" } }, context, true).action, "inbox");
+  const bad=audio(20);bad.body.data.message.base64="@@@=";
+  assert.equal(normalize(bad).media.audio_base64,"@@@=");
 });
+test("consumer persists one validated primary/fallback result or controlled failure; it never creates an Inbox",()=>{
+  const context={id:randomUUID(),processing_token:randomUUID(),media_hash:"a".repeat(64)};
+  for(const response of [{},{error:"timeout"},{statusCode:503},{statusCode:200,body:{text:""}},{statusCode:200,body:{text:"x".repeat(501)}}]) {
+    assert.equal(transcriptionDecision(response,context,false).action,"fallback");
+    const failed=transcriptionDecision(response,context,true);
+    assert.deepEqual(failed.payload.result,{status:"failed",error_code:"transcription_unavailable"});
+    assert.equal(failed.inbound,undefined);assert.equal(failed.text,undefined);
+  }
+  for(const fallback of [false,true]) {
+    const r=transcriptionDecision({statusCode:200,body:{text:"  ajuda  "}},context,fallback);
+    assert.equal(r.payload.result.text,"ajuda");assert.equal(r.payload.result.provider,fallback?"openai":"groq");
+    assert.equal(r.payload.processing_token,context.processing_token);
+  }
+  assert.deepEqual(mediaClaimDecision({statusCode:204,body:""}),[]);
+  assert.throws(()=>mediaClaimDecision({statusCode:200,body:{}}),/media_claim_invalid/);
+});
+
 test("Inbox outcome exposes only an Outbox ID to claim, never sends reply_text directly", () => {
   const id = randomUUID();
   assert.deepEqual(inboxDecision({ statusCode: 200, body: { outbound: { id, status: "pending" }, reply_text: "private" } }), { action: "claim", id, http_status: 200 });
@@ -161,26 +165,19 @@ test("generated text path calls Inbox once then shared delivery with the entire 
   assert.equal(result.calls[2].json.statusCode,204);
   assert.equal(result.item.json.reason,"empty"); assert.deepEqual(result.acknowledgements,[200]);
 });
-for(const [label,primary,secondary,expected] of [
-  ["primary",{statusCode:200,body:'{"text":"ajuda"}'},null,"inbox"],
-  ["fallback after timeout",{error:"ETIMEDOUT"},{statusCode:200,body:'{"text":"ajuda"}'},"inbox"],
-  ["fallback after empty transcript",{statusCode:200,body:'{"text":""}'},{statusCode:200,body:'{"text":"ajuda"}'},"inbox"],
-  ["total failure",{statusCode:500},{statusCode:503},"notice"],
-]) test(`generated audio path ${label} has one final path and retains binary for fallback`,()=>{
-  const result=simulateGateway(audio(20),{"Transcribe Groq":primary,"Transcribe OpenAI fallback":secondary,"Channel Inbox":inboxReply(),"Claim outbound":{statusCode:409,body:""},
-    "One-shot audio notice":{statusCode:201,body:{key:{id:"notice-1",fromMe:true,remoteJid:"5566991234567@s.whatsapp.net"}}}});
-  const inboxes=result.calls.filter(c=>c.name==="Channel Inbox");
-  const notices=result.calls.filter(c=>c.name==="One-shot audio notice");
-  assert.equal(inboxes.length,expected==="inbox"?1:0); assert.equal(notices.length,expected==="notice"?1:0);
-  if(secondary) assert.ok(result.calls.find(c=>c.name==="Transcribe OpenAI fallback").binary?.data);
-  else assert.ok(!result.calls.some(c=>c.name==="Transcribe OpenAI fallback"));
-  assert.deepEqual(result.acknowledgements,[200]);
+test("generated audio path acknowledges only durable API admission, never sends or transcribes",()=>{
+  for(const duration of [20,121]) {
+    const result=simulateGateway(audio(duration),{"Persist media":{statusCode:200,body:{id:randomUUID(),status:"pending",duplicate:false}}});
+    assert.deepEqual(result.calls.map(c=>c.name),["Persist media"]);
+    assert.deepEqual(result.acknowledgements,[200]);
+  }
+  for(const response of [{error:"timeout"},{statusCode:503},{statusCode:200,body:{}}]) {
+    const result=simulateGateway(audio(20),{"Persist media":response});
+    assert.deepEqual(result.acknowledgements,[503]);
+    assert.deepEqual(result.calls.map(c=>c.name),["Persist media"]);
+  }
 });
-test("long audio graph skips both transcribers and sends only the one-shot notice",()=>{
-  const result=simulateGateway(audio(121),{"One-shot audio notice":{statusCode:201,body:{key:{id:"notice-2",fromMe:true,remoteJid:"5566991234567@s.whatsapp.net"}}}});
-  assert.deepEqual(result.calls.map(c=>c.name),["One-shot audio notice"]);
-  assert.deepEqual(result.acknowledgements,[200]);
-});
+
 test("generated gateway never claims on Inbox errors, conflict or missing Outbox",()=>{
   for(const response of [{error:"timeout"},{statusCode:500},{statusCode:200,body:"{}"},{statusCode:409,body:'{"error":"channel_message_payload_conflict"}'}]) {
     const result=simulateGateway(event(),{"Channel Inbox":response});
@@ -201,7 +198,7 @@ test("text HTTP envelopes handle empty 204, malformed JSON and all uncertain tra
 test("exports only use node versions present in the pinned n8n source; every reference resolves",()=>{
   const allowed={webhook:[1,1.1,2,2.1],code:[1,2],if:[2,2.1,2.2,2.3],httpRequest:[3,4,4.1,4.2,4.3],
     executeWorkflow:[1,1.1,1.2,1.3],executeWorkflowTrigger:[1,1.1],scheduleTrigger:[1,1.1,1.2,1.3],convertToFile:[1,1.1],respondToWebhook:[1,1.1,1.2,1.3,1.4,1.5]};
-  for(const file of ["gateway.json","shared-delivery.json","outbox-dispatcher.json","inbox-recovery.json"]) {
+  for(const file of ["gateway.json","shared-delivery.json","outbox-dispatcher.json","inbox-recovery.json","media-consumer.json"]) {
     const workflow=JSON.parse(readFileSync(new URL(file,import.meta.url),"utf8"));
     const names=new Set(workflow.nodes.map(n=>n.name));
     assert.equal(names.size,workflow.nodes.length);

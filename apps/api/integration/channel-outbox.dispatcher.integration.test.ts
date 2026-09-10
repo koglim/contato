@@ -271,7 +271,7 @@ test("uncertain delivery is held beyond its lease and only its original token ca
     assert.equal(await repository.markSent(id, { processing_token: token, provider_message_id: "reconciled-provider-id" }), true);
     assert.equal((await repository.findById(id))?.status, "sent");
     assert.equal(await repository.holdDelivery(id, input), false);
-  } finally { await query("DELETE FROM channel_outbound_messages WHERE id = $1", [id]); }
+  } finally { await query('TRUNCATE channel_transport_events'); await query("DELETE FROM channel_outbound_messages WHERE id = $1", [id]); }
 });
 
 for (const state of ["receipt", "hold"] as const) {
@@ -282,7 +282,8 @@ for (const state of ["receipt", "hold"] as const) {
       const token = randomUUID();
       await repository.claim(id, token, 60);
       if (state === "receipt") await repository.markSent(id, { processing_token: token, provider_message_id: "receipt" });
-      else await repository.holdDelivery(id, { processing_token: token, reason: "confirmation_pending" });
+      // This fixture isolates the 017 hold constraint, without a 020 audit that must itself block down first.
+      else await query("UPDATE channel_outbound_messages SET delivery_hold_reason='confirmation_pending' WHERE id=$1",[id]);
       const fingerprint = async () => (await query(`SELECT
         (SELECT md5(jsonb_agg(to_jsonb(t) ORDER BY id)::text) FROM channel_outbound_messages t) data,
         (SELECT md5(jsonb_agg(to_jsonb(t) ORDER BY id)::text) FROM pgmigrations t) migrations,

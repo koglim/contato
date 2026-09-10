@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { claimDecision, transportDecision, confirmationDecision, httpResponse } from "./delivery-contract.mjs";
-import { normalizeGatewayEvent, transcriptionDecision, inboxDecision } from "./gateway-contract.mjs";
+import { normalizeGatewayEvent, transcriptionDecision, inboxDecision, mediaAdmissionDecision, mediaClaimDecision } from "./gateway-contract.mjs";
 
 const node = (name, type, parameters, x, y = 0, extra = {}) => ({
   id: name.toLowerCase().replaceAll(" ", "-"), name, type: `n8n-nodes-base.${type}`,
@@ -95,60 +95,54 @@ const gateway = flow("ContatoCerto - WhatsApp Gateway", [
     responseMode: "responseNode", options: {} }, 0, 0, { credentials: { jwtAuth: { name: "ContatoCerto Evolution Webhook JWT" } } }),
   code("Validate event", `${normalizeGatewayEvent.toString()}\nreturn { json: normalizeGatewayEvent($json, { instance: $vars.EVOLUTION_INSTANCE, provider: $vars.EVOLUTION_PROVIDER, origin: $vars.EVOLUTION_WEBHOOK_ORIGIN }) };`, 220),
   branch("Text input", "={{ $json.action === 'inbox' }}", 440),
-  branch("Audio input", "={{ $json.action === 'audio' }}", 660, 320),
-  node("Audio binary", "convertToFile", { operation: "toBinary", sourceProperty: "audio_base64", binaryPropertyName: "data",
-    options: { fileName: "={{ $json.file_name }}", mimeType: "={{ $json.mime_type }}" } }, 880, 320, { onError: "continueRegularOutput" }),
-  transcribe("Transcribe Groq", "https://api.groq.com/openai/v1/audio/transcriptions", "whisper-large-v3-turbo", "ContatoCerto Groq Transcription", 1100),
-  code("Primary transcript", `${transcriptionDecision.toString()}\nreturn { json: transcriptionDecision($json, $('Validate event').item.json, false) };`, 1320, 320),
-  branch("Primary succeeded", "={{ $json.action === 'inbox' }}", 1540, 320),
-  // Reattach the original binary by item linkage. No Merge by position or two
-  // parallel branches that could each emit an inbound/fallback notification.
-  code("Restore audio for fallback", "const source = $('Audio binary').item;\nreturn { json: {}, ...(source.binary ? { binary: source.binary } : {}) };", 1760, 480),
-  transcribe("Transcribe OpenAI fallback", "https://api.openai.com/v1/audio/transcriptions", "gpt-4o-mini-transcribe", "ContatoCerto OpenAI Transcription", 1980),
-  code("Fallback transcript", `${transcriptionDecision.toString()}\nreturn { json: transcriptionDecision($json, $('Validate event').item.json, true) };`, 2200, 320),
-  branch("Fallback succeeded", "={{ $json.action === 'inbox' }}", 2420, 320),
-  { ...http("Channel Inbox", "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}", "={{ $json.inbound }}", "ContatoCerto Internal API", 2640),
+  { ...http("Channel Inbox", "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}", "={{ $json.inbound }}", "ContatoCerto Internal API", 660),
     parameters: { ...http("Channel Inbox", "", null, "", 0).parameters,
-      url: "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}", sendBody: true, specifyBody: "json", jsonBody: "={{ $json.inbound }}",
-      options: { ...http("", "", null, "", 0).parameters.options, timeout: 70000 } } },
-  code("Inspect Inbox", `${inboxDecision.toString()}\nreturn { json: inboxDecision($json) };`, 2860),
-  // ACK after the durable Inbox result, before sending. Outbox dispatcher owns
-  // recovery if execution terminates after this point.
-  respond("Acknowledge Inbox", "={{ $json.http_status }}", 3080),
-  branch("Outbox available", "={{ $json.action === 'claim' }}", 3300),
-  http("Claim outbound", "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.id + '/claim' }}", null, "ContatoCerto Internal API", 3520),
-  node("Deliver shared", "executeWorkflow", { source: "database", workflowId: { __rl: true, value: "={{ $vars.CONTATOCERTO_DELIVERY_WORKFLOW_ID }}", mode: "id" }, mode: "each", options: { waitForSubWorkflow: true } }, 3740),
-  branch("Audio notice", "={{ $json.action === 'notice' }}", 2640, 640),
-  respond("Acknowledge ignored or rejected", "={{ $json.http_status }}", 2860, 880),
-  // Explicit transport-only exception: no business action and no fabricated
-  // Inbox input. ACK before this one-shot notice; never retry an uncertain send.
-  respond("Acknowledge audio notice", 200, 2860, 640),
-  http("One-shot audio notice", "={{ $vars.EVOLUTION_API_BASE_URL + '/message/sendText/' + encodeURIComponent($vars.EVOLUTION_INSTANCE) }}",
-    "={{ { number: $json.inbound.phone_e164.slice(1), text: $json.text } }}", "ContatoCerto Evolution", 3080, 640),
-  code("Inspect audio notice", `${transportDecision.toString()}\nconst source = $('Acknowledge audio notice').item.json;\nconst outcome = transportDecision($json, { recipient_phone_e164: source.inbound.phone_e164 });\nif (outcome.action !== 'sent') throw new Error('audio_notice_reconciliation_required');\nreturn { json: { action: 'complete', provider_message_id: outcome.payload.provider_message_id, transport_notice: true } };`, 3300, 640),
-], {
-  "Evolution webhook": { main: [[edge("Validate event")]] },
-  "Validate event": { main: [[edge("Text input")]] },
-  "Text input": { main: [[edge("Channel Inbox")], [edge("Audio input")]] },
-  "Audio input": { main: [[edge("Audio binary")], [edge("Audio notice")]] },
-  "Audio binary": { main: [[edge("Transcribe Groq")]] },
-  "Transcribe Groq": { main: [[edge("Primary transcript")]] },
-  "Primary transcript": { main: [[edge("Primary succeeded")]] },
-  "Primary succeeded": { main: [[edge("Channel Inbox")], [edge("Restore audio for fallback")]] },
-  "Restore audio for fallback": { main: [[edge("Transcribe OpenAI fallback")]] },
-  "Transcribe OpenAI fallback": { main: [[edge("Fallback transcript")]] },
-  "Fallback transcript": { main: [[edge("Fallback succeeded")]] },
-  "Fallback succeeded": { main: [[edge("Channel Inbox")], [edge("Audio notice")]] },
-  "Channel Inbox": { main: [[edge("Inspect Inbox")]] },
-  "Inspect Inbox": { main: [[edge("Acknowledge Inbox")]] },
-  "Acknowledge Inbox": { main: [[edge("Outbox available")]] },
-  "Outbox available": { main: [[edge("Claim outbound")], []] },
-  "Claim outbound": { main: [[edge("Deliver shared")]] },
-  "Audio notice": { main: [[edge("Acknowledge audio notice")], [edge("Acknowledge ignored or rejected")]] },
-  "Acknowledge audio notice": { main: [[edge("One-shot audio notice")]] },
-  "One-shot audio notice": { main: [[edge("Inspect audio notice")]] },
-}, 165);
+      url: "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}", sendBody:true,specifyBody:"json",jsonBody:"={{ $json.inbound }}",
+      options:{...http("","",null,"",0).parameters.options,timeout:70000} } },
+  code("Inspect Inbox", `${inboxDecision.toString()}\nreturn {json:inboxDecision($json)};`,880),
+  respond("Acknowledge Inbox","={{ $json.http_status }}",1100),
+  branch("Outbox available","={{ $json.action === 'claim' }}",1320),
+  http("Claim outbound","={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.id + '/claim' }}",null,"ContatoCerto Internal API",1540),
+  node("Deliver shared","executeWorkflow",{source:"database",workflowId:{__rl:true,value:"={{ $vars.CONTATOCERTO_DELIVERY_WORKFLOW_ID }}",mode:"id"},mode:"each",options:{waitForSubWorkflow:true}},1760),
+  branch("Audio input","={{ $json.action === 'audio' }}",660,320),
+  http("Persist media","={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/events' }}","={{ $json.media }}","ContatoCerto Internal API",880,320),
+  code("Inspect media persistence",`${mediaAdmissionDecision.toString()}\nreturn {json:mediaAdmissionDecision($json)};`,1100,320),
+  respond("Acknowledge media","={{ $json.http_status }}",1320,320),
+  respond("Acknowledge ignored or rejected","={{ $json.http_status }}",880,560),
+],{
+  "Evolution webhook":{main:[[edge("Validate event")]]},"Validate event":{main:[[edge("Text input")]]},
+  "Text input":{main:[[edge("Channel Inbox")],[edge("Audio input")]]},
+  "Channel Inbox":{main:[[edge("Inspect Inbox")]]},"Inspect Inbox":{main:[[edge("Acknowledge Inbox")]]},
+  "Acknowledge Inbox":{main:[[edge("Outbox available")]]},"Outbox available":{main:[[edge("Claim outbound")],[]]},
+  "Claim outbound":{main:[[edge("Deliver shared")]]},
+  "Audio input":{main:[[edge("Persist media")],[edge("Acknowledge ignored or rejected")]]},
+  "Persist media":{main:[[edge("Inspect media persistence")]]},"Inspect media persistence":{main:[[edge("Acknowledge media")]]},
+},140);
 
-for (const [filename, contents] of [["shared-delivery.json", delivery], ["outbox-dispatcher.json", dispatcher], ["inbox-recovery.json", recovery], ["gateway.json", gateway]]) {
+const media = flow("ContatoCerto - Durable Audio Consumer",[
+  node("Schedule","scheduleTrigger",{rule:{interval:[{field:"seconds",secondsInterval:10}]}},0),
+  http("Claim media","={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/next/claim' }}",null,"ContatoCerto Internal API",220),
+  code("Validate media claim",`${mediaClaimDecision.toString()}\nreturn mediaClaimDecision($input.all()[0]?.json);`,440,0,"runOnceForAllItems"),
+  node("Audio binary","convertToFile",{operation:"toBinary",sourceProperty:"audio_base64",binaryPropertyName:"data",
+    options:{fileName:"={{ $json.file_name }}",mimeType:"={{ $json.mime_type }}"}},660,0,{onError:"continueRegularOutput"}),
+  transcribe("Transcribe Groq","https://api.groq.com/openai/v1/audio/transcriptions","whisper-large-v3-turbo","ContatoCerto Groq Transcription",880),
+  code("Primary transcript",`${transcriptionDecision.toString()}\nreturn {json:transcriptionDecision($json,$('Validate media claim').item.json,false)};`,1100),
+  branch("Primary succeeded","={{ $json.action === 'persist' }}",1320),
+  code("Restore audio for fallback","const source=$('Audio binary').item; return {json:{},...(source.binary?{binary:source.binary}:{})};",1540,320),
+  transcribe("Transcribe OpenAI fallback","https://api.openai.com/v1/audio/transcriptions","gpt-4o-mini-transcribe","ContatoCerto OpenAI Transcription",1760),
+  code("Fallback transcript",`${transcriptionDecision.toString()}\nreturn {json:transcriptionDecision($json,$('Validate media claim').item.json,true)};`,1980,320),
+  http("Persist transcript","={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/' + $json.id + '/result' }}","={{ $json.payload }}","ContatoCerto Internal API",2200,0,true),
+  code("Check persistence","const response=httpResponse($json); if(response.statusCode!==200 || !['completed','failed','quarantined'].includes(response.body?.status)) throw new Error('media_result_not_confirmed'); return {json:{status:response.body.status}};",2420),
+],{
+  Schedule:{main:[[edge("Claim media")]]},"Claim media":{main:[[edge("Validate media claim")]]},
+  "Validate media claim":{main:[[edge("Audio binary")]]},"Audio binary":{main:[[edge("Transcribe Groq")]]},
+  "Transcribe Groq":{main:[[edge("Primary transcript")]]},"Primary transcript":{main:[[edge("Primary succeeded")]]},
+  "Primary succeeded":{main:[[edge("Persist transcript")],[edge("Restore audio for fallback")]]},
+  "Restore audio for fallback":{main:[[edge("Transcribe OpenAI fallback")]]},
+  "Transcribe OpenAI fallback":{main:[[edge("Fallback transcript")]]},"Fallback transcript":{main:[[edge("Persist transcript")]]},
+  "Persist transcript":{main:[[edge("Check persistence")]]},
+},55);
+
+for (const [filename, contents] of [["shared-delivery.json", delivery], ["outbox-dispatcher.json", dispatcher], ["inbox-recovery.json", recovery], ["gateway.json", gateway],["media-consumer.json",media]]) {
   writeFileSync(fileURLToPath(new URL(filename, import.meta.url)), `${JSON.stringify(contents, null, 2)}\n`);
 }

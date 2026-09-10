@@ -26,6 +26,7 @@ export function apiLoggerOptions(stream?: LogStream): Exclude<FastifyServerOptio
     },
     redact: {
       paths: ["headers", "body", "password", "raw_text", "text_content", "phone_e164", "recipient_phone_e164", "processing_token",
+        'audio_base64','media_bytes','transcript','*.audio_base64','*.media_bytes','*.transcript',
         "*.password", "*.raw_text", "*.text_content", "*.phone_e164", "*.recipient_phone_e164", "*.processing_token"],
       remove: true,
     },

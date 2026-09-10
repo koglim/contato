@@ -32,15 +32,22 @@ function exhaustAbandonedSql(leaseParameter: string, maxParameter: string) {
 // Independent business notifications are FIFO. Inline replies retain their
 // compatibility path (including a new delivered consent prompt replacing an
 // unsent prompt); they must not be blocked by an older inline reply.
-const recipientTurnSql = `(outbound.purpose NOT IN ('professional_contact_notification', 'customer_contact_update') OR NOT EXISTS (
+const recipientTurnSql = `outbound.administrative_closed_at IS NULL AND (outbound.purpose NOT IN ('professional_contact_notification', 'customer_contact_update') OR NOT EXISTS (
   SELECT 1 FROM channel_outbound_messages earlier
   WHERE earlier.provider = outbound.provider
     AND earlier.recipient_phone_e164 = outbound.recipient_phone_e164
-    AND earlier.purpose IN ('professional_contact_notification', 'customer_contact_update')
+    AND earlier.purpose IN ('professional_contact_notification', 'customer_contact_update') AND earlier.administrative_closed_at IS NULL
     AND (earlier.created_at, earlier.id) < (outbound.created_at, outbound.id)
     AND (earlier.status IN ('pending', 'processing')
       OR (earlier.status = 'failed' AND earlier.attempt_count < ${OUTBOX_MAX_ATTEMPTS}))
-))`;
+)) AND NOT EXISTS (
+  SELECT 1 FROM channel_outbound_messages earlier WHERE earlier.provider=outbound.provider
+    AND earlier.recipient_phone_e164=outbound.recipient_phone_e164
+    AND (outbound.purpose='channel_notice' OR earlier.purpose='channel_notice')
+    AND (earlier.created_at,earlier.id)<(outbound.created_at,outbound.id)
+    AND earlier.administrative_closed_at IS NULL
+    AND (earlier.status IN ('pending','processing') OR (earlier.status='failed' AND earlier.attempt_count<${OUTBOX_MAX_ATTEMPTS}))
+)`;
 
 export type ChannelOutboundMessageRow = {
   id: string;
@@ -305,6 +312,7 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
            processing_started_at = NULL, next_attempt_at = NULL, last_error_code = NULL,
            sent_token_hash = encode(digest($2::text, 'sha256'), 'hex'), delivery_hold_reason = NULL
        WHERE id = $1 AND status = 'processing' AND processing_token = $2
+         AND (provider_message_id IS NULL OR provider_message_id=$3)
        RETURNING id`,
         [id, input.processing_token, input.provider_message_id],
       );
@@ -345,12 +353,19 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
     return result.rows.length === 1;
   }
 
-  async holdDelivery(id: string, input: { processing_token: string; reason: "transport_outcome_unknown" | "confirmation_pending" }) {
-    const result = await this.execute<{ id: string }>(`UPDATE channel_outbound_messages
-      SET delivery_hold_reason = $3, last_error_code = $3
+  async holdDelivery(id: string, input: { processing_token: string; reason: "transport_outcome_unknown" | "confirmation_pending"; provider_message_id?: string }) {
+    const result = await this.execute<{ id: string }>(`WITH held AS (UPDATE channel_outbound_messages
+      SET delivery_hold_reason = $3, last_error_code = $3, delivery_held_at=COALESCE(delivery_held_at,clock_timestamp()),
+        provider_message_id=COALESCE(provider_message_id,$4)
       WHERE id = $1 AND status = 'processing' AND processing_token = $2
         AND (delivery_hold_reason IS NULL OR delivery_hold_reason = $3)
-      RETURNING id`, [id, input.processing_token, input.reason]);
+        AND ($4::text IS NULL OR provider_message_id IS NULL OR provider_message_id=$4)
+      RETURNING id), audit AS (
+        INSERT INTO channel_transport_events(outbound_id,event_key,action,reason,payload_hash,provider_message_id,result)
+        SELECT id,'hold_'||encode(digest($2::text||$3::text||COALESCE($4::text,''),'sha256'),'hex'),'hold',$3,
+          encode(digest($2::text||$3::text||COALESCE($4::text,''),'sha256'),'hex'),$4,'{}' FROM held
+        ON CONFLICT(outbound_id,event_key) DO NOTHING
+      ) SELECT id FROM held`, [id, input.processing_token, input.reason, input.provider_message_id??null]);
     return result.rows.length === 1;
   }
 }

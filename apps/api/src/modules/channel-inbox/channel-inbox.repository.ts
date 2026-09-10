@@ -137,7 +137,7 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
     const result = await this.execute<ChannelInboundMessageRow>(
       `WITH candidate AS (
         SELECT i.id FROM channel_inbound_messages i WHERE ($1::uuid IS NULL OR i.id = $1)
-          AND i.recovery_state = 'active' AND i.status IN ('received', 'failed') AND i.attempt_count < $5
+          AND NOT i.media_pending AND i.recovery_state = 'active' AND i.status IN ('received', 'failed') AND i.attempt_count < $5
           AND ($4 OR NOT i.contextual_queue)
           AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= clock_timestamp())
           AND NOT EXISTS (SELECT 1 FROM channel_inbound_messages older WHERE older.phone_e164 = i.phone_e164
