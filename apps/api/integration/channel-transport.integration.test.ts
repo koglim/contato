@@ -102,6 +102,22 @@ test('two media consumers cannot hold the same lease; expiry resumes and old tok
   }finally{await f.cleanup();}
 });
 
+test('parallel consumers claim different media while Inbox preserves admission order',async()=>{
+  const f=await fixture();try{
+    const first=(await media.admit(f.input)).response!.id;
+    const second=(await media.admit({...f.input,provider_message_id:randomUUID()})).response!.id;
+    const claims=await Promise.all([media.claimNext(),media.claimNext()]);
+    assert.deepEqual(claims.map(c=>c!.id).sort(),[first,second].sort());
+    assert.equal(new Set(claims.map(c=>c!.processing_token)).size,2);
+    const later=claims.find(c=>c!.id===second)!;
+    await media.complete(second,transcriptionDecision({statusCode:200,body:{text:'ajuda'}},later,false).payload);
+    assert.equal(await inbox.claimNext(60),null);
+    const earlier=claims.find(c=>c!.id===first)!;
+    await media.complete(first,transcriptionDecision({statusCode:200,body:{text:'ajuda'}},earlier,false).payload);
+    const row=await inbox.claimNext(60);assert.equal(row?.id,(await f.state(first)).inbound_id);
+  }finally{await f.cleanup();}
+});
+
 for(const fallbackWorks of [true,false]) test(`durable transcription primary failure, fallback ${fallbackWorks?'success':'failure'}`,async()=>{
   const f=await fixture();try{
     const id=(await media.admit(f.input)).response!.id,claim=await media.claimNext();
@@ -152,6 +168,9 @@ for(const action of ['confirm','retry','close','retain'] as const) test(`adminis
     const claim=await outbox.claim(id,randomUUID(),60);assert.ok(claim);
     const receipt=action==='confirm'?'verified-provider-id':undefined;
     await outbox.holdDelivery(id,{processing_token:claim.processingToken!,reason:receipt?'confirmation_pending':'transport_outcome_unknown',provider_message_id:receipt});
+    const laterMedia=(await media.admit({...f.input,provider_message_id:randomUUID(),duration_seconds:121})).response!.id;
+    const laterId=(await f.state(laterMedia)).notice_outbound_id;
+    assert.equal(await outbox.claim(laterId,randomUUID(),60),null);
     const payload={request_id:randomUUID(),operator_id:randomUUID(),action,reason:{confirm:'delivery_proven',retry:'non_delivery_proven',close:'delivery_impossible',retain:'evidence_insufficient'}[action],
       ...(action==='retain'?{}:{evidence_hash:'a'.repeat(64)}),...(receipt?{provider_message_id:receipt}:{})};
     const results=await Promise.all([f.post(`/outbound/${id}/disposition`,payload),f.post(`/outbound/${id}/disposition`,payload)]);
@@ -164,6 +183,8 @@ for(const action of ['confirm','retry','close','retain'] as const) test(`adminis
     assert.equal(row.text_content,claim.textContent);assert.equal(row.recipient_phone_e164,f.phone);assert.equal(row.attempt_count,1);
     assert.equal(row.status,{confirm:'sent',retry:'pending',close:'failed',retain:'processing'}[action]);
     assert.equal(await outbox.claim(id,randomUUID(),60),null);
+    const laterClaim=await outbox.claim(laterId,randomUUID(),60);
+    assert.equal(Boolean(laterClaim),action==='confirm'||action==='close');
     if(action==='retry'){
       assert.ok(row.next_attempt_at>Date.now());
       await query("UPDATE channel_outbound_messages SET next_attempt_at=clock_timestamp()-INTERVAL '1 second' WHERE id=$1",[id]);
