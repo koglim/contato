@@ -1,5 +1,6 @@
 exports.up = (pgm) => {
   pgm.sql(`
+    ALTER TABLE channel_inbound_messages ADD COLUMN contextual_queue BOOLEAN NOT NULL DEFAULT FALSE;
     CREATE TABLE contextual_memories (
       customer_id UUID PRIMARY KEY REFERENCES customers(id) ON DELETE RESTRICT,
       memory JSONB NOT NULL DEFAULT '{"conversationId":null,"service":null,"location":null,"hypotheses":[]}',
@@ -31,12 +32,14 @@ exports.up = (pgm) => {
 };
 exports.down = (pgm) => {
   pgm.sql(`
-    LOCK TABLE contextual_memories, contextual_turns, contextual_budgets IN ACCESS EXCLUSIVE MODE;
+    LOCK TABLE contextual_memories, contextual_turns, contextual_budgets, channel_inbound_messages IN ACCESS EXCLUSIVE MODE;
     DO $$ BEGIN
-      IF EXISTS (SELECT 1 FROM contextual_memories) OR EXISTS (SELECT 1 FROM contextual_turns) THEN
+      IF EXISTS (SELECT 1 FROM contextual_memories) OR EXISTS (SELECT 1 FROM contextual_turns)
+        OR EXISTS (SELECT 1 FROM channel_inbound_messages WHERE contextual_queue) THEN
         RAISE EXCEPTION USING ERRCODE = 'P0018', MESSAGE = 'CONTEXTUAL_ROLLBACK_BLOCKED';
       END IF;
     END $$;
     DROP TABLE contextual_turns, contextual_memories, contextual_budgets;
+    ALTER TABLE channel_inbound_messages DROP COLUMN contextual_queue;
   `);
 };

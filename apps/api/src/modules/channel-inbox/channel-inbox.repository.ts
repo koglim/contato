@@ -70,11 +70,11 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
     private readonly transaction: ChannelInboxTransaction = withTransaction,
   ) {}
 
-  async createOrFind(input: ChannelInboundMessageInput) {
+  async createOrFind(input: ChannelInboundMessageInput, options?: { contextual: boolean }) {
     const inserted = await this.execute<ChannelInboundMessageRow>(
       `INSERT INTO channel_inbound_messages (
-         provider, provider_message_id, phone_e164, raw_text, country_code, limit_value
-       ) VALUES ($1, $2, $3, $4, $5, $6)
+         provider, provider_message_id, phone_e164, raw_text, country_code, limit_value${options?.contextual ? ", contextual_queue" : ""}
+       ) VALUES ($1, $2, $3, $4, $5, $6${options?.contextual ? ", TRUE" : ""})
        ON CONFLICT (provider, provider_message_id) DO NOTHING
        RETURNING ${columns}`,
       [input.provider, input.provider_message_id, input.phone_e164, input.raw_text, input.country_code, input.limit],

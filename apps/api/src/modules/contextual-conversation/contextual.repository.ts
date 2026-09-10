@@ -22,6 +22,7 @@ export async function contextualFingerprint(client: DatabaseClient, customerId: 
 export class PostgresContextualRepository {
   async acquire(record: ChannelInboundMessageRecord, model: string): Promise<ContextualSnapshot> {
     const customerId = await withTransaction(async client => {
+      await client.query(`UPDATE channel_inbound_messages SET contextual_queue = TRUE WHERE id = $1`, [record.id]);
       const customer = await client.query<{ id: string }>(`INSERT INTO customers(phone_e164) VALUES ($1)
         ON CONFLICT(phone_e164) DO UPDATE SET phone_e164 = EXCLUDED.phone_e164 RETURNING id`, [record.phoneE164]);
       const customerId = customer.rows[0].id;
@@ -39,10 +40,10 @@ export class PostgresContextualRepository {
         AND (lease_token IS NULL OR lease_expires_at <= NOW()) RETURNING revision, memory, conversation_fingerprint`, [customerId, token, CONTEXTUAL_POLICY.leaseSeconds]);
       if (!claimed.rows[0]) throw new ContextualBusyError();
       // Arrival order, not UUID or completion order. A later turn stays recoverable in the Inbox.
-      const older = await client.query(`SELECT t.inbound_id FROM contextual_turns t
-        JOIN channel_inbound_messages i ON i.id = t.inbound_id
+      const older = await client.query(`SELECT i.id FROM channel_inbound_messages i
         JOIN channel_inbound_messages current ON current.id = $2
-        WHERE t.customer_id = $1 AND t.status = 'pending' AND (i.created_at, i.id) < (current.created_at, current.id) LIMIT 1`, [customerId, record.id]);
+        WHERE i.phone_e164 = $1 AND i.contextual_queue AND i.status <> 'processed'
+          AND (i.created_at, i.id) < (current.created_at, current.id) LIMIT 1`, [record.phoneE164, record.id]);
       if (older.rows.length) throw new ContextualBusyError();
       const current = await contextualFingerprint(client, customerId);
       const memory = contextualMemorySchema.parse(claimed.rows[0].memory);

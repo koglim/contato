@@ -35,8 +35,11 @@ e inbound de evidência, hipóteses separadas, revisão, lease, turnos idempoten
 orçamentos. `down` bloqueia com `P0018` se existirem memórias/turnos; nunca apaga
 histórico para permitir downgrade. Migrations 001–017 não foram editadas.
 
-Registro de turno precede lease. Turnos pendentes são ordenados pela chegada do
-inbound. Concorrente recebe o contrato recuperável `channel_message_processing`;
+O inbound novo recebe `contextual_queue=true` no INSERT original, antes do handler.
+Registro de turno precede lease. Entradas elegíveis ainda não processadas são
+ordenadas pela chegada do inbound, inclusive quando um handler anterior ainda
+não começou. Entradas antigas fora da B2 não entram retroativamente nessa fila.
+Concorrente recebe o contrato recuperável `channel_message_processing`;
 nenhum conteúdo é descartado. O transporte/operador precisa repetir inbounds
 recuperáveis; ainda não existe worker autônomo de reprocessamento de Inbox.
 Uma entrada abandonada pode bloquear as seguintes até sua recuperação.

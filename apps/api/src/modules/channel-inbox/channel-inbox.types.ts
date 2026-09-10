@@ -39,7 +39,7 @@ export type MarkProcessedInboundMessageWithOutbound = MarkProcessedInboundMessag
 };
 
 export interface ChannelInboundMessageRepository {
-  createOrFind(input: ChannelInboundMessageInput): Promise<{ record: ChannelInboundMessageRecord; created: boolean }>;
+  createOrFind(input: ChannelInboundMessageInput, options?: { contextual: boolean }): Promise<{ record: ChannelInboundMessageRecord; created: boolean }>;
   findById(id: string): Promise<ChannelInboundMessageRecord | null>;
   claim(id: string, processingToken: string, processingLeaseSeconds: number): Promise<ChannelInboundMessageRecord | null>;
   markProcessedAndCreateOutbound(input: MarkProcessedInboundMessageWithOutbound): Promise<ChannelOutboundMessageRecord | null>;

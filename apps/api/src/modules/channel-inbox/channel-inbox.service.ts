@@ -82,7 +82,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
-    const registered = await this.repository.createOrFind(input);
+    const registered = await this.repository.createOrFind(input, this.contextualConversation ? { contextual: true } : undefined);
     if (!sameInboundPayload(registered.record, input)) {
       return { kind: "channel_message_payload_conflict" };
     }

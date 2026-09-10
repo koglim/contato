@@ -85,6 +85,25 @@ test("B2 old proposal cannot be reused after an external context change", async 
   } finally { await f.cleanup(); }
 });
 
+test("B2 arrival FIFO includes an earlier inbound before its contextual handler starts", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ intent: "faq_cost" }));
+    const inbox = new PostgresChannelInboundMessageRepository(), repository = new PostgresContextualRepository();
+    const payload = (id: string) => ({ provider: "b2-test", provider_message_id: id, phone_e164: f.phone, raw_text: "Quanto custa usar?", country_code: "BR", limit: 3 });
+    const firstId = randomUUID(), secondId = randomUUID();
+    await inbox.createOrFind(payload(firstId), { contextual: true });
+    const second = await inbox.createOrFind(payload(secondId), { contextual: true });
+    const claimed = await inbox.claim(second.record.id, randomUUID(), 60); assert.ok(claimed);
+    await assert.rejects(repository.acquire(claimed, "fake"));
+    assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164=$1", [f.phone])).rows.length, 0);
+    const first = await f.receive("Quanto custa usar?", firstId); assert.equal(first.statusCode, 200, first.body);
+    await inbox.markFailed(claimed.id, claimed.processingToken!, "contextual_processing");
+    const retry = await f.receive("Quanto custa usar?", secondId); assert.equal(retry.statusCode, 200, retry.body);
+    assert.notEqual(first.json().outbound.id, retry.json().outbound.id);
+  } finally { await f.cleanup(); }
+});
+
 async function fixture() {
   const serviceId = randomUUID(), categoryId = randomUUID();
   const name = `Encanador${serviceId.replaceAll("-", "")}`;

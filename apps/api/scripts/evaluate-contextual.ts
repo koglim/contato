@@ -59,7 +59,10 @@ for (const source of sources.filter(s => selected === "all" || s.split === selec
       const explicit = (` ${normalizeContextualText(sample.message)} `).includes(" encanador ") ? "Encanador" : null;
       const result = controlContextualProposal(sample.message, randomUUID(), proposal, memory, catalog, explicit);
       actual = result.kind; memory = result.memory;
-    } catch { error = "provider_or_contract_failure"; }
+    } catch (caught) {
+      error = caught instanceof Error && caught.message === "evaluation_budget_exhausted" ? "evaluation_budget_exhausted" : "provider_or_contract_failure";
+      if (error === "evaluation_budget_exhausted") actual = "not_evaluated";
+    }
     const slots = { service: memory.service?.value ?? null, location: memory.location?.value ?? null, hypotheses: memory.hypotheses.map(h => h.name) };
     const slotsPassed = JSON.stringify(slots) === JSON.stringify(sample.expected_slots);
     rows.push({ id: sample.id, category: sample.category, split: source.split, passed: actual === sample.expected && slotsPassed, slots_passed: slotsPassed, injected_failure: sample.failure, expected: sample.expected,
@@ -69,7 +72,8 @@ for (const source of sources.filter(s => selected === "all" || s.split === selec
 const report = {
   mode: real ? "real-model-with-injected-failure-cases" : "mocked-proposals-controller-only", model: model ?? null,
   corpus: sources.map(s => ({ split: s.split, sha256: s.digest, cases: s.cases.length })), cases: rows.length,
-  passed: rows.filter(r => r.passed).length, failed: rows.filter(r => !r.passed).length,
+  passed: rows.filter(r => r.passed).length, failed: rows.filter(r => !r.passed && r.actual !== "not_evaluated").length,
+  not_evaluated: rows.filter(r => r.actual === "not_evaluated").length,
   categories: Object.fromEntries([...new Set(rows.map(r => r.category))].map(category => {
     const subset = rows.filter(r => r.category === category);
     return [category, { cases: subset.length, passed: subset.filter(r => r.passed).length }];
@@ -81,4 +85,5 @@ const report = {
   results: rows,
 };
 console.log(JSON.stringify(report, null, 2));
-if (report.failed && !real) process.exitCode = 1;
+if (report.failed) process.exitCode = 1;
+else if (report.not_evaluated) process.exitCode = 2;
