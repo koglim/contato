@@ -93,7 +93,8 @@ async function createFixture(legacy = false): Promise<Fixture> {
     provider: "bilateral-fixture", provider_message_id: randomUUID(), phone_e164: customerPhone,
     raw_text: "preciso de eletricista", country_code: "BR", limit: 2,
   });
-  await query("UPDATE channel_inbound_messages SET customer_id = $2, conversation_id = $3, search_request_id = $4 WHERE id = $1",
+  await query(`UPDATE channel_inbound_messages SET customer_id = $2, conversation_id = $3, search_request_id = $4,
+    status='processed',processed_at=NOW(),result=jsonb_build_object('route','contextual','customer_id',$2::uuid,'status','matched') WHERE id = $1`,
     [presentationInbound.record.id, customerId, conversationId, searchRequestId]);
   const presentation = await query<{ id: string }>(`INSERT INTO channel_outbound_messages
     (channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id)
@@ -116,6 +117,7 @@ async function createFixture(legacy = false): Promise<Fixture> {
     cleanup: async () => {
       await query(`DELETE FROM channel_outbound_messages WHERE business_key IN
         (SELECT 'contact:' || id || ':initial' FROM contacts WHERE search_request_id = $1)`, [searchRequestId]);
+      await query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1)", [customerPhone]);
       await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [customerPhone]);
       await query(`DELETE FROM contacts WHERE search_request_id = $1`, [searchRequestId]);
       await query(`DELETE FROM matches WHERE search_request_id = $1`, [searchRequestId]);
@@ -354,6 +356,7 @@ test("channel inbox selects by professional name and replays the same inbound sa
     assert.equal(state.rows[0]!.purpose, "customer_reply");
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1)`, [providerMessageId]);
+    await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1)`, [providerMessageId]);
     await query(`DELETE FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1`, [providerMessageId]);
     await fixture.cleanup();
   }
@@ -399,6 +402,7 @@ test("channel inbox keeps questions active, then selects by name idempotently", 
     assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM channel_outbound_messages WHERE channel_inbound_message_id = $1`, [replay.response.message_id])).rows[0]!.count), 1);
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [questionProviderMessageId, selectionProviderMessageId]);
+    await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [questionProviderMessageId, selectionProviderMessageId]);
     await query(`DELETE FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2)`, [questionProviderMessageId, selectionProviderMessageId]);
     await fixture.cleanup();
   }
@@ -442,6 +446,7 @@ test("channel inbox keeps an inconsistent name and position from creating a cont
     assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM contacts WHERE search_request_id = $1`, [fixture.searchRequestId])).rows[0]!.count), 1);
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [inconsistentId, validId]);
+    await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [inconsistentId, validId]);
     await query(`DELETE FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2)`, [inconsistentId, validId]);
     await fixture.cleanup();
   }
@@ -494,6 +499,7 @@ test("channel inbox recovers a completed selection after a crash before inbound 
     assert.equal((await bilateralCounts(fixture)).notifications, 1);
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id = $1`, [registered.record.id]);
+    await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE id = $1)`, [registered.record.id]);
     await query(`DELETE FROM channel_inbound_messages WHERE id = $1`, [registered.record.id]);
     await fixture.cleanup();
   }

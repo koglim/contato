@@ -66,6 +66,17 @@ const dispatcher = flow("ContatoCerto - Outbox Dispatcher", [
   "Continue draining": { main: [[edge("Budget")]] },
 }, 105);
 
-for (const [filename, contents] of [["shared-delivery.json", delivery], ["outbox-dispatcher.json", dispatcher]]) {
+const recovery = flow("ContatoCerto - Inbox Recovery", [
+  node("Schedule", "scheduleTrigger", { rule: { interval: [{ field: "seconds", secondsInterval: 10 }] } }, 0),
+  code("Budget", "const item = $input.all()[0]?.json ?? {};\nconst started_at = item.started_at ?? Date.now();\nconst count = item.count ?? 0;\nif (count >= 10 || Date.now() - started_at >= 45000) return [];\nreturn [{ json: { started_at, count } }];", 220, 0, "runOnceForAllItems"),
+  { ...http("Process next", "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/next/process' }}", null, "ContatoCerto Internal API", 440),
+    parameters: { ...http("Process next", "", null, "", 0).parameters,
+      url: "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/next/process' }}",
+      options: { timeout: 70000, redirect: { redirect: { followRedirects: false } }, response: { response: { fullResponse: true, neverError: true, responseFormat: "json" } } } } },
+  code("Continue recovery", "if ($json.statusCode === 204) return [];\nif ($json.statusCode !== 200 || !['processed','retry_scheduled','quarantined','processing'].includes($json.body?.status)) throw new Error('inbox_recovery_failed');\nconst budget = $('Budget').item.json;\nreturn [{ json: { started_at: budget.started_at, count: budget.count + 1 } }];", 660, 0, "runOnceForAllItems"),
+], { Schedule: { main: [[edge("Budget")]] }, Budget: { main: [[edge("Process next")]] },
+  "Process next": { main: [[edge("Continue recovery")]] }, "Continue recovery": { main: [[edge("Budget")]] } }, 120);
+
+for (const [filename, contents] of [["shared-delivery.json", delivery], ["outbox-dispatcher.json", dispatcher], ["inbox-recovery.json", recovery]]) {
   writeFileSync(fileURLToPath(new URL(filename, import.meta.url)), `${JSON.stringify(contents, null, 2)}\n`);
 }

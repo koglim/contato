@@ -57,7 +57,7 @@ jobs:
       - name: Verify generated n8n exports
         run: |
           pnpm build:workflows
-          git diff --exit-code -- workflows/n8n/shared-delivery.json workflows/n8n/outbox-dispatcher.json
+          git diff --exit-code -- workflows/n8n/shared-delivery.json workflows/n8n/outbox-dispatcher.json workflows/n8n/inbox-recovery.json
 
       - name: B2 300 synthetic cases (mocked proposals, not model quality)
         run: pnpm --filter @contatocerto/api eval:b2 --split=all --summary --report=b2-frozen-report.json
@@ -145,6 +145,20 @@ jobs:
               OR to_regclass('contextual_budgets') IS NULL
               OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'contextual_turns' AND column_name = 'reply_draft') THEN
               RAISE EXCEPTION 'migration 018 is incomplete';
+            END IF;
+          END $$;
+          SQL
+
+      - name: Verify migration 019 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='019_add_inbox_recovery')
+              OR to_regclass('channel_inbound_recovery_events') IS NULL
+              OR to_regclass('channel_inbound_recovery_queue_idx') IS NULL
+              OR to_regclass('channel_inbound_recovery_phone_idx') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_inbound_messages' AND column_name='next_attempt_at') THEN
+              RAISE EXCEPTION 'migration 019 is incomplete';
             END IF;
           END $$;
           SQL
@@ -255,7 +269,7 @@ jobs:
             ('00000000-0000-0000-0000-000000000016', 'professional_contact_notification', 'test', '+5566900000016', 'retry rollback fixture', NOW() + INTERVAL '1 minute');
           SQL
           set +e
-          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 3 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 4 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
           rollback_status=$?
           set -e
           echo "$rollback_output"
@@ -317,6 +331,18 @@ jobs:
              SET status = 'cancelled',
                  pending_slot = NULL
            WHERE id = '00000000-0000-0000-0000-000000000002';
+          SQL
+
+      - name: Roll back migration 019 with compatible data
+        run: |
+          node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF to_regclass('channel_inbound_recovery_events') IS NOT NULL OR EXISTS (
+              SELECT 1 FROM information_schema.columns WHERE table_name='channel_inbound_messages' AND column_name='recovery_state') THEN
+              RAISE EXCEPTION 'migration 019 remained after rollback';
+            END IF;
+          END $$;
           SQL
 
       - name: Roll back migration 018 with compatible data
@@ -498,7 +524,7 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 018
+      - name: Reapply migrations 008 through 019
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
       - name: Test PostgreSQL integrations after reapply

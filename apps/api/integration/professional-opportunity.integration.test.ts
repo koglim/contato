@@ -48,6 +48,8 @@ async function fixture(other = false) {
     VALUES ($1, $2, 'completed', 'eletricista em Sinop', 'eletricista', 'Sinop, MT', 'BR', 3, $3, NOW() + INTERVAL '1 hour', NOW())`, [conversationId, customerId, searchId]);
   await query(`INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value)
     VALUES ($1::uuid, 'test', $1::text, $2, 'Ana', 'BR', 3)`, [choiceId, customerPhone]);
+  await query(`UPDATE channel_inbound_messages SET status='processed',processed_at=NOW(),
+    result=jsonb_build_object('route','selection','customer_id',$2::uuid,'result',jsonb_build_object('kind','selected','professional_name','Ana','service_name','eletricista','professional_phone_e164',$3::text)) WHERE id=$1`,[choiceId,customerId,professionalPhone]);
   const snapshot = { public_code: code, service_name: "eletricista", city: "Sinop", state: "MT", neighborhood: null,
     summary: "Reparar tomada", professional_name: "Ana", professional_phone_e164: professionalPhone,
     customer_phone_e164: customerPhone, notice_version: "bilateral-v1", notice_outbound_id: randomUUID(),
@@ -76,6 +78,7 @@ async function fixture(other = false) {
       await db.query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
       await db.query("DELETE FROM opportunity_response_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$1)", [customerId]);
       await db.query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
+      await db.query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 IN ($1,$2))", [customerPhone, professionalPhone]);
       await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
       await db.query("DELETE FROM contacts WHERE customer_id=$1", [customerId]);
       await db.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE customer_id=$1)", [customerId]);
@@ -92,6 +95,8 @@ async function fixture(other = false) {
       VALUES ($1,$2,'completed','eletricista','eletricista','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [conversation,customerId,search]);
     await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value)
       VALUES ($1::uuid,'test',$1::text,$2,'Ana','BR',3)`,[selectionKey,customerPhone]);
+    await query(`UPDATE channel_inbound_messages SET status='processed',processed_at=NOW(),
+      result=jsonb_build_object('route','selection','customer_id',$2::uuid,'result',jsonb_build_object('kind','selected','professional_name','Ana','service_name','eletricista','professional_phone_e164',$3::text)) WHERE id=$1`,[selectionKey,customerId,professionalPhone]);
     await query(`INSERT INTO contacts (professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id)
       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)`, [professionalId,customerId,search,selectionKey,publicCode,JSON.stringify({...snapshot,public_code:publicCode,choice_inbound_id:selectionKey}),conversation]);
     return { conversation, publicCode };
@@ -221,6 +226,7 @@ test("crash before inbound completion rolls back all intentions and is recoverab
     assert.equal((await query("SELECT status FROM contacts WHERE id=$1",[f.contactId])).rows[0].status,"requested");
     assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)",[f.customerPhone,f.professionalPhone])).rows.length,0);
     await query("DROP TRIGGER fail_opportunity_completion ON channel_inbound_messages; DROP FUNCTION fail_opportunity_completion()");
+    await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE provider_message_id=$1 AND phone_e164=$2",[delivery,f.professionalPhone]);
     await f.send(`aceito ${f.code}`,f.professionalPhone,delivery);
     assert.equal(await f.countEvents(),1);
   } finally {
@@ -338,6 +344,7 @@ test("Outbox failure rolls back decision, event and reopening; retry after crash
     assert.equal((await f.conversations())[0].status,"completed");
     assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)",[f.customerPhone,f.professionalPhone])).rows.length,0);
     await query("DROP TRIGGER fail_opportunity_reply ON channel_outbound_messages; DROP FUNCTION fail_opportunity_reply()");
+    await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE provider_message_id=$1 AND phone_e164=$2",[delivery,f.professionalPhone]);
     await f.send(`recuso ${f.code}`,f.professionalPhone,delivery);
     assert.equal(await f.countEvents(),1);
     assert.equal((await f.send(`recuso ${f.code}`,f.professionalPhone,delivery)).duplicate,true);

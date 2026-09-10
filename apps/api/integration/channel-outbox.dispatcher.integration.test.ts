@@ -47,6 +47,7 @@ test("queue diagnostics reports pending, scheduled, held, expired and dead-lette
   } finally {
     await app.close();
     await query("DELETE FROM channel_outbound_messages WHERE id = ANY($1::uuid[])", [`{${ids.join(",")}}`]);
+    await query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[]))", [`{${ids.join(",")}}`]);
     await query("DELETE FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[])", [`{${ids.join(",")}}`]);
   }
 });
@@ -171,6 +172,7 @@ test("dispatcher uses the same claim contract for customer replies and professio
     assert.deepEqual(new Set([first?.purpose, second?.purpose]), new Set(["customer_reply", "professional_contact_notification"]));
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE id = ANY($1::uuid[])`, [[customerId, professionalId] as unknown as string]);
+    await query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[]))", [[customerId] as unknown as string]);
     await query("DELETE FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[])", [[customerId] as unknown as string]);
   }
 });

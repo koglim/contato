@@ -70,7 +70,7 @@ test("text normalization handles quotes, newlines, emoji and quoted replies with
 });
 
 test("workflow exports are inactive, connected, credential-free and never retry transport", () => {
-  for (const file of ["shared-delivery.json", "outbox-dispatcher.json"]) {
+  for (const file of ["shared-delivery.json", "outbox-dispatcher.json", "inbox-recovery.json"]) {
     const raw = readFileSync(new URL(file, import.meta.url), "utf8");
     const workflow = JSON.parse(raw);
     assert.equal(workflow.active, false);
@@ -94,6 +94,23 @@ test("workflow exports are inactive, connected, credential-free and never retry 
       assert.match(send.parameters.jsonBody, /message.text_content/u);
     }
   }
+});
+
+test("Inbox recovery export only processes bounded work; empty queue is normal and no transport is present", () => {
+  const workflow = JSON.parse(readFileSync(new URL("inbox-recovery.json", import.meta.url), "utf8"));
+  assert.equal(workflow.active,false);
+  assert.ok(workflow.nodes.every(node => !/Evolution|Deliver|Send/.test(node.name)));
+  const http = workflow.nodes.find(node => node.name === "Process next");
+  assert.match(http.parameters.url, /\/internal\/channel\/inbound\/next\/process/);
+  assert.equal(http.retryOnFail,false);
+  const next = workflow.nodes.find(node => node.name === "Continue recovery").parameters.jsCode;
+  const run = response => runInNewContext(`(() => { ${next} })()`, { $json: response, $: () => ({ item: { json: { count:1,started_at:123 } } }) });
+  assert.equal(run({statusCode:204}).length,0);
+  for (const status of ["processed","retry_scheduled","quarantined","processing"]) assert.equal(run({statusCode:200,body:{status}})[0].json.count,2);
+  assert.throws(() => run({statusCode:500,body:{raw_text:"private"}}), /inbox_recovery_failed/);
+  const budget = workflow.nodes.find(node => node.name === "Budget").parameters.jsCode;
+  const runBudget = json => runInNewContext(`(() => { ${budget} })()`, { $input:{all:()=>[{json}]} });
+  assert.equal(runBudget({count:10}).length,0); assert.equal(runBudget({started_at:Date.now()-46000}).length,0);
 });
 
 test("exported Code gate evaluates the same contract and dispatcher budgets are bounded", () => {

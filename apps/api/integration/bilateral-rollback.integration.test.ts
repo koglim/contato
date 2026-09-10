@@ -80,6 +80,7 @@ for (const protectedData of ["independent", "selection_key", "snapshot", "notice
       // test's own fixtures. Scenario B uses separate compatible data in CI.
       await withTransaction(async (client) => {
         await client.query("DELETE FROM channel_outbound_messages WHERE id = $1", [id]);
+        await client.query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE id = $1)", [inboundId]);
         await client.query("DELETE FROM channel_inbound_messages WHERE id = $1", [inboundId]);
         await client.query("DELETE FROM contacts WHERE id = $1", [id]);
         await client.query("DELETE FROM search_conversations WHERE id = $1", [conversationId]);

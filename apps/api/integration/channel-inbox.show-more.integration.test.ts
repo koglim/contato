@@ -83,6 +83,7 @@ async function createFixture(): Promise<Fixture> {
     nextMatchIds: [matchIds[2]!, matchIds[3]!],
     originalShownAt: [matches.rows[0]!.shown_at, matches.rows[1]!.shown_at],
     cleanup: async () => {
+      await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1)`, [phone]);
       await query(`DELETE FROM channel_inbound_messages WHERE phone_e164 = $1`, [phone]);
       await query(`DELETE FROM matches WHERE search_request_id = $1`, [searchRequestId]);
       await query(`DELETE FROM search_conversations WHERE id = $1`, [conversationId]);
@@ -118,7 +119,7 @@ test("Channel Inbox serializes concurrent show-more pages without duplicate prof
     ]);
     const responses = [first, second];
     assert.equal(responses.filter((response) => response.statusCode === 200).length, 1);
-    assert.equal(responses.filter((response) => response.statusCode === 409 && response.json().error === "selection_show_more_pending").length, 1);
+    assert.equal(responses.filter((response) => response.statusCode === 409 && ["selection_show_more_pending","channel_message_processing"].includes(response.json().error)).length, 1);
 
     const outbound = await query<{ id: string; text_content: string; channel_inbound_message_id: string }>(
       `SELECT id, text_content, channel_inbound_message_id
@@ -150,7 +151,8 @@ test("Channel Inbox serializes concurrent show-more pages without duplicate prof
       [fixture.phone],
     );
     assert.equal(inbound.rows.filter((row) => row.status === "processed").length, 1);
-    assert.equal(inbound.rows.filter((row) => row.status === "failed").length, 1);
+    // FIFO may stop the later inbound before it reaches the page reservation.
+    assert.equal(inbound.rows.filter((row) => row.status === "failed" || row.status === "received").length, 1);
     assert.deepEqual(inbound.rows.map((row) => Number(row.outbound_count)).sort(), [0, 1]);
 
     const original = await query<{ id: string; shown_at: Date | null; reservation_count: number | string }>(

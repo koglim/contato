@@ -27,6 +27,8 @@ test("B2 natural clarification is persisted before effects; retry does not regen
     assert.equal((await query("SELECT id FROM search_conversations WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows.length, 0);
     const calls = f.calls(), compositions = f.compositions();
     await query("DROP TRIGGER b2_fail_outbound ON channel_outbound_messages"); await query("DROP FUNCTION b2_fail_outbound()");
+    assert.equal((await f.receive(text,id)).statusCode,409,"backoff must prevent immediate retries");
+    await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE provider_message_id=$1 AND phone_e164=$2",[id,f.phone]);
     const retry = await f.receive(text, id); assert.equal(retry.statusCode, 200, retry.body);
     assert.equal(retry.json().reply_text, unavailable ? `Em qual cidade você precisa de ${f.name}?` : "Em qual cidade você precisa desse atendimento?");
     assert.equal(f.calls(), calls); assert.equal(f.compositions(), compositions);
@@ -82,8 +84,8 @@ test("B2 old proposal cannot be reused after an external context change", async 
     let effects = 0;
     await assert.rejects(repository.commit(record, snapshot, async () => { effects++; return { value: true, memory: snapshot.memory }; }));
     assert.equal(effects, 0); await repository.release(snapshot);
-    const renewed = await repository.acquire(record, "fake"); assert.equal(renewed.proposal, null);
-    assert.equal(renewed.memory.location?.value, "Sorriso"); await repository.release(renewed);
+    // Recovery must not reinterpret this old message against a different search.
+    await assert.rejects(repository.acquire(record,"fake"));
   } finally { await f.cleanup(); }
 });
 
@@ -91,19 +93,117 @@ test("B2 arrival FIFO includes an earlier inbound before its contextual handler 
   const f = await fixture();
   try {
     f.set(async () => basic({ intent: "faq_cost" }));
-    const inbox = new PostgresChannelInboundMessageRepository(), repository = new PostgresContextualRepository();
+    const inbox = new PostgresChannelInboundMessageRepository();
     const payload = (id: string) => ({ provider: "b2-test", provider_message_id: id, phone_e164: f.phone, raw_text: "Quanto custa usar?", country_code: "BR", limit: 3 });
     const firstId = randomUUID(), secondId = randomUUID();
     await inbox.createOrFind(payload(firstId), { contextual: true });
     const second = await inbox.createOrFind(payload(secondId), { contextual: true });
-    const claimed = await inbox.claim(second.record.id, randomUUID(), 60); assert.ok(claimed);
-    await assert.rejects(repository.acquire(claimed, "fake"));
+    const claimed = await inbox.claim(second.record.id, randomUUID(), 60); assert.equal(claimed,null,"FIFO now rejects before consuming an attempt");
+    assert.equal((await query("SELECT attempt_count FROM channel_inbound_messages WHERE id=$1",[second.record.id])).rows[0].attempt_count,0);
     assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164=$1", [f.phone])).rows.length, 0);
     const first = await f.receive("Quanto custa usar?", firstId); assert.equal(first.statusCode, 200, first.body);
-    await inbox.markFailed(claimed.id, claimed.processingToken!, "contextual_processing");
     const retry = await f.receive("Quanto custa usar?", secondId); assert.equal(retry.statusCode, 200, retry.body);
     assert.notEqual(first.json().outbound.id, retry.json().outbound.id);
   } finally { await f.cleanup(); }
+});
+
+for (const stage of ["before_proposal","after_proposal","after_draft"] as const) {
+  test(`Autonomous B2 recovery ${stage} reuses compatible artifacts without regenerating them`,async()=>{
+    const f=await fixture();const inbox=new PostgresChannelInboundMessageRepository(),context=new PostgresContextualRepository();
+    try {
+      f.set(async()=>basic({speech_act:"request"}));
+      f.setCompose(async input=>({target:input.target,question:"Em qual cidade precisa desse atendimento?"}));
+      const payload={provider:"b2-test",provider_message_id:randomUUID(),phone_e164:f.phone,raw_text:`Preciso de ${f.name}`,country_code:"BR",limit:3};
+      const registered=await inbox.createOrFind(payload,{contextual:true}),record=await inbox.claim(registered.record.id,randomUUID(),60);assert.ok(record);
+      const snapshot=await context.acquire(record,"fake");
+      if(stage!=="before_proposal") await context.saveProposal(record,snapshot,basic({speech_act:"request"}));
+      if(stage==="after_draft") await context.saveDraft(record,snapshot,"Em qual cidade precisa desse atendimento?");
+      await query("UPDATE channel_inbound_messages SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1",[record.id]);
+      await query("UPDATE contextual_memories SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE customer_id=$1",[snapshot.customerId]);
+      assert.equal((await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers})).statusCode,204);
+      await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE id=$1",[record.id]);
+      const recovered=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
+      assert.equal(recovered.statusCode,200,recovered.body);assert.equal(recovered.json().status,"processed",recovered.body);
+      assert.equal(f.calls(),stage==="before_proposal"?1:0);assert.equal(f.compositions(),stage==="after_draft"?0:1);
+      let effects=0;
+      await assert.rejects(context.acquire(record,"fake"));
+      await assert.rejects(context.saveProposal(record,snapshot,basic()));
+      await assert.rejects(context.saveDraft(record,snapshot,"Qual outro serviço?"));
+      await assert.rejects(context.commit(record,snapshot,async()=>{effects++;return{value:true,memory:snapshot.memory};}));
+      assert.equal(effects,0);assert.equal((await f.state()).revision,1);
+      const replay=await f.receive(payload.raw_text,payload.provider_message_id);assert.equal(replay.json().duplicate,true);
+      assert.equal(f.calls(),stage==="before_proposal"?1:0);assert.equal(f.compositions(),stage==="after_draft"?0:1);
+      assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164=$1",[f.phone])).rows.length,1);
+      assert.equal((await query("SELECT id FROM search_conversations WHERE customer_id=$1",[snapshot.customerId])).rows.length,1);
+    }finally{await f.cleanup();}
+  });
+}
+
+for(const boundary of ["search","outbox"] as const) {
+  test(`Autonomous B2 retry after crash at ${boundary} commits exactly one search, conversation, memory and Outbox`,async()=>{
+    const f=await fixture();try {
+      f.set(async()=>basic({speech_act:"request",location:{text:"Sinop",evidence:"Sinop"}}));
+      const table=boundary==="search"?"search_requests":"channel_outbound_messages";
+      const condition=boundary==="search"?`NEW.service_id='${f.serviceId}'`:`NEW.recipient_phone_e164='${f.phone}'`;
+      await query(`CREATE FUNCTION recovery_b2_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF ${condition} THEN RAISE EXCEPTION 'injected crash'; END IF; RETURN NEW; END $$`);
+      await query(`CREATE TRIGGER recovery_b2_fail AFTER INSERT ON ${table} FOR EACH ROW EXECUTE FUNCTION recovery_b2_fail()`);
+      const id=randomUUID(),text=`Preciso de ${f.name} em Sinop`;
+      assert.equal((await f.receive(text,id)).statusCode,500);
+      assert.equal((await query("SELECT id FROM search_requests WHERE service_id=$1",[f.serviceId])).rows.length,0);
+      assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164=$1",[f.phone])).rows.length,0);
+      assert.equal((await f.state()).revision,0);const calls=f.calls();
+      await query(`DROP TRIGGER recovery_b2_fail ON ${table}`);await query("DROP FUNCTION recovery_b2_fail()");
+      await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE phone_e164=$1",[f.phone]);
+      const response=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
+      assert.equal(response.json().status,"processed",response.body);assert.equal(f.calls(),calls);
+      const replay=await f.receive(text,id);assert.equal(replay.json().duplicate,true);assert.equal(f.calls(),calls);
+      assert.equal((await query("SELECT id FROM search_requests WHERE service_id=$1",[f.serviceId])).rows.length,1);
+      assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164=$1",[f.phone])).rows.length,1);
+      assert.equal((await f.state()).revision,1);
+      await f.sent(replay.json().outbound.id);
+      const choiceId=randomUUID(),chosen=await f.receive("quero o segundo",choiceId);assert.equal(chosen.statusCode,200,chosen.body);
+      assert.equal(chosen.json().result.result.kind,"selected");
+      const again=await f.receive("quero o segundo",choiceId);assert.equal(again.json().outbound.id,chosen.json().outbound.id);
+      const customer=(await f.state()).memory;
+      assert.ok(customer);
+      assert.equal((await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)",[f.phone])).rows.length,1);
+      assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE purpose='professional_contact_notification' AND business_key IN (SELECT 'contact:'||id||':initial' FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1))",[f.phone])).rows.length,1);
+    }finally {
+      await query(`DROP TRIGGER IF EXISTS recovery_b2_fail ON ${boundary==="search"?"search_requests":"channel_outbound_messages"}`);
+      await query("DROP FUNCTION IF EXISTS recovery_b2_fail()");await f.cleanup();
+    }
+  });
+}
+
+test("Recovery quarantines corrupt persisted proposals rather than hiding corruption as an AI fallback",async()=>{
+  const f=await fixture();try {
+    const inbox=new PostgresChannelInboundMessageRepository(),context=new PostgresContextualRepository();
+    const registered=await inbox.createOrFind({provider:"b2-test",provider_message_id:randomUUID(),phone_e164:f.phone,raw_text:"Quanto custa usar?",country_code:"BR",limit:3},{contextual:true});
+    const record=await inbox.claim(registered.record.id,randomUUID(),60);assert.ok(record);
+    const snapshot=await context.acquire(record,"fake");await context.release(snapshot);
+    await query("UPDATE contextual_turns SET proposal='{\"execute\":\"share_contacts\"}' WHERE inbound_id=$1",[record.id]);
+    await inbox.markFailed(record.id,record.processingToken!,"internal_error");
+    await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE id=$1",[record.id]);
+    const response=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
+    assert.equal(response.json().status,"quarantined",response.body);assert.equal(f.calls(),0);
+    assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164=$1",[f.phone])).rows.length,0);
+    assert.equal((await query("SELECT recovery_reason FROM channel_inbound_messages WHERE id=$1",[record.id])).rows[0].recovery_reason,"persisted_proposal_invalid");
+  }finally{await f.cleanup();}
+});
+
+test("Recovery after context expiration preserves confirmed slots but cannot select expired candidates",async()=>{
+  const f=await fixture();try {
+    f.set(async()=>basic({speech_act:"request",location:{text:"Sinop",evidence:"Sinop"}}));
+    const first=await f.receive(`Preciso de ${f.name} em Sinop`);await f.sent(first.json().outbound.id);
+    const before=await f.state(),inbox=new PostgresChannelInboundMessageRepository();
+    const registered=await inbox.createOrFind({provider:"b2-test",provider_message_id:randomUUID(),phone_e164:f.phone,raw_text:"quero o segundo",country_code:"BR",limit:3},{contextual:true});
+    await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1",[before.id]);
+    f.set(async()=>basic({intent:"selection",speech_act:"request"}));
+    const response=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
+    assert.equal(response.json().id,registered.record.id);assert.equal(response.json().status,"processed",response.body);
+    assert.equal((await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)",[f.phone])).rows.length,0);
+    const after=await f.state();assert.equal(after.memory.service.value,f.name);assert.equal(after.memory.location.value,"Sinop");assert.equal(after.memory.conversationId,null);
+  }finally{await f.cleanup();}
 });
 
 async function fixture() {
@@ -151,6 +251,7 @@ async function fixture() {
       await client.query("DELETE FROM contextual_budgets WHERE scope IN (SELECT id::text FROM customers WHERE phone_e164=$1)", [phone]);
       await client.query("DELETE FROM contextual_memories WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
       await client.query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164=$1 OR business_key IN (SELECT 'contact:'||id||':initial' FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1))", [phone]);
+      await client.query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164=$1)", [phone]);
       await client.query("DELETE FROM channel_inbound_messages WHERE phone_e164=$1", [phone]);
       await client.query("DELETE FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
       await client.query("DELETE FROM search_conversations WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
