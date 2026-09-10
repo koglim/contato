@@ -40,6 +40,7 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | `ba57af4` | B2: contexto, hipóteses, perguntas fundamentadas, recuperação, FIFO e corpus 300 | [34475297400](https://github.com/koglim/contato/actions/runs/34475297400) |
 | `883544c` | B2.2: pedidos interrogativos, catálogo informativo, composição e jornadas Inbox | [34478125708](https://github.com/koglim/contato/actions/runs/34478125708) |
 | `103a7cb` | Inbox autônoma: FIFO/fencing, retry/quarentena/admin, recuperação B2 e legado | [34484998845](https://github.com/koglim/contato/actions/runs/34484998845) |
+| `860c304` | Transporte inativo fixado em n8n 1.123.21 / Evolution 2.3.7: gateway JWT, áudio, shared e fixture B2 estável | [34500007769](https://github.com/koglim/contato/actions/runs/34500007769) |
 
 Checkpoint anterior à B2: `1cd80a6e699dbabdc64199a7b62026e72062e60a`.
 Lint, typecheck, build, 276 testes API + 12 web + 7 workflows passaram localmente
@@ -153,3 +154,9 @@ Nova Variable **n8n**: EVOLUTION_WEBHOOK_ORIGIN; nenhuma variável API/EasyPanel
 As demais Variables/credentials e riscos estão no runbook do transporte.
 Homologação manual, durabilidade de mídia/avisos e alertas continuam gates,
 não resultados comprovados pelo CI. B2 permanece desligada.
+
+Código validado em `860c3048e0c2ea838ef45e91fc09f4568c654c06`: lint, typecheck,
+build, 303 testes API + 12 web + 40 workflows; 300 casos B2 e 18 readiness
+simulados; 127 integrações PostgreSQL antes e depois do rollback/reaplicação
+até019, sem falhas. CI vinculado na tabela; a consolidação documental posterior
+também exige CI do próprio HEAD. Nenhuma execução paga ou transporte real.

@@ -269,3 +269,14 @@ sanitizador de PII, divergindo da asserção de texto literal. Os quatro testes
 novos de transporte passaram nas duas rodadas. Correção restrita ao fixture:
 suffix único somente alfabético; preservadas proteção, corpus e asserção estrita.
 O CI final deve ser conferido no SHA posterior, não considerar esse run aprovado.
+
+Correção validada: `860c3048e0c2ea838ef45e91fc09f4568c654c06`,
+[CI 34500007769](https://github.com/koglim/contato/actions/runs/34500007769), **success**.
+Instalação congelada, lint/typecheck/build, API303/web12/workflows40, B2 simulado300
+e readiness18, 127 integrações PostgreSQL **nas duas rodadas**, migrations até019,
+down protegido/compatível e reaplicação aprovados. Localmente passaram lint,
+typecheck, build, testes e avaliações simuladas; PostgreSQL foi executado no CI
+descartável (sem Docker/psql local). Exports reproduzíveis e diff sem erros.
+Nenhum segredo do export original encontrado nos arquivos do repositório pelo
+scan local, que não imprime valores. Isto não elimina a necessidade de rotação
+das chaves que já estavam no arquivo compartilhado.
