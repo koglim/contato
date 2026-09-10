@@ -1,4 +1,8 @@
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
+import { readContextualConfig } from "./config/contextual-conversation.js";
+import { ContextualConversationService, type ContextualInboxHandler } from "./modules/contextual-conversation/contextual.service.js";
+import { OpenAIContextualProvider } from "./modules/contextual-conversation/contextual.provider.js";
+import { apiLoggerOptions, type LogStream } from "./observability/logging.js";
 import { ProfessionalOpportunityService } from "./modules/professional-opportunity/professional-opportunity.service.js";
 import { healthResponseSchema } from "@contatocerto/shared";
 import { checkDatabaseConnection } from "./database/connection.js";
@@ -66,8 +70,15 @@ import { DefaultChannelOutboundService } from "./modules/channel-outbox/channel-
 import { PostgresChannelOutboundMessageRepository } from "./modules/channel-outbox/channel-outbox.repository.js";
 import type { ChannelOutboundMessageRepository, ChannelOutboundService } from "./modules/channel-outbox/channel-outbox.types.js";
 import { readChannelOutboundConfig, type ChannelOutboundConfig } from "./config/channel-outbound.js";
+import { InboxRecoveryService } from "./modules/channel-inbox/inbox-recovery.service.js";
+import { inboxRecoveryRoutes } from "./modules/channel-inbox/inbox-recovery.routes.js";
+import { channelTransportRoutes } from './modules/channel-media/channel-transport.routes.js';
+import { ChannelMediaService } from './modules/channel-media/channel-media.service.js';
+import { OutboundDispositionService } from './modules/channel-outbox/outbound-disposition.service.js';
 
 type AppDependencies = {
+  contextualConversation?: ContextualInboxHandler;
+  logStream?: LogStream;
   checkDatabase?: () => Promise<void>;
   professionalsRepository?: ProfessionalsRepository;
   catalogRepository?: CatalogRepository;
@@ -157,8 +168,20 @@ export function buildApp({
   channelOutboundService,
   channelOutboundConfig,
   professionalOpportunityService,
+  logStream,
+  contextualConversation,
 }: AppDependencies = {}) {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: apiLoggerOptions(logStream), logController: new LogController({ disableRequestLogging: true }), requestIdHeader: false });
+  app.addHook("onError", async (request, _reply, error) => {
+    request.log.error({ err: error }, "Request failed");
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    request.log.info({
+      code: "http_request_completed", method: request.method,
+      route: request.routeOptions.url ?? "unmatched", status_code: reply.statusCode,
+      duration_ms: reply.elapsedTime,
+    }, "Request completed");
+  });
   const resolvedMessageInterpretationFallbackConfig =
     messageInterpretationFallbackConfig ?? readMessageInterpretationFallbackConfig();
   const resolvedServiceResolutionRepository = serviceResolutionRepository ?? new PostgresServiceResolutionRepository();
@@ -214,6 +237,10 @@ export function buildApp({
     messagePresenter ?? new DefaultMessagePresenter(),
     resolvedChannelOutboundMessageRepository,
     professionalOpportunityService ?? (channelInboundMessageRepository ? undefined : new ProfessionalOpportunityService()),
+    contextualConversation ?? (() => {
+      const config = readContextualConfig();
+      return config.enabled ? new ContextualConversationService(new OpenAIContextualProvider(config.model, config.apiKey), resolvedLocationResolutionService) : undefined;
+    })(),
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
@@ -261,7 +288,12 @@ export function buildApp({
   app.register(searchConversationRoutes, { prefix: "/internal/search/conversations", service: resolvedSearchConversationService, internalApiKey });
   app.register(customerSearchRoutes, { prefix: "/internal/customer-search", router: resolvedCustomerSearchRouter, internalApiKey });
   app.register(channelInboxRoutes, { prefix: "/internal/channel/inbound", service: resolvedChannelInboxService, internalApiKey });
+  app.register(inboxRecoveryRoutes, { prefix: "/internal/channel/inbound", internalApiKey,
+    service: new InboxRecoveryService(resolvedChannelInboxService, (channelInboxConfig ?? readChannelInboxConfig()).processingLeaseSeconds,
+      Boolean(contextualConversation) || readContextualConfig().enabled) });
   app.register(channelOutboundRoutes, { prefix: "/internal/channel/outbound", service: resolvedChannelOutboundService, internalApiKey });
+  app.register(channelTransportRoutes,{prefix:'/internal/channel',internalApiKey,
+    media:new ChannelMediaService(Boolean(contextualConversation)||readContextualConfig().enabled),admin:new OutboundDispositionService()});
 
   return app;
 }

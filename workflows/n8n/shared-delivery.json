@@ -1,0 +1,421 @@
+{
+  "name": "ContatoCerto - Shared Outbox Delivery",
+  "active": false,
+  "nodes": [
+    {
+      "id": "start",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "validate-claim",
+      "name": "Validate claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction claimDecision(response, expectedProvider) {\n  response = httpResponse(response);\n  if (response?.statusCode === 204) return { action: \"stop\", reason: \"empty\" };\n  if (response?.statusCode === 409) return { action: \"stop\", reason: \"busy\" };\n  if (response?.statusCode !== 200) throw new Error(\"outbox_claim_unavailable\");\n  const message = response.body;\n  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;\n  const purposes = [\"customer_reply\", \"professional_contact_notification\", \"professional_reply\", \"customer_contact_update\", \"channel_notice\"];\n  if (!uuid.test(message?.id ?? \"\") || !purposes.includes(message?.purpose)\n    || !Number.isInteger(message?.attempt_count) || message.attempt_count < 0) throw new Error(\"outbox_claim_invalid\");\n  if (message.status === \"sent\") return { action: \"stop\", reason: \"sent\" };\n  if (message.status !== \"processing\" || !uuid.test(message.processing_token ?? \"\")\n    || !/^[a-z][a-z0-9_-]{0,62}$/u.test(expectedProvider ?? \"\") || message.provider !== expectedProvider\n    || !/^\\+[1-9][0-9]{7,14}$/u.test(message.recipient_phone_e164 ?? \"\")\n    || message.message_type !== \"text\" || typeof message.text_content !== \"string\"\n    || !message.text_content.trim() || message.text_content.length > 2000) throw new Error(\"outbox_claim_invalid\");\n  return { action: \"send\", message: {\n    id: message.id, purpose: message.purpose, provider: message.provider,\n    recipient_phone_e164: message.recipient_phone_e164, text_content: message.text_content,\n    processing_token: message.processing_token,\n  } };\n}\nreturn { json: claimDecision($json, $vars.EVOLUTION_PROVIDER) };"
+      }
+    },
+    {
+      "id": "send-authorized",
+      "name": "Send authorized",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Send authorized",
+              "leftValue": "={{ $json.action === 'send' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "send-evolution",
+      "name": "Send Evolution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.EVOLUTION_API_BASE_URL + '/message/sendText/' + encodeURIComponent($vars.EVOLUTION_INSTANCE) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { number: $json.message.recipient_phone_e164.slice(1), text: $json.message.text_content } }}",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Evolution"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "classify-transport",
+      "name": "Classify transport",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction transportDecision(response, message) {\n  response = httpResponse(response);\n  const code = response?.statusCode;\n  const key = response?.body?.key;\n  if (Number.isInteger(code) && code >= 200 && code < 300\n    && key?.fromMe === true && typeof key.id === \"string\" && key.id.trim()\n    && key.id.length <= 255 && key.remoteJid === `${message.recipient_phone_e164.slice(1)}@s.whatsapp.net`) {\n    return { action: \"sent\", payload: { processing_token: message.processing_token, provider_message_id: key.id } };\n  }\n  // Evolution 2.3.7 wraps even post-send exceptions in BadRequestException (400).\n  // Status alone (including a proxy's 429) is NOT proof that sending never ran.\n  // This exact authGuard rejection occurs before the send controller. Everything\n  // else is retained, pending provider reconciliation rather than a blind retry.\n  if (code === 401 && response.body?.status === 401 && response.body?.error === \"Unauthorized\"\n    && response.body?.response?.message === \"Unauthorized\") {\n    return { action: \"failed\", payload: { processing_token: message.processing_token, error_code: `transport_http_${code}` } };\n  }\n  return { action: \"hold\", payload: { processing_token: message.processing_token, reason: \"transport_outcome_unknown\" } };\n}\nconst message = $('Validate claim').item.json.message;\nreturn { json: { message, outcome: transportDecision($json, message) } };"
+      }
+    },
+    {
+      "id": "confirm-outcome",
+      "name": "Confirm outcome",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.message.id + '/' + $json.outcome.action }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.outcome.payload }}",
+        "options": {
+          "timeout": 5000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "check-confirmation",
+      "name": "Check confirmation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction confirmationDecision(response, message, outcome) {\n  response = httpResponse(response);\n  const expected = outcome.action === \"sent\" ? [\"sent\"] : outcome.action === \"failed\" ? [\"pending\", \"failed\"] : [\"processing\"];\n  const body = response?.body;\n  if (response?.statusCode === 200 && body?.id === message.id && expected.includes(body.status)\n    && (outcome.action !== \"hold\" || body.delivery_status === \"reconciliation_required\")) {\n    return { action: \"complete\", id: message.id, status: body.status, needs_reconciliation: outcome.action === \"hold\" };\n  }\n  if (outcome.action === \"sent\") return {\n    action: \"hold\", id: message.id,\n    provider_message_id: outcome.payload.provider_message_id,\n    payload: { processing_token: message.processing_token, reason: \"confirmation_pending\", provider_message_id: outcome.payload.provider_message_id },\n  };\n  throw new Error(\"outbox_confirmation_unavailable\");\n}\nconst context = $('Classify transport').item.json;\nreturn { json: confirmationDecision($json, context.message, context.outcome) };"
+      }
+    },
+    {
+      "id": "confirmation-pending",
+      "name": "Confirmation pending",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Confirmation pending",
+              "leftValue": "={{ $json.action === 'hold' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "hold-unconfirmed-send",
+      "name": "Hold unconfirmed send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.id + '/hold' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.payload }}",
+        "options": {
+          "timeout": 5000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "check-hold",
+      "name": "Check hold",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst context = $('Check confirmation').item.json;\nconst response = httpResponse($json);\nif (response.statusCode !== 200 || response.body?.id !== context.id || response.body?.delivery_status !== 'reconciliation_required') throw new Error('outbox_reconciliation_required');\nreturn { json: { action: 'complete', id: context.id, provider_message_id: context.provider_message_id, status: 'processing', needs_reconciliation: true } };"
+      }
+    },
+    {
+      "id": "complete",
+      "name": "Complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        240
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nreturn { json: $json };"
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Validate claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate claim": {
+      "main": [
+        [
+          {
+            "node": "Send authorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send authorized": {
+      "main": [
+        [
+          {
+            "node": "Send Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Evolution": {
+      "main": [
+        [
+          {
+            "node": "Classify transport",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify transport": {
+      "main": [
+        [
+          {
+            "node": "Confirm outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm outcome": {
+      "main": [
+        [
+          {
+            "node": "Check confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check confirmation": {
+      "main": [
+        [
+          {
+            "node": "Confirmation pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmation pending": {
+      "main": [
+        [
+          {
+            "node": "Hold unconfirmed send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hold unconfirmed send": {
+      "main": [
+        [
+          {
+            "node": "Check hold",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check hold": {
+      "main": [
+        [
+          {
+            "node": "Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 55,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": false
+  },
+  "pinData": {},
+  "tags": []
+}

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
+import { buildApp } from "../src/app.js";
+import { deliverClaim } from "./delivery-helper.js";
 import { closeDatabaseConnection, query } from "../src/database/connection.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
 import { PostgresCustomerRepository } from "../src/modules/customers/customer.repository.js";
@@ -54,8 +56,8 @@ async function createFixture(legacy = false): Promise<Fixture> {
   await query(`INSERT INTO service_categories (id, name, slug) VALUES ($1, $2, $3)`, [categoryId, "Teste", `teste-${categoryId}`]);
   await query(`INSERT INTO services (id, category_id, name, slug) VALUES ($1, $2, $3, $4)`, [serviceId, categoryId, "Eletricista", `eletricista-${serviceId}`]);
   await query(
-    `INSERT INTO professionals (id, display_name, slug, phone_e164)
-     VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)`,
+    `INSERT INTO professionals (id, display_name, slug, phone_e164, status)
+     VALUES ($1, $2, $3, $4, 'active'), ($5, $6, $7, $8, 'active')`,
     [
       firstProfessionalId, "Ana Eletricista", `ana-${firstProfessionalId}`, firstProfessionalPhone,
       secondProfessionalId, "Bia Eletricista", `bia-${secondProfessionalId}`, secondProfessionalPhone,
@@ -67,10 +69,13 @@ async function createFixture(legacy = false): Promise<Fixture> {
     [firstProfessionalServiceId, firstProfessionalId, serviceId, secondProfessionalServiceId, secondProfessionalId],
   );
   await query(
-    `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status)
-     VALUES ($1, $2, $3, $4, 'matched')`,
+    `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status, location)
+     VALUES ($1, $2, $3, $4, 'matched', ST_SetSRID(ST_MakePoint(-55.5, -11.86), 4326)::geography)`,
     [searchRequestId, customerId, "preciso de eletricista", serviceId],
   );
+  await query(`INSERT INTO professional_service_areas (professional_id, city, state, country_code, center, radius_meters)
+    SELECT id, 'Sinop', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.5, -11.86), 4326)::geography, 40000
+    FROM professionals WHERE id IN ($1, $2)`, [firstProfessionalId, secondProfessionalId]);
   await query(
     `INSERT INTO search_conversations (
        id, customer_id, status, pending_slot, original_raw_text, service_text,
@@ -88,7 +93,8 @@ async function createFixture(legacy = false): Promise<Fixture> {
     provider: "bilateral-fixture", provider_message_id: randomUUID(), phone_e164: customerPhone,
     raw_text: "preciso de eletricista", country_code: "BR", limit: 2,
   });
-  await query("UPDATE channel_inbound_messages SET customer_id = $2, conversation_id = $3, search_request_id = $4 WHERE id = $1",
+  await query(`UPDATE channel_inbound_messages SET customer_id = $2, conversation_id = $3, search_request_id = $4,
+    status='processed',processed_at=NOW(),result=jsonb_build_object('route','contextual','customer_id',$2::uuid,'status','matched') WHERE id = $1`,
     [presentationInbound.record.id, customerId, conversationId, searchRequestId]);
   const presentation = await query<{ id: string }>(`INSERT INTO channel_outbound_messages
     (channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id)
@@ -111,18 +117,41 @@ async function createFixture(legacy = false): Promise<Fixture> {
     cleanup: async () => {
       await query(`DELETE FROM channel_outbound_messages WHERE business_key IN
         (SELECT 'contact:' || id || ':initial' FROM contacts WHERE search_request_id = $1)`, [searchRequestId]);
+      await query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1)", [customerPhone]);
       await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [customerPhone]);
       await query(`DELETE FROM contacts WHERE search_request_id = $1`, [searchRequestId]);
       await query(`DELETE FROM matches WHERE search_request_id = $1`, [searchRequestId]);
       await query(`DELETE FROM search_conversations WHERE id = $1`, [conversationId]);
       await query(`DELETE FROM search_requests WHERE id = $1`, [searchRequestId]);
       await query(`DELETE FROM professional_services WHERE id = $1 OR id = $2`, [firstProfessionalServiceId, secondProfessionalServiceId]);
+      await query(`DELETE FROM professional_service_areas WHERE professional_id IN ($1, $2)`, [firstProfessionalId, secondProfessionalId]);
       await query(`DELETE FROM professionals WHERE id = $1 OR id = $2`, [firstProfessionalId, secondProfessionalId]);
       await query(`DELETE FROM services WHERE id = $1`, [serviceId]);
       await query(`DELETE FROM service_categories WHERE id = $1`, [categoryId]);
       await query(`DELETE FROM customers WHERE id = $1`, [customerId]);
     },
   };
+}
+
+for (const change of ["suspended", "inactive_service", "inactive_catalog", "removed_coverage"] as const) {
+  test(`first selection revalidates ${change} after presentation without changing history`, async () => {
+    const fixture = await createFixture();
+    try {
+      const professionalId = (await query<{ professional_id: string }>("SELECT professional_id FROM matches WHERE id = $1", [fixture.matchIds[0]])).rows[0].professional_id;
+      if (change === "suspended") await query("UPDATE professionals SET status = 'suspended' WHERE id = $1", [professionalId]);
+      if (change === "inactive_service") await query("UPDATE professional_services SET is_active = false WHERE professional_id = $1", [professionalId]);
+      if (change === "inactive_catalog") await query("UPDATE services SET is_active = false WHERE id = (SELECT service_id FROM search_requests WHERE id = $1)", [fixture.searchRequestId]);
+      if (change === "removed_coverage") await query("DELETE FROM professional_service_areas WHERE professional_id = $1", [professionalId]);
+      const repo = new PostgresSelectionMatchRepository();
+      assert.equal(await repo.findShownByPosition(fixture.searchRequestId, 1), null);
+      const selected = await repo.selectShownMatch({ ...fixture, position: 1, lastMessageText: "1", selectionKey: await fixture.inboundKey("1") });
+      assert.equal(selected.kind, "match_not_available");
+      assert.deepEqual(await bilateralCounts(fixture), { contacts: 0, notifications: 0, selected: 0, status: "active", pending_slot: "selection" });
+      const match = (await query<{ rank_position: number; shown_at: Date }>("SELECT rank_position, shown_at FROM matches WHERE id = $1", [fixture.matchIds[0]])).rows[0];
+      assert.equal(match.rank_position, 1);
+      assert.equal(match.shown_at.getTime(), fixture.shownAt[0].getTime());
+    } finally { await fixture.cleanup(); }
+  });
 }
 
 test("selectShownMatch serializes concurrent selections in PostgreSQL", { concurrency: false }, async () => {
@@ -327,6 +356,7 @@ test("channel inbox selects by professional name and replays the same inbound sa
     assert.equal(state.rows[0]!.purpose, "customer_reply");
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1)`, [providerMessageId]);
+    await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1)`, [providerMessageId]);
     await query(`DELETE FROM channel_inbound_messages WHERE provider = 'test' AND provider_message_id = $1`, [providerMessageId]);
     await fixture.cleanup();
   }
@@ -372,6 +402,7 @@ test("channel inbox keeps questions active, then selects by name idempotently", 
     assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM channel_outbound_messages WHERE channel_inbound_message_id = $1`, [replay.response.message_id])).rows[0]!.count), 1);
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [questionProviderMessageId, selectionProviderMessageId]);
+    await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [questionProviderMessageId, selectionProviderMessageId]);
     await query(`DELETE FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2)`, [questionProviderMessageId, selectionProviderMessageId]);
     await fixture.cleanup();
   }
@@ -415,6 +446,7 @@ test("channel inbox keeps an inconsistent name and position from creating a cont
     assert.equal(Number((await query<{ count: string }>(`SELECT COUNT(*) AS count FROM contacts WHERE search_request_id = $1`, [fixture.searchRequestId])).rows[0]!.count), 1);
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [inconsistentId, validId]);
+    await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2))`, [inconsistentId, validId]);
     await query(`DELETE FROM channel_inbound_messages WHERE provider_message_id IN ($1, $2)`, [inconsistentId, validId]);
     await fixture.cleanup();
   }
@@ -467,6 +499,7 @@ test("channel inbox recovers a completed selection after a crash before inbound 
     assert.equal((await bilateralCounts(fixture)).notifications, 1);
   } finally {
     await query(`DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id = $1`, [registered.record.id]);
+    await query(`DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE id = $1)`, [registered.record.id]);
     await query(`DELETE FROM channel_inbound_messages WHERE id = $1`, [registered.record.id]);
     await fixture.cleanup();
   }
@@ -623,7 +656,8 @@ test("legacy refusal and wrong-customer confirmation never share phones or creat
     if (prompt.kind !== "response") throw new Error("expected prompt");
     await markFixtureMessageSent(prompt.response.outbound.id);
     const repo = new PostgresSelectionMatchRepository();
-    const wrong = await repo.selectShownMatch({ ...fixture, customerId: randomUUID(), position: 1, lastMessageText: "sim", selectionKey: await fixture.inboundKey("sim"), confirmBilateral: true });
+    // Use the existing delivery key: a repository-only ownership probe must not enqueue an unprocessed message for the real client.
+    const wrong = await repo.selectShownMatch({ ...fixture, customerId: randomUUID(), position: 1, lastMessageText: "sim", selectionKey: prompt.response.message_id, confirmBilateral: true });
     assert.equal(wrong.kind, "conversation_customer_mismatch");
     const refusalId = randomUUID();
     const refused = await channel.receive("não quero", refusalId);
@@ -703,4 +737,28 @@ test("legacy consent prompt recovers after crash before inbound completion witho
     assert.equal((await bilateralCounts(fixture)).contacts, 0);
     assert.equal(await repository.recoverConsentResponse(randomUUID(), inbound.record.id), null);
   } finally { await fixture.cleanup(); }
+});
+
+test("bilateral choice delivers customer reply and independent professional notification without a professional webhook", async () => {
+  const fixture = await createFixture();
+  const app = buildApp({ internalApiKey: "delivery-integration" });
+  try {
+    const choiceId = randomUUID();
+    const choice = await bilateralChannel(fixture).receive("Ana", choiceId);
+    if (choice.kind !== "response") throw new Error("expected choice response");
+    const customer = await deliverClaim(app, "delivery-integration", "bilateral-test", choice.response.outbound.id);
+    assert.equal(customer.recipient_phone_e164, fixture.customerPhone);
+    const professional = await deliverClaim(app, "delivery-integration", "bilateral-test");
+    assert.equal(professional.purpose, "professional_contact_notification");
+    assert.equal(professional.recipient_phone_e164, fixture.firstProfessionalPhone);
+    assert.ok(professional.text_content.includes(fixture.customerPhone));
+    assert.doesNotMatch(professional.text_content, /[0-9a-f]{8}-[0-9a-f-]{27}|score_breakdown/u);
+    const replay = await bilateralChannel(fixture).receive("Ana", choiceId);
+    if (replay.kind !== "response") throw new Error("expected replay");
+    assert.equal(replay.response.outbound.id, customer.id);
+    assert.equal(replay.response.outbound.status, "sent");
+    assert.equal((await query("SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1", [fixture.firstProfessionalPhone])).rows.length, 0);
+    assert.equal((await new PostgresChannelOutboundMessageRepository().claimNextPending(randomUUID(), 60)), null);
+    assert.equal((await bilateralCounts(fixture)).contacts, 1);
+  } finally { await app.close(); await fixture.cleanup(); }
 });

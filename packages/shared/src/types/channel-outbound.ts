@@ -7,6 +7,7 @@ import type {
   channelOutboundMessagePurposeSchema,
   markChannelOutboundMessageFailedSchema,
   markChannelOutboundMessageSentSchema,
+  channelOutboundQueueStatusSchema,
 } from "../schemas/channel-outbound.js";
 
 export type ChannelOutboundMessageStatus = z.infer<typeof channelOutboundMessageStatusSchema>;
@@ -16,3 +17,4 @@ export type ChannelOutboundMessageClaimResponse = z.infer<typeof channelOutbound
 export type MarkChannelOutboundMessageSentInput = z.infer<typeof markChannelOutboundMessageSentSchema>;
 export type MarkChannelOutboundMessageFailedInput = z.infer<typeof markChannelOutboundMessageFailedSchema>;
 export type ChannelOutboundMessageMutationResponse = z.infer<typeof channelOutboundMessageMutationResponseSchema>;
+export type ChannelOutboundQueueStatus = z.infer<typeof channelOutboundQueueStatusSchema>;

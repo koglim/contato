@@ -6,6 +6,7 @@ import type { ChannelInboundMessageRecord } from "../channel-inbox/channel-inbox
 import { normalizeOpportunityCommand, parseOpportunityMessage } from "./professional-opportunity.parser.js";
 import { resolveResumeTarget } from "./resume-target.js";
 import { resumedMatchEligibilitySql } from "./resumed-match-eligibility.js";
+import { InboxFenceError, InboxContextChangedError, inboxContextSql, liveInboxLeaseSql } from "../channel-inbox/inbox-recovery.policy.js";
 
 type Contact = { id: string; professional_id: string; customer_id: string; search_request_id: string;
   selection_conversation_id: string; public_code: string; status: string; bilateral_snapshot: unknown };
@@ -27,6 +28,10 @@ export class ProfessionalOpportunityService {
         return this.response(db, record.id, inbound.response_outbound_id, opportunityMessageSchema.parse(inbound.result), true);
       }
       if (inbound.status !== "processing" || inbound.processing_token !== record.processingToken) return null;
+      const live = await db.query(`SELECT id FROM channel_inbound_messages WHERE id = $1 AND processing_token = $2 AND ${liveInboxLeaseSql}`, [record.id, record.processingToken]);
+      if (!live.rows.length) throw new InboxFenceError();
+      const fingerprint=(await db.query<{fingerprint:string}>(`SELECT COALESCE(${inboxContextSql},'none') AS fingerprint`,[record.phoneE164])).rows[0]?.fingerprint;
+      if(record.contextFingerprint && fingerprint!==record.contextFingerprint) throw new InboxContextChangedError();
       if (parseGlobalConversationCommand(record.rawText)) return null;
       const parsed = parseOpportunityMessage(record.rawText);
       const customer = (await db.query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = $1", [record.phoneE164])).rows[0];
@@ -167,8 +172,11 @@ export class ProfessionalOpportunityService {
       (channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, opportunity_event_id, business_key)
       VALUES ($1, $7, $2, $3, $4, $5, $6) RETURNING id`,
     [record.id, record.provider, record.phoneE164, text, eventId ?? null, eventId ? `opportunity:${eventId}:professional` : `context:${record.id}`, purpose])).rows[0].id;
-    await db.query(`UPDATE channel_inbound_messages SET status = 'processed', result = $2::jsonb, response_outbound_id = $3,
-      processing_token = NULL, processing_started_at = NULL, error_code = NULL, processed_at = NOW() WHERE id = $1`, [record.id, JSON.stringify(result), outboundId]);
+    const finished = await db.query(`UPDATE channel_inbound_messages SET status = 'processed', result = $2::jsonb, response_outbound_id = $3,
+      processing_token = NULL, processing_started_at = NULL, error_code = NULL, processed_at = NOW(), lease_expires_at = NULL,
+      next_attempt_at = NULL, recovered_at = CASE WHEN total_attempts > 1 THEN NOW() END
+      WHERE id = $1 AND processing_token = $4 AND ${liveInboxLeaseSql} RETURNING id`, [record.id, JSON.stringify(result), outboundId, record.processingToken]);
+    if (!finished.rows.length) throw new InboxFenceError();
     return this.response(db, record.id, outboundId, result, false);
   }
 

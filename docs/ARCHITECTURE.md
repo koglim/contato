@@ -1,5 +1,38 @@
 # Arquitetura atual
 
+Logs HTTP usam rota parametrizada, código, status, duração e request ID gerado
+no servidor. Serializers e hook nativos removem detalhes de erros e seu `msg`,
+sem registrar query, headers, corpo ou IP. Política e limitações operacionais:
+[OPERATIONS.md](OPERATIONS.md). Isso não substitui revisão de retenção e acesso.
+
+A operação dispõe de `GET /internal/channel/outbound/queue-status`: agregado
+somente leitura por finalidade, protegido pela chave interna e contrato estrito
+sem PII. Usa o prazo de lease do dispatcher, sem reclamar/terminalizar mensagens.
+Não substitui alertas nem a recuperação administrativa da Outbox ainda pendentes.
+A Inbox tem diagnóstico e disposição auditada próprios na 019, descritos abaixo.
+
+O BFF do painel aplica uma allowlist de autosserviço no servidor antes do proxy
+interno. Status administrativo, verificação e identidade não podem ser alterados
+pela sessão demonstrativa. Ela continua vinculada ao profissional configurado;
+não confundir esse limite de segurança com a identidade individual ainda pendente.
+
+O transporte proposto tem exports inativos versionados em `workflows/n8n`.
+As funções puras dos Code nodes são também usadas pelos testes PostgreSQL de
+entrega bilateral com provider simulado. Esses testes não executam o motor n8n.
+Gateway imediato e dispatcher deverão compartilhar esse transporte na homologação,
+sem mudar a criação transacional das mensagens na API.
+
+Confirmações repetidas e retenções de entrega usam recibo persistido (017).
+Notificações independentes são ordenadas por destinatário; leases abandonadas
+têm limite terminal. O contrato e as limitações operacionais estão em
+[OUTBOUND_DELIVERY.md](OUTBOUND_DELIVERY.md).
+
+Estado canônico e checkpoints: [V1_EXECUTION.md](V1_EXECUTION.md). Seções de etapas
+anteriores permanecem como histórico. A elegibilidade de status, serviço, contato
+canônico e cobertura é agora obrigatória também na primeira escolha/apresentação,
+sem depender de recusa anterior. Ranks, snapshots e `shown_at` são preservados;
+replay de contato já efetivado continua usando o snapshot, não o perfil mutável.
+
 ## Contato bilateral — etapa 3
 
 Esta seção atualiza os limites históricos descritos abaixo. A Inbox agora pode concluir uma oportunidade bilateral; não há envio externo dentro da transação, alteração do n8n ou implementação de aceite/recusa profissional.
@@ -300,7 +333,7 @@ A reserva usa `FOR NO KEY UPDATE` sobre a busca: a Inbox pode já possuir `KEY S
 
 Não há garantia exactly-once matemática: se a Evolution aceitar o texto e o n8n cair antes da confirmação, uma lease vencida poderá ser reivindicada e reenviada. A Outbox evita a perda da intenção e múltiplas mensagens lógicas por inbound, além de tornar tentativas e estados observáveis. Logs incluem apenas IDs internos, provider, status, tentativas, flag de duplicata e código de erro controlado — nunca telefone, texto ou payload de webhook.
 
-Essa camada reduz duplicatas usuais de uma entrega at-least-once e garante um único processamento ativo em condições normais. Não promete exactly-once matemático: se o processo cair após o efeito do router mas antes do `markProcessed`, um reclaim posterior pode reexecutar o domínio. Idempotência de eventos e adaptação concreta da Evolution permanecem deliberadamente para a próxima fase.
+Historicamente existia uma janela entre efeito do router e `markProcessed`. O checkpoint 019 fecha essa janela para novos processamentos com transação compartilhada e fencing; entradas legadas com efeitos incertos são colocadas em quarentena. Isso não elimina a incerteza entre envio externo e recibo: a entrega WhatsApp continua dependendo de reconciliação, não é exatamente uma vez garantida.
 # Resposta profissional e retomada explícita (migration 015)
 
 A Inbox identifica oportunidades pelo telefone normalizado do remetente, conferido
@@ -335,3 +368,43 @@ sem executar novamente a troca de contexto.
 
 Migration 015 possui down protegido (`P0015`): dados de decisões ou retomadas
 impedem remoção destrutiva. Rollback compatível é exercitado antes dos downs anteriores.
+# Continuidade B2
+
+Ver [B2_CONTEXTUAL_CONVERSATION.md](B2_CONTEXTUAL_CONVERSATION.md) para o handler
+opcional, memória/hipóteses, fencing, quotas e limites do checkpoint. A ativação
+continua desabilitada; não equivale à conclusão comercial da V1.
+# Checkpoint 019 — recuperação da Inbox
+
+Recuperação autenticada com claim atômico, ordem `(created_at,id)` por telefone,
+lease/fencing, cinco tentativas, backoff e quarentena auditada. Fluxo síncrono e
+worker compartilham o mesmo processador. A transação da Inbox agora engloba os
+efeitos do router legado; B2 mantém proposta/rascunho fora do commit final e
+verifica também o token da Inbox. Fingerprint impede aplicar mensagem antiga
+em outra busca. Quarentena não libera FIFO sem disposição explícita.
+
+Decisões, limites transacionais, preservação de evidência, identidade administrativa
+declarada e testes: [INBOX_RECOVERY.md](INBOX_RECOVERY.md). O export agendado é
+inativo e não possui transporte; dispatcher/gateway continuam usando uma Outbox
+e entrega compartilhada. Migrations anteriores não foram alteradas.
+
+# Checkpoint 020 — admissão de mídia e reconciliação
+
+Gateway não envia avisos diretamente: persiste evento e placeholder FIFO da Inbox
+antes do ACK. BYTEA temporário, SHA-256, lease e resultado são controlados pela API;
+consumer separado só transcreve; recovery processa o único inbound original.
+Avisos API-owned são Outboxes channel_notice independentes idempotentes. Shared
+Delivery continua único caminho de envio, com holds e fencing. Transcrição e
+transporte HTTP sempre ocorrem fora das transações. Disposições administrativas
+serializadas preservam recibos, tentativas e histórico append-only, sem consentimento.
+Ver [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md) para invariantes, limites,
+privacidade, riscos de resultado externo incerto e identidade administrativa declarada.
+
+### Revisão cumulativa: fronteira entre mídia e Inbox
+
+Claim, resultado e expurgo de mídia conferem o placeholder da Inbox sob lock na
+ordem mídia → Inbox. Uma quarentena imposta por outro caminho ou encerramento
+administrativo impede transcrição/aviso posterior e não pode ser desfeito pelo
+worker. Bytes podem ser expurgados sem alterar a disposição da entrada nem liberar
+FIFO. Retry administrativo não ressuscita um placeholder sem mídia utilizável.
+Evidências, inventário completo e gates de integração em
+[CUMULATIVE_REVIEW.md](CUMULATIVE_REVIEW.md). Nenhuma migration nova nessa correção.

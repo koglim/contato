@@ -6,6 +6,8 @@ import type {
   ChannelOutboundClaimOutcome,
   ChannelOutboundMutationOutcome,
   ChannelOutboundService,
+  ChannelOutboundHoldOutcome,
+  HoldOutboundInput,
 } from "./channel-outbox.types.js";
 import type { MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 
@@ -32,6 +34,10 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
     private readonly repository: ChannelOutboundMessageRepository,
     private readonly config: ChannelOutboundConfig,
   ) {}
+
+  async queueStatus() {
+    return this.repository.queueStatus(this.config.processingLeaseSeconds);
+  }
 
   async claim(id: string): Promise<ChannelOutboundClaimOutcome> {
     const claimed = await this.repository.claim(id, randomUUID(), this.config.processingLeaseSeconds);
@@ -62,7 +68,14 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
     return this.mutationFailure(id);
   }
 
-  private async mutationFailure(id: string): Promise<ChannelOutboundMutationOutcome> {
+  async holdDelivery(id: string, input: HoldOutboundInput): Promise<ChannelOutboundHoldOutcome> {
+    if (await this.repository.holdDelivery(id, input)) {
+      return { kind: "response", response: { id, status: "processing", delivery_status: "reconciliation_required" } };
+    }
+    return this.mutationFailure(id);
+  }
+
+  private async mutationFailure(id: string): Promise<Exclude<ChannelOutboundMutationOutcome, { kind: "response" }>> {
     return (await this.repository.findById(id))
       ? { kind: "outbound_message_claim_invalid" }
       : { kind: "outbound_message_not_found" };

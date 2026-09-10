@@ -66,6 +66,8 @@ export {
   channelOutboundMessagePurposeSchema,
   markChannelOutboundMessageFailedSchema,
   markChannelOutboundMessageSentSchema,
+  holdChannelOutboundMessageSchema,
+  channelOutboundHoldResponseSchema,
 } from "./schemas/channel-outbound.js";
 export type { HealthResponse } from "./types/health.js";
 export type {
@@ -134,3 +136,10 @@ export type {
 export type { SelectionMessageContract } from "./types/selection-message.js";
 export type { GlobalConversationMessageContract } from "./types/global-conversation-message.js";
 export { opportunityMessageSchema } from "./schemas/opportunity-message.js";
+export { dashboardMutationSchema, updateSelfServiceProfileSchema } from "./schemas/dashboard-mutation.js";
+export { channelOutboundQueueStatusSchema } from "./schemas/channel-outbound.js";
+export type { ChannelOutboundQueueStatus } from "./types/channel-outbound.js";
+export { contextualMessageSchema } from "./schemas/contextual-message.js";
+export { inboxRecoveryResponseSchema, inboxDispositionSchema, inboxDispositionResponseSchema, inboxQueueStatusSchema } from "./schemas/inbox-recovery.js";
+export type { InboxDisposition } from "./schemas/inbox-recovery.js";
+export * from './schemas/channel-transport.js';

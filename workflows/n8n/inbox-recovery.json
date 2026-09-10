@@ -1,0 +1,149 @@
+{
+  "name": "ContatoCerto - Inbox Recovery",
+  "active": false,
+  "nodes": [
+    {
+      "id": "schedule",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "budget",
+      "name": "Budget",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst item = $input.all()[0]?.json ?? {};\nconst started_at = item.started_at ?? Date.now();\nconst count = item.count ?? 0;\nif (count >= 10 || Date.now() - started_at >= 45000) return [];\nreturn [{ json: { started_at, count } }];"
+      }
+    },
+    {
+      "id": "process-next",
+      "name": "Process next",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/next/process' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 70000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "continue-recovery",
+      "name": "Continue recovery",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst response = httpResponse($json);\nif (response.statusCode === 204) return [];\nif (response.statusCode !== 200 || !['processed','retry_scheduled','quarantined','processing'].includes(response.body?.status)) throw new Error('inbox_recovery_failed');\nconst budget = $('Budget').item.json;\nreturn [{ json: { started_at: budget.started_at, count: budget.count + 1 } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "Budget",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Budget": {
+      "main": [
+        [
+          {
+            "node": "Process next",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process next": {
+      "main": [
+        [
+          {
+            "node": "Continue recovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue recovery": {
+      "main": [
+        [
+          {
+            "node": "Budget",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 120,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": false
+  },
+  "pinData": {},
+  "tags": []
+}

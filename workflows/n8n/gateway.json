@@ -1,0 +1,513 @@
+{
+  "name": "ContatoCerto - WhatsApp Gateway",
+  "active": false,
+  "nodes": [
+    {
+      "id": "evolution-webhook",
+      "name": "Evolution webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contatocerto-evolution-inbound",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "jwtAuth": {
+          "name": "ContatoCerto Evolution Webhook JWT"
+        }
+      }
+    },
+    {
+      "id": "validate-event",
+      "name": "Validate event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction normalizeGatewayEvent(input, config, now = Math.floor(Date.now() / 1000)) {\n  const reject = (reason, http_status = 422) => ({ action: \"reject\", reason, http_status });\n  const ignore = reason => ({ action: \"ignore\", reason, http_status: 200 });\n  const jwt = input?.jwtPayload;\n  if (jwt?.app !== \"evolution\" || jwt.action !== \"webhook\" || !Number.isInteger(jwt.iat)\n    || !Number.isInteger(jwt.exp) || jwt.exp <= now || jwt.iat > now + 30\n    || jwt.exp - jwt.iat > 600 || jwt.exp <= jwt.iat) return reject(\"webhook_auth_invalid\", 403);\n  if (!/^application\\/json(?:\\s*;|$)/iu.test(input?.headers?.[\"content-type\"] ?? \"\")) return reject(\"webhook_content_type\", 415);\n  const body = input.body;\n  if (!body || typeof body !== \"object\" || Array.isArray(body)) return reject(\"webhook_envelope_invalid\");\n  if (Buffer.byteLength(JSON.stringify(body), \"utf8\") > 5 * 1024 * 1024) return reject(\"webhook_body_too_large\", 413);\n  if (!config.instance || body.instance !== config.instance) return reject(\"webhook_instance_invalid\", 403);\n  if (!config.origin || body.server_url !== config.origin) return reject(\"webhook_origin_invalid\", 403);\n  if (!/^[a-z][a-z0-9_-]{0,62}$/u.test(config.provider ?? \"\")) return reject(\"webhook_provider_unconfigured\", 503);\n  if (body.event !== \"messages.upsert\") return ignore(\"unsupported_event\");\n  const key = body.data?.key;\n  if (key?.fromMe === true) return ignore(\"own_message\");\n  if (key?.fromMe !== false) return reject(\"webhook_key_invalid\");\n  if (typeof key.remoteJid !== \"string\") return reject(\"webhook_phone_invalid\");\n  if (key.remoteJid.endsWith(\"@g.us\") || key.remoteJid.endsWith(\"@broadcast\")) return ignore(\"unsupported_recipient\");\n  const phoneJid = /^[1-9][0-9]{7,14}@s\\.whatsapp\\.net$/u;\n  const primaryPhone = phoneJid.test(key.remoteJid);\n  const altPhone = phoneJid.test(key.remoteJidAlt ?? \"\");\n  if (primaryPhone && altPhone && key.remoteJid !== key.remoteJidAlt) return reject(\"webhook_phone_conflict\");\n  const jid = primaryPhone ? key.remoteJid : /^\\d+@lid$/u.test(key.remoteJid) && altPhone ? key.remoteJidAlt : null;\n  if (!jid) return reject(\"webhook_phone_invalid\");\n  if (typeof key.id !== \"string\" || !/^[A-Za-z0-9_-]+$/u.test(key.id)\n    || `${config.instance}:${key.id}`.length > 255) return reject(\"webhook_id_invalid\");\n  const inbound = { provider: config.provider, provider_message_id: `${config.instance}:${key.id}`,\n    phone_e164: `+${jid.split(\"@\")[0]}`, country_code: \"BR\", limit: 3 };\n  const message = body.data.message;\n  if (!message || typeof message !== \"object\" || Array.isArray(message)) return reject(\"webhook_message_invalid\");\n  if (message.audioMessage) {\n    const audio = message.audioMessage;\n    // The API classifies, fingerprints and persists every audio event BEFORE ACK.\n    // No notice text and no transcription decision belongs to this gateway.\n    return { action: \"audio\", inbound, media: { ...inbound,\n      audio_base64: typeof message.base64 === 'string' ? message.base64 : '',\n      mime_type: typeof audio.mimetype === 'string' ? audio.mimetype.slice(0,100) : '',\n      duration_seconds: Number.isFinite(audio.seconds) && audio.seconds>=0 ? audio.seconds : null } };\n  }\n  const text = message.conversation ?? message.extendedTextMessage?.text;\n  if (text === undefined) return ignore(\"unsupported_message\");\n  if (typeof text !== \"string\" || !text.trim() || text.trim().length > 500) return reject(\"webhook_text_invalid\");\n  return { action: \"inbox\", inbound: { ...inbound, raw_text: text.trim() } };\n}\nreturn { json: normalizeGatewayEvent($json, { instance: $vars.EVOLUTION_INSTANCE, provider: $vars.EVOLUTION_PROVIDER, origin: $vars.EVOLUTION_WEBHOOK_ORIGIN }) };"
+      }
+    },
+    {
+      "id": "text-input",
+      "name": "Text input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Text input",
+              "leftValue": "={{ $json.action === 'inbox' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "channel-inbox",
+      "name": "Channel Inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 70000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.inbound }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "inspect-inbox",
+      "name": "Inspect Inbox",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction inboxDecision(response) {\n  response = httpResponse(response);\n  const status = response?.statusCode;\n  const body = response?.body;\n  if (status === 204) return { action: \"stop\", http_status: 200, reason: \"no_outbox\" };\n  if (status === 200 && /^[0-9a-f]{8}-[0-9a-f-]{27}$/iu.test(body?.outbound?.id ?? \"\")\n    && [\"pending\", \"processing\", \"sent\", \"failed\"].includes(body.outbound.status)) {\n    return { action: \"claim\", id: body.outbound.id, http_status: 200 };\n  }\n  if (status === 409 && [\"channel_message_processing\", \"conversation_processing\", \"selection_show_more_pending\"].includes(body?.error)) {\n    // These records are already durable; the recovery consumer resumes them.\n    return { action: \"stop\", http_status: 200, reason: \"inbox_deferred\" };\n  }\n  if (status === 409 && body?.error === \"channel_message_payload_conflict\") return { action: \"stop\", http_status: 409, reason: \"payload_conflict\" };\n  return { action: \"stop\", http_status: [400,401,403,422,429].includes(status) ? status : 502, reason: \"inbox_unavailable\" };\n}\nreturn {json:inboxDecision($json)};"
+      }
+    },
+    {
+      "id": "acknowledge-inbox",
+      "name": "Acknowledge Inbox",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: $json.http_status === 200, code: $json.reason ?? 'accepted' } }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      }
+    },
+    {
+      "id": "outbox-available",
+      "name": "Outbox available",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Outbox available",
+              "leftValue": "={{ $json.action === 'claim' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "claim-outbound",
+      "name": "Claim outbound",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.id + '/claim' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "deliver-shared",
+      "name": "Deliver shared",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.CONTATOCERTO_DELIVERY_WORKFLOW_ID }}",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "audio-input",
+      "name": "Audio input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Audio input",
+              "leftValue": "={{ $json.action === 'audio' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "persist-media",
+      "name": "Persist media",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/events' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.media }}",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "inspect-media-persistence",
+      "name": "Inspect media persistence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction mediaAdmissionDecision(response) {\n  response=httpResponse(response);\n  if (response?.statusCode===200 && /^[0-9a-f]{8}-[0-9a-f-]{27}$/iu.test(response.body?.id??'')\n    && ['pending','processing','completed','failed','quarantined'].includes(response.body?.status) && typeof response.body?.duplicate==='boolean')\n    return {http_status:200,reason:'media_persisted'};\n  return {http_status:response?.statusCode===409?409:503,reason:'media_not_acknowledged'};\n}\nreturn {json:mediaAdmissionDecision($json)};"
+      }
+    },
+    {
+      "id": "acknowledge-media",
+      "name": "Acknowledge media",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1320,
+        320
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: $json.http_status === 200, code: $json.reason ?? 'accepted' } }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      }
+    },
+    {
+      "id": "acknowledge-ignored-or-rejected",
+      "name": "Acknowledge ignored or rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        880,
+        560
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: $json.http_status === 200, code: $json.reason ?? 'accepted' } }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Evolution webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate event": {
+      "main": [
+        [
+          {
+            "node": "Text input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text input": {
+      "main": [
+        [
+          {
+            "node": "Channel Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audio input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Channel Inbox": {
+      "main": [
+        [
+          {
+            "node": "Inspect Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inspect Inbox": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge Inbox": {
+      "main": [
+        [
+          {
+            "node": "Outbox available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outbox available": {
+      "main": [
+        [
+          {
+            "node": "Claim outbound",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Claim outbound": {
+      "main": [
+        [
+          {
+            "node": "Deliver shared",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio input": {
+      "main": [
+        [
+          {
+            "node": "Persist media",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acknowledge ignored or rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist media": {
+      "main": [
+        [
+          {
+            "node": "Inspect media persistence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inspect media persistence": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 140,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": false
+  },
+  "pinData": {},
+  "tags": []
+}

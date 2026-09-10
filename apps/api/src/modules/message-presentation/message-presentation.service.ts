@@ -32,7 +32,7 @@ function matchingFrom(result: MatchedCustomerSearchResult): MatchingSearchRespon
   return result.orchestration.matching;
 }
 
-function presentMatches(matching: MatchingSearchResponse) {
+export function presentMatches(matching: MatchingSearchResponse) {
   const plural = matching.matches.length === 1 ? "um profissional" : `${matching.matches.length} profissionais`;
   const title = `Encontrei ${plural} para você 👇`;
   const entries = matching.matches.map((match, index) => {

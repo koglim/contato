@@ -10,6 +10,7 @@
     "lint": "eslint src scripts integration",
     "test": "node scripts/run-tests.mjs unit",
     "test:integration": "node scripts/run-tests.mjs integration",
+    "eval:b2": "tsx scripts/evaluate-contextual.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

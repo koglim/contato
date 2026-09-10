@@ -15,6 +15,7 @@ function harness(targets: object[], current?: object, persisted?: object) {
   const db = { async query(sql: string, values: unknown[] = []) {
     if (/^(INSERT|UPDATE)/u.test(sql)) writes.push(sql);
     if (sql.startsWith("SELECT status, processing_token")) return { rows:[persisted ?? { status:"processing", processing_token:id }] };
+    if (sql.startsWith("SELECT id FROM channel_inbound_messages") || sql.startsWith("UPDATE channel_inbound_messages")) return { rows:[{id}] };
     if (sql.startsWith("SELECT id FROM customers")) return { rows:[{id}] };
     if (sql.includes("SELECT contacts.*")) return { rows:[] };
     if (sql.includes("conversation.resume_slot IS NOT NULL")) return { rows:targets };

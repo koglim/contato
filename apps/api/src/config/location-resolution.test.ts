@@ -17,6 +17,12 @@ test("location resolution configuration uses documented defaults", () => {
   });
 });
 
+test("blank optional geocoding key from env example is treated as unconfigured", () => {
+  for (const OPENROUTESERVICE_API_KEY of ["", "   "]) {
+    assert.deepEqual(readLocationResolutionConfig({ OPENROUTESERVICE_API_KEY }), readLocationResolutionConfig({}));
+  }
+});
+
 test("location resolution configuration validates overrides", () => {
   assert.deepEqual(readLocationResolutionConfig({
     OPENROUTESERVICE_API_KEY: "key",

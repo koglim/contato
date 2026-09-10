@@ -27,6 +27,17 @@ function fake(results: QueryResultRow[][]) {
   return { calls, repository: new PostgresChannelOutboundMessageRepository(execute, transaction) };
 }
 
+test("queue diagnostics aggregates only unfinished metadata with the lease and retry policy", async () => {
+  const oldest = new Date("2026-09-01T12:00:00Z");
+  const row = { purpose: "professional_contact_notification", pending: 2, scheduled_retry: 1,
+    processing: 3, expired_lease: 1, reconciliation_required: 1, failed: 1, dead_letter: 1, oldest_unfinished_at: oldest };
+  const f = fake([[row]]);
+  assert.deepEqual(await f.repository.queueStatus(60), { items: [{ ...row, oldest_unfinished_at: oldest.toISOString() }] });
+  assert.deepEqual(f.calls[0].values, [60, 5]);
+  assert.match(f.calls[0].text, /WHERE status <> 'sent'/u);
+  assert.doesNotMatch(f.calls[0].text, /recipient_phone_e164|text_content|processing_token|UPDATE|INSERT|DELETE/u);
+});
+
 test("outbox repository recovers one legacy outbound, associates ranked matches, and claims retryable statuses with a lease", async () => {
   const matchId = randomUUID();
   const current = fake([[row()], [row()], [{ id }], [{ id: matchId }], [], [row({ status: "processing", processing_token: token, processing_started_at: new Date(), attempt_count: 2 })], [{ id }], [], [{ id }]]);
@@ -66,7 +77,7 @@ test("outbox repository rejects unranked or foreign matches before creating asso
 });
 
 test("outbox repository does not update matches when sent confirmation is invalid or failed", async () => {
-  const current = fake([[], [{ id }]]);
+  const current = fake([[], [], [{ id }]]);
   assert.equal(await current.repository.markSent(id, { processing_token: token, provider_message_id: "evolution-001" }), false);
   assert.equal(current.calls.some((call) => /shown_at/u.test(call.text)), false);
   assert.equal(await current.repository.markFailed(id, { processing_token: token, error_code: "evolution_timeout" }), true);

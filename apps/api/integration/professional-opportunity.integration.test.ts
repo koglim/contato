@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { rollbackThrough } from "./rollback-helper.js";
+import { deliverClaim } from "./delivery-helper.js";
 import { after, test } from "node:test";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
 import { buildApp } from "../src/app.js";
@@ -15,6 +14,26 @@ import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel
 after(closeDatabaseConnection);
 const key = "opportunity-integration";
 const phone = () => `+5566${Math.floor(100000000 + Math.random() * 899999999)}`;
+
+test("professional acceptance delivers an independent update without a new customer webhook", async () => {
+  const f = await fixture();
+  try {
+    const decisionId = randomUUID();
+    const accepted = await f.send(`aceito ${f.code}`, f.professionalPhone, decisionId);
+    const reply = await deliverClaim(f.app, key, "test", accepted.outbound.id);
+    assert.equal(reply.purpose, "professional_reply");
+    assert.equal(reply.recipient_phone_e164, f.professionalPhone);
+    const notification = await deliverClaim(f.app, key, "test");
+    assert.equal(notification.purpose, "customer_contact_update");
+    assert.equal(notification.recipient_phone_e164, f.customerPhone);
+    assert.ok(notification.text_content.includes(f.code));
+    const repeat = await f.send(`aceito ${f.code}`, f.professionalPhone, decisionId);
+    assert.equal(repeat.outbound.id, reply.id);
+    assert.equal(repeat.outbound.status, "sent");
+    assert.equal(await f.countEvents(), 1);
+    assert.equal((await new PostgresChannelOutboundMessageRepository().claimNextPending(randomUUID(), 60)), null);
+  } finally { await f.cleanup(); }
+});
 
 async function fixture(other = false) {
   const customerId = randomUUID(), professionalId = randomUUID(), searchId = randomUUID(), conversationId = randomUUID();
@@ -29,6 +48,8 @@ async function fixture(other = false) {
     VALUES ($1, $2, 'completed', 'eletricista em Sinop', 'eletricista', 'Sinop, MT', 'BR', 3, $3, NOW() + INTERVAL '1 hour', NOW())`, [conversationId, customerId, searchId]);
   await query(`INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value)
     VALUES ($1::uuid, 'test', $1::text, $2, 'Ana', 'BR', 3)`, [choiceId, customerPhone]);
+  await query(`UPDATE channel_inbound_messages SET status='processed',processed_at=NOW(),
+    result=jsonb_build_object('route','selection','customer_id',$2::uuid,'result',jsonb_build_object('kind','selected','professional_name','Ana','service_name','eletricista','professional_phone_e164',$3::text)) WHERE id=$1`,[choiceId,customerId,professionalPhone]);
   const snapshot = { public_code: code, service_name: "eletricista", city: "Sinop", state: "MT", neighborhood: null,
     summary: "Reparar tomada", professional_name: "Ana", professional_phone_e164: professionalPhone,
     customer_phone_e164: customerPhone, notice_version: "bilateral-v1", notice_outbound_id: randomUUID(),
@@ -45,6 +66,25 @@ async function fixture(other = false) {
     assert.equal(response.statusCode, 200, `Inbox failed with ${response.statusCode}`);
     return channelInboundMessageResponseSchema.parse(response.json());
   }
+  async function concurrentDecisions(texts: string[]) {
+    const deliveries = texts.map(raw_text => ({ provider: "test", provider_message_id: randomUUID(), phone_e164: professionalPhone, raw_text, country_code: "BR", limit: 3 }));
+    const responses = await Promise.all(deliveries.map(payload => app.inject({ method: "POST", url: "/internal/channel/inbound/messages", headers: { "x-internal-key": key }, payload })));
+    assert.ok(responses.some(response => response.statusCode === 200));
+    for (const response of responses) {
+      assert.ok([200, 409].includes(response.statusCode), response.body);
+      if (response.statusCode === 409) assert.equal(response.json().error, "channel_message_processing");
+    }
+    // FIFO can queue the later delivery. Complete it through the real autonomous consumer, not by bypassing its claim.
+    for (const response of responses.filter(response => response.statusCode === 409)) {
+      assert.equal(response.json().error, "channel_message_processing");
+      const recovered = await app.inject({ method: "POST", url: "/internal/channel/inbound/next/process", headers: { "x-internal-key": key } });
+      assert.equal(recovered.statusCode, 200, recovered.body);
+      assert.equal(recovered.json().status, "processed");
+    }
+    const replayed = await Promise.all(deliveries.map(payload => send(payload.raw_text, professionalPhone, payload.provider_message_id)));
+    assert.ok(replayed.every(response => response.duplicate));
+    return replayed;
+  }
   const conversations = async () => (await query<{ id: string; status: string; resume_slot: string | null }>(
     "SELECT id, status, resume_slot FROM search_conversations WHERE customer_id=$1 ORDER BY id", [customerId])).rows;
   const countEvents = async () => Number((await query("SELECT count(*) FROM opportunity_response_events WHERE contact_id=$1", [contactId])).rows[0].count);
@@ -57,6 +97,7 @@ async function fixture(other = false) {
       await db.query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
       await db.query("DELETE FROM opportunity_response_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$1)", [customerId]);
       await db.query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
+      await db.query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 IN ($1,$2))", [customerPhone, professionalPhone]);
       await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
       await db.query("DELETE FROM contacts WHERE customer_id=$1", [customerId]);
       await db.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE customer_id=$1)", [customerId]);
@@ -73,11 +114,13 @@ async function fixture(other = false) {
       VALUES ($1,$2,'completed','eletricista','eletricista','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [conversation,customerId,search]);
     await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value)
       VALUES ($1::uuid,'test',$1::text,$2,'Ana','BR',3)`,[selectionKey,customerPhone]);
+    await query(`UPDATE channel_inbound_messages SET status='processed',processed_at=NOW(),
+      result=jsonb_build_object('route','selection','customer_id',$2::uuid,'result',jsonb_build_object('kind','selected','professional_name','Ana','service_name','eletricista','professional_phone_e164',$3::text)) WHERE id=$1`,[selectionKey,customerId,professionalPhone]);
     await query(`INSERT INTO contacts (professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id)
       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)`, [professionalId,customerId,search,selectionKey,publicCode,JSON.stringify({...snapshot,public_code:publicCode,choice_inbound_id:selectionKey}),conversation]);
     return { conversation, publicCode };
   }
-  return { app, choiceId, customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, conversations, countEvents, cleanup, addOpportunity };
+  return { app, choiceId, customerId, contactId, professionalId, searchId, conversationId, otherId, code, customerPhone, professionalPhone, send, concurrentDecisions, conversations, countEvents, cleanup, addOpportunity };
 }
 
 test("decline reopens without another active search; events, replies and replay are atomic", async () => {
@@ -138,7 +181,7 @@ test("expired prior search does not replace current context or reuse options", a
 test("accept versus decline concurrent decisions have one event and one stable outcome", async () => {
   const f = await fixture();
   try {
-    const results = await Promise.all([f.send(`aceito ${f.code}`), f.send(`recuso ${f.code}`)]);
+    const results = await f.concurrentDecisions([`aceito ${f.code}`, `recuso ${f.code}`]);
     assert.deepEqual(results[0].outbound, results[1].outbound);
     assert.deepEqual(results[0].result, results[1].result);
     assert.equal(await f.countEvents(), 1);
@@ -169,7 +212,7 @@ for (const command of ["aceito", "recuso"]) {
   test(`two simultaneous ${command} deliveries produce one transition`, async () => {
     const f = await fixture();
     try {
-      const results = await Promise.all([f.send(`${command} ${f.code}`), f.send(`${command} ${f.code}`)]);
+      const results = await f.concurrentDecisions([`${command} ${f.code}`, `${command} ${f.code}`]);
       assert.equal(results[0].outbound.id, results[1].outbound.id);
       assert.equal(await f.countEvents(), 1);
     } finally { await f.cleanup(); }
@@ -202,6 +245,7 @@ test("crash before inbound completion rolls back all intentions and is recoverab
     assert.equal((await query("SELECT status FROM contacts WHERE id=$1",[f.contactId])).rows[0].status,"requested");
     assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)",[f.customerPhone,f.professionalPhone])).rows.length,0);
     await query("DROP TRIGGER fail_opportunity_completion ON channel_inbound_messages; DROP FUNCTION fail_opportunity_completion()");
+    await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE provider_message_id=$1 AND phone_e164=$2",[delivery,f.professionalPhone]);
     await f.send(`aceito ${f.code}`,f.professionalPhone,delivery);
     assert.equal(await f.countEvents(),1);
   } finally {
@@ -319,6 +363,7 @@ test("Outbox failure rolls back decision, event and reopening; retry after crash
     assert.equal((await f.conversations())[0].status,"completed");
     assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)",[f.customerPhone,f.professionalPhone])).rows.length,0);
     await query("DROP TRIGGER fail_opportunity_reply ON channel_outbound_messages; DROP FUNCTION fail_opportunity_reply()");
+    await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE provider_message_id=$1 AND phone_e164=$2",[delivery,f.professionalPhone]);
     await f.send(`recuso ${f.code}`,f.professionalPhone,delivery);
     assert.equal(await f.countEvents(),1);
     assert.equal((await f.send(`recuso ${f.code}`,f.professionalPhone,delivery)).duplicate,true);
@@ -344,8 +389,7 @@ test("migration 015 refuses destructive rollback and events cannot be overwritte
        WHERE recipient_phone_e164 IN ($1,$2) ORDER BY id`,[f.customerPhone,f.professionalPhone]);
     // Exercise the protected 015 rollback with the supported CLI syntax. The
     // explicit single transaction must roll back 016 as well when 015 rejects.
-    await assert.rejects(promisify(execFile)(process.execPath,["node_modules/node-pg-migrate/bin/node-pg-migrate.js","down","2","--single-transaction","-m","database/migrations","--database-url-var","DATABASE_URL"],
-      {cwd:fileURLToPath(new URL("../../../",import.meta.url))}), (error: unknown) => {
+    await assert.rejects(rollbackThrough("015_add_opportunity_responses"), (error: unknown) => {
       assert.ok(error instanceof Error && "stderr" in error);
       assert.match(String(error.stderr),/OPPORTUNITY_RESPONSE_ROLLBACK_BLOCKED/);
       assert.match(String(error.stderr),/P0015/); return true;

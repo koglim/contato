@@ -2,7 +2,7 @@ import { z } from "zod";
 import { phoneE164Schema } from "./phone.js";
 
 export const channelOutboundMessageStatusSchema = z.enum(["pending", "processing", "sent", "failed"]);
-export const channelOutboundMessagePurposeSchema = z.enum(["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update"]);
+export const channelOutboundMessagePurposeSchema = z.enum(["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice"]);
 
 export const channelOutboundMessageSummarySchema = z.object({
   id: z.string().uuid(),
@@ -42,7 +42,34 @@ export const markChannelOutboundMessageFailedSchema = z.object({
   error_code: z.string().trim().regex(/^[a-z][a-z0-9_]{0,119}$/u),
 }).strict();
 
+export const holdChannelOutboundMessageSchema = z.object({
+  processing_token: z.string().uuid(),
+  reason: z.enum(["transport_outcome_unknown", "confirmation_pending"]),
+  provider_message_id: z.string().trim().min(1).max(255).optional(),
+}).strict();
+
+export const channelOutboundHoldResponseSchema = z.object({
+  id: z.string().uuid(),
+  status: z.literal("processing"),
+  delivery_status: z.literal("reconciliation_required"),
+}).strict();
+
 export const channelOutboundMessageMutationResponseSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(["sent", "pending", "failed"]),
+}).strict();
+
+const queueCount = z.number().int().nonnegative();
+export const channelOutboundQueueStatusSchema = z.object({
+  items: z.array(z.object({
+    purpose: channelOutboundMessagePurposeSchema,
+    pending: queueCount,
+    scheduled_retry: queueCount,
+    processing: queueCount,
+    expired_lease: queueCount,
+    reconciliation_required: queueCount,
+    failed: queueCount,
+    dead_letter: queueCount,
+    oldest_unfinished_at: z.string().datetime({ offset: true }),
+  }).strict()).max(5),
 }).strict();

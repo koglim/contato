@@ -1,5 +1,17 @@
 # Modelo de dados
 
+## Evolução 017 — recibo e retenção de entrega
+
+`channel_outbound_messages.sent_token_hash` guarda SHA-256 do token que confirmou
+o envio; só existe em `sent`. `delivery_hold_reason` só existe em `processing`,
+com motivos limitados a `transport_outcome_unknown` e `confirmation_pending`.
+Nenhum token/recibo retroativo é gerado para dados legados. Índice parcial
+`channel_outbound_recipient_queue_idx` apoia ordenação de notificações por
+provider, destinatário, criação e ID. Não há nova variável.
+
+Down rejeita evidências incompatíveis com `P0017`, preservando integralmente os
+dados e as migrations anteriores. Ver [OUTBOUND_DELIVERY.md](OUTBOUND_DELIVERY.md).
+
 ## Evolução 014 — oportunidade bilateral e rollback protegido
 
 - `contacts.public_code`: código canônico `CC-` + oito caracteres aleatórios, único por `lower(public_code)`. Sem sequência, UUID ou PII. Novos contatos bilaterais têm uma única oportunidade por busca, protegida por índice parcial.
@@ -80,3 +92,26 @@ Valores monetários usam inteiros em centavos, nunca `FLOAT`. A restrição de `
 - Um contato recusado não bloqueia outro contato da mesma busca, mas seu histórico,
   snapshot e selected_at permanecem; uma retomada não inventa uma nova oportunidade.
 - Down bloqueia com P0015 diante de dados incompatíveis, sem apagar eventos/PII.
+# Adição 019 — Inbox recuperável
+
+`channel_inbound_messages`: `recovery_state`, `attempt_count`, `total_attempts`,
+`next_attempt_at`, `lease_expires_at`, `quarantined_at`, `recovery_reason`,
+`recovered_at`, `context_fingerprint`. Estado operacional separado do status
+histórico; nenhuma entrada é falsamente marcada como concluída para liberar FIFO.
+`channel_inbound_recovery_events`: ação/razão/data, chave idempotente, operador
+declarado e hash opcional do conflito; FK RESTRICT e updates proibidos. Sem
+cópia de telefone/texto/token. Índices de elegibilidade e ordem por telefone.
+Down P0019 protege dados incompatíveis. [Detalhes](INBOX_RECOVERY.md).
+
+# Adição 020 — mídia temporária e trilha de transporte
+
+channel_media_events liga exatamente um registro ao inbound_id (UNIQUE/RESTRICT),
+com fingerprint do evento/hash da mídia, MIME/duração, BYTEA até3MiB, expires_at,
+purged_at/reason, status, lease/token, attempt_count≤3, transcrição/provider,
+result_token_hash e notice_outbound_id único. Inbox ganha media_pending para
+não ultrapassar áudio ainda pendente. Outbox ganha channel_notice,
+delivery_held_at e administrative_closed_at; destinatário/texto não são editáveis
+pela administração. channel_transport_events guarda requests/evidências/resultado,
+com chaves idempotentes e trigger que rejeita UPDATE/DELETE. Sem PII no diagnóstico.
+Índices parciais para fila e expurgo. Down protegido P0020; 001–019 intactas.
+Retenção operacional e limites de WAL/backups: [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).

@@ -4,6 +4,7 @@ import type {
   ChannelOutboundMessageStatus,
   MarkChannelOutboundMessageFailedInput,
   MarkChannelOutboundMessageSentInput,
+  ChannelOutboundQueueStatus,
 } from "@contatocerto/shared";
 
 export type ChannelOutboundMessageRecord = {
@@ -35,13 +36,15 @@ export type CreateChannelOutboundMessage = {
 
 export type CreateIndependentChannelOutboundMessage = {
   businessKey: string;
-  purpose: "professional_contact_notification";
+  purpose: "professional_contact_notification" | "channel_notice";
   provider: string;
   recipientPhoneE164: string;
   textContent: string;
 };
 
 export interface ChannelOutboundMessageRepository {
+  queueStatus(processingLeaseSeconds: number): Promise<ChannelOutboundQueueStatus>;
+  holdDelivery(id: string, input: HoldOutboundInput): Promise<boolean>;
   findById(id: string): Promise<ChannelOutboundMessageRecord | null>;
   findByInboundMessageId(channelInboundMessageId: string): Promise<ChannelOutboundMessageRecord | null>;
   createOrFindForProcessedInbound(input: CreateChannelOutboundMessage): Promise<ChannelOutboundMessageRecord>;
@@ -64,8 +67,21 @@ export type ChannelOutboundMutationOutcome =
   | { kind: "outbound_message_claim_invalid" };
 
 export interface ChannelOutboundService {
+  queueStatus(): Promise<ChannelOutboundQueueStatus>;
+  holdDelivery(id: string, input: HoldOutboundInput): Promise<ChannelOutboundHoldOutcome>;
   claim(id: string): Promise<ChannelOutboundClaimOutcome>;
   claimNextPending(): Promise<ChannelOutboundClaimOutcome>;
   markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<ChannelOutboundMutationOutcome>;
   markFailed(id: string, input: MarkChannelOutboundMessageFailedInput): Promise<ChannelOutboundMutationOutcome>;
 }
+
+export type HoldOutboundInput = {
+  processing_token: string;
+  reason: "transport_outcome_unknown" | "confirmation_pending";
+  provider_message_id?: string;
+};
+
+export type ChannelOutboundHoldOutcome =
+  | { kind: "response"; response: { id: string; status: "processing"; delivery_status: "reconciliation_required" } }
+  | { kind: "outbound_message_not_found" }
+  | { kind: "outbound_message_claim_invalid" };

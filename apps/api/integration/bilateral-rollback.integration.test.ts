@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { rollbackThrough } from "./rollback-helper.js";
 import { after, test } from "node:test";
 import { closeDatabaseConnection, query, withTransaction } from "../src/database/connection.js";
 
-const exec = promisify(execFile);
-const root = fileURLToPath(new URL("../../../", import.meta.url));
 after(closeDatabaseConnection);
 
 async function databaseFingerprint() {
@@ -70,8 +66,7 @@ for (const protectedData of ["independent", "selection_key", "snapshot", "notice
       const before = await databaseFingerprint();
       let blocked = false;
       try {
-        await exec(process.execPath, ["node_modules/node-pg-migrate/bin/node-pg-migrate.js",
-          "-m", "database/migrations", "--database-url-var", "DATABASE_URL", "down", "3"], { cwd: root });
+        await rollbackThrough("014_add_bilateral_contact");
       } catch (error) {
         assert.ok(error instanceof Error && "stderr" in error);
         assert.match(String(error.stderr), /BILATERAL_ROLLBACK_BLOCKED/);
@@ -85,6 +80,7 @@ for (const protectedData of ["independent", "selection_key", "snapshot", "notice
       // test's own fixtures. Scenario B uses separate compatible data in CI.
       await withTransaction(async (client) => {
         await client.query("DELETE FROM channel_outbound_messages WHERE id = $1", [id]);
+        await client.query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE id = $1)", [inboundId]);
         await client.query("DELETE FROM channel_inbound_messages WHERE id = $1", [inboundId]);
         await client.query("DELETE FROM contacts WHERE id = $1", [id]);
         await client.query("DELETE FROM search_conversations WHERE id = $1", [conversationId]);

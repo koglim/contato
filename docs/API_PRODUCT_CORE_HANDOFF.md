@@ -1,5 +1,18 @@
 # API Product Core — contato bilateral
 
+> Estado atual: [V1_EXECUTION.md](V1_EXECUTION.md). As rodadas abaixo são histórico,
+> não instruções para reconstruir módulos ou modificar migrations já aplicadas.
+> A base atual inclui resposta profissional/retomada (015), retry (016) e
+> recibo/retenção de entrega (017), memória B2 (018), recuperação da Inbox (019)
+> e áudio durável/disposição de transporte (020). A execução V1 corrige elegibilidade
+> de toda nova seleção e limita o autosserviço do painel no BFF.
+>
+> Os novos exports de consumidor estão em `workflows/n8n`, inativos. Nenhum
+> workflow instalado foi alterado; versões e cinco exports candidatos estão
+> registrados, mas falta homologação real com números autorizados. Não ativar nem
+> interpretar teste simulado como entrega real. Estado e ordem de integração:
+> [CUMULATIVE_REVIEW.md](CUMULATIVE_REVIEW.md).
+
 ## Rodada atual: `feat/bilateral-contact`
 
 Base exata: `a3135a7f2b6543ce069c1b0b65b0bf428272bbd6`. Sem merge, frontend, n8n, gateway, IA ou variável de ambiente nova. Esta rodada implementa somente a etapa 3; aceite/recusa profissional, avaliações, assinaturas e autenticação permanecem fora do escopo.
@@ -261,3 +274,24 @@ próxima página, confirmação de envio e proteção de rollback. Testes usam I
 serviços/repositórios reais e banco descartável do CI, sem integração de produção.
 O consumidor futuro deve continuar confirmando por ID/lease, sem enviar mensagens
 fora da Outbox. A etapa não garante entrega externa até o consumidor ser integrado.
+# Continuidade: recuperação autônoma 019
+
+Implementado consumidor interno da Inbox e export n8n inativo; contrato e runbook
+em [INBOX_RECOVERY.md](INBOX_RECOVERY.md). Instalação/homologação/ativação não
+executadas. Não recriar notificações bilaterais: recuperação e replay usam os
+mesmos efeitos transacionais, selectionKey, consentimento e Outbox existentes.
+Aplicar todas as migrations pendentes (017/018/019 incluídas) antes da nova API,
+sem réplicas antigas processando durante a troca. B2 continua desligada.
+
+# Continuidade: durabilidade de áudio e intervenção 020
+
+Partindo de9b4646e, foram implementados admissão antes do ACK, transcrição durável,
+consumer de áudio inativo, aviso channel_notice pelo Shared Delivery, admin
+confirm/retry/close/retain com auditoria e diagnóstico agregado sem PII. Rotas e
+limites em [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).
+Migration020 é necessária; aplicar todas as pendentes, inclusive017/018/019/020,
+antes da API. Sem variável/credential nova. Não houve merge, deploy, importação,
+ativação, WhatsApp ou transcrição real. B2 off. Próximo checkpoint: homologação
+manual autorizada do transporte e retenção; depois avaliação B2 real autorizada.
+Núcleo bilateral preservado; V1 comercial ainda tem identidade, avaliações,
+cobrança, políticas e operação pública pendentes na matriz de aceite.
