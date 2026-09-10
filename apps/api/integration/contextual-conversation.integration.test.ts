@@ -18,10 +18,10 @@ async function fixture() {
   const name = `Encanador${serviceId.replaceAll("-", "")}`;
   const phone = `+5566${BigInt(`0x${randomUUID().replaceAll("-", "").slice(0, 8)}`).toString().padStart(10, "0")}`;
   const professionalIds = [randomUUID(), randomUUID()];
-  await query("INSERT INTO service_categories(id,name,slug) VALUES ($1,'B2 fixture',$1::text)", [categoryId]);
+  await query("INSERT INTO service_categories(id,name,slug) VALUES ($1::uuid,'B2 fixture',$1::text)", [categoryId]);
   await query("INSERT INTO services(id,category_id,name,slug) VALUES ($1,$2,$3,$3)", [serviceId, categoryId, name]);
   for (const [index, id] of professionalIds.entries()) {
-    await query("INSERT INTO professionals(id,display_name,slug,phone_e164,status) VALUES ($1,$2,$1::text,$3,'active')", [id, `Profissional ${index + 1}`, `+5566${Math.floor(Math.random() * 1e9).toString().padStart(9, "0")}`]);
+    await query("INSERT INTO professionals(id,display_name,slug,phone_e164,status) VALUES ($1::uuid,$2,$1::text,$3,'active')", [id, `Profissional ${index + 1}`, `+5566${Math.floor(Math.random() * 1e9).toString().padStart(9, "0")}`]);
     await query("INSERT INTO professional_services(professional_id,service_id) VALUES ($1,$2)", [id, serviceId]);
     await query(`INSERT INTO professional_service_areas(professional_id,city,state,country_code,center,radius_meters)
       VALUES ($1,'Sinop','MT','BR',ST_SetSRID(ST_MakePoint(-55.5,-11.86),4326)::geography,10000)`, [id]);
