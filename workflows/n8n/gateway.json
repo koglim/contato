@@ -1,0 +1,918 @@
+{
+  "name": "ContatoCerto - WhatsApp Gateway",
+  "active": false,
+  "nodes": [
+    {
+      "id": "evolution-webhook",
+      "name": "Evolution webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contatocerto-evolution-inbound",
+        "authentication": "jwtAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "jwtAuth": {
+          "name": "ContatoCerto Evolution Webhook JWT"
+        }
+      }
+    },
+    {
+      "id": "validate-event",
+      "name": "Validate event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction normalizeGatewayEvent(input, config, now = Math.floor(Date.now() / 1000)) {\n  const reject = (reason, http_status = 422) => ({ action: \"reject\", reason, http_status });\n  const ignore = reason => ({ action: \"ignore\", reason, http_status: 200 });\n  const jwt = input?.jwtPayload;\n  if (jwt?.app !== \"evolution\" || jwt.action !== \"webhook\" || !Number.isInteger(jwt.iat)\n    || !Number.isInteger(jwt.exp) || jwt.exp <= now || jwt.iat > now + 30\n    || jwt.exp - jwt.iat > 600 || jwt.exp <= jwt.iat) return reject(\"webhook_auth_invalid\", 403);\n  if (!/^application\\/json(?:\\s*;|$)/iu.test(input?.headers?.[\"content-type\"] ?? \"\")) return reject(\"webhook_content_type\", 415);\n  const body = input.body;\n  if (!body || typeof body !== \"object\" || Array.isArray(body)) return reject(\"webhook_envelope_invalid\");\n  if (Buffer.byteLength(JSON.stringify(body), \"utf8\") > 5 * 1024 * 1024) return reject(\"webhook_body_too_large\", 413);\n  if (!config.instance || body.instance !== config.instance) return reject(\"webhook_instance_invalid\", 403);\n  if (!config.origin || body.server_url !== config.origin) return reject(\"webhook_origin_invalid\", 403);\n  if (!/^[a-z][a-z0-9_-]{0,62}$/u.test(config.provider ?? \"\")) return reject(\"webhook_provider_unconfigured\", 503);\n  if (body.event !== \"messages.upsert\") return ignore(\"unsupported_event\");\n  const key = body.data?.key;\n  if (key?.fromMe === true) return ignore(\"own_message\");\n  if (key?.fromMe !== false) return reject(\"webhook_key_invalid\");\n  if (typeof key.remoteJid !== \"string\") return reject(\"webhook_phone_invalid\");\n  if (key.remoteJid.endsWith(\"@g.us\") || key.remoteJid.endsWith(\"@broadcast\")) return ignore(\"unsupported_recipient\");\n  const phoneJid = /^[1-9][0-9]{7,14}@s\\.whatsapp\\.net$/u;\n  const primaryPhone = phoneJid.test(key.remoteJid);\n  const altPhone = phoneJid.test(key.remoteJidAlt ?? \"\");\n  if (primaryPhone && altPhone && key.remoteJid !== key.remoteJidAlt) return reject(\"webhook_phone_conflict\");\n  const jid = primaryPhone ? key.remoteJid : /^\\d+@lid$/u.test(key.remoteJid) && altPhone ? key.remoteJidAlt : null;\n  if (!jid) return reject(\"webhook_phone_invalid\");\n  if (typeof key.id !== \"string\" || !/^[A-Za-z0-9_-]+$/u.test(key.id)\n    || `${config.instance}:${key.id}`.length > 255) return reject(\"webhook_id_invalid\");\n  const inbound = { provider: config.provider, provider_message_id: `${config.instance}:${key.id}`,\n    phone_e164: `+${jid.split(\"@\")[0]}`, country_code: \"BR\", limit: 3 };\n  const message = body.data.message;\n  if (!message || typeof message !== \"object\" || Array.isArray(message)) return reject(\"webhook_message_invalid\");\n  const notice = (reason, text) => ({ action: \"notice\", inbound, reason, text, http_status: 200 });\n  if (message.audioMessage) {\n    const audio = message.audioMessage;\n    if (!Number.isFinite(audio.seconds) || audio.seconds <= 0 || audio.seconds > 120) return notice(\"audio_duration_invalid\", \"Envie um áudio de até 2 minutos ou escreva o que você precisa.\");\n    const base64 = message.base64;\n    const mime = typeof audio.mimetype === \"string\" ? audio.mimetype.split(\";\")[0].trim() : \"\";\n    const extensions = { \"audio/ogg\": \"ogg\", \"audio/mpeg\": \"mp3\", \"audio/mp4\": \"m4a\", \"audio/wav\": \"wav\", \"audio/webm\": \"webm\" };\n    if (!extensions[mime] || typeof base64 !== \"string\" || !base64.length || base64.length > 4 * 1024 * 1024\n      || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(base64)) {\n      return notice(\"audio_content_invalid\", \"Não consegui ler esse áudio. Pode escrever o pedido ou enviar um novo áudio de até 2 minutos?\");\n    }\n    return { action: \"audio\", inbound, audio_base64: base64, mime_type: mime, file_name: `audio.${extensions[mime]}` };\n  }\n  const text = message.conversation ?? message.extendedTextMessage?.text;\n  if (text === undefined) return ignore(\"unsupported_message\");\n  if (typeof text !== \"string\" || !text.trim() || text.trim().length > 500) return reject(\"webhook_text_invalid\");\n  return { action: \"inbox\", inbound: { ...inbound, raw_text: text.trim() } };\n}\nreturn { json: normalizeGatewayEvent($json, { instance: $vars.EVOLUTION_INSTANCE, provider: $vars.EVOLUTION_PROVIDER, origin: $vars.EVOLUTION_WEBHOOK_ORIGIN }) };"
+      }
+    },
+    {
+      "id": "text-input",
+      "name": "Text input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Text input",
+              "leftValue": "={{ $json.action === 'inbox' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "audio-input",
+      "name": "Audio input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Audio input",
+              "leftValue": "={{ $json.action === 'audio' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "audio-binary",
+      "name": "Audio binary",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        320
+      ],
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "audio_base64",
+        "binaryPropertyName": "data",
+        "options": {
+          "fileName": "={{ $json.file_name }}",
+          "mimeType": "={{ $json.mime_type }}"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "transcribe-groq",
+      "name": "Transcribe Groq",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            },
+            {
+              "name": "language",
+              "value": "pt"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Groq Transcription"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "primary-transcript",
+      "name": "Primary transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction transcriptionDecision(response, context, finalAttempt) {\n  response = httpResponse(response);\n  const text = response?.body?.text;\n  if (response?.statusCode === 200 && typeof text === \"string\" && text.trim().length > 0 && text.trim().length <= 500) {\n    return { action: \"inbox\", inbound: { ...context.inbound, raw_text: text.trim() } };\n  }\n  if (!finalAttempt) return { action: \"fallback\" };\n  return { action: \"notice\", inbound: context.inbound, http_status: 200, reason: \"transcription_unavailable\",\n    text: \"Não consegui entender esse áudio. Pode escrever o pedido ou enviar um novo áudio de até 2 minutos?\" };\n}\nreturn { json: transcriptionDecision($json, $('Validate event').item.json, false) };"
+      }
+    },
+    {
+      "id": "primary-succeeded",
+      "name": "Primary succeeded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Primary succeeded",
+              "leftValue": "={{ $json.action === 'inbox' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "restore-audio-for-fallback",
+      "name": "Restore audio for fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        480
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst source = $('Audio binary').item;\nreturn { json: {}, ...(source.binary ? { binary: source.binary } : {}) };"
+      }
+    },
+    {
+      "id": "transcribe-openai-fallback",
+      "name": "Transcribe OpenAI fallback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "gpt-4o-mini-transcribe"
+            },
+            {
+              "name": "language",
+              "value": "pt"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto OpenAI Transcription"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "fallback-transcript",
+      "name": "Fallback transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction transcriptionDecision(response, context, finalAttempt) {\n  response = httpResponse(response);\n  const text = response?.body?.text;\n  if (response?.statusCode === 200 && typeof text === \"string\" && text.trim().length > 0 && text.trim().length <= 500) {\n    return { action: \"inbox\", inbound: { ...context.inbound, raw_text: text.trim() } };\n  }\n  if (!finalAttempt) return { action: \"fallback\" };\n  return { action: \"notice\", inbound: context.inbound, http_status: 200, reason: \"transcription_unavailable\",\n    text: \"Não consegui entender esse áudio. Pode escrever o pedido ou enviar um novo áudio de até 2 minutos?\" };\n}\nreturn { json: transcriptionDecision($json, $('Validate event').item.json, true) };"
+      }
+    },
+    {
+      "id": "fallback-succeeded",
+      "name": "Fallback succeeded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2420,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Fallback succeeded",
+              "leftValue": "={{ $json.action === 'inbox' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "channel-inbox",
+      "name": "Channel Inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 70000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.inbound }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "inspect-inbox",
+      "name": "Inspect Inbox",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction inboxDecision(response) {\n  response = httpResponse(response);\n  const status = response?.statusCode;\n  const body = response?.body;\n  if (status === 204) return { action: \"stop\", http_status: 200, reason: \"no_outbox\" };\n  if (status === 200 && /^[0-9a-f]{8}-[0-9a-f-]{27}$/iu.test(body?.outbound?.id ?? \"\")\n    && [\"pending\", \"processing\", \"sent\", \"failed\"].includes(body.outbound.status)) {\n    return { action: \"claim\", id: body.outbound.id, http_status: 200 };\n  }\n  if (status === 409 && [\"channel_message_processing\", \"conversation_processing\", \"selection_show_more_pending\"].includes(body?.error)) {\n    // These records are already durable; the recovery consumer resumes them.\n    return { action: \"stop\", http_status: 200, reason: \"inbox_deferred\" };\n  }\n  if (status === 409 && body?.error === \"channel_message_payload_conflict\") return { action: \"stop\", http_status: 409, reason: \"payload_conflict\" };\n  return { action: \"stop\", http_status: [400,401,403,422,429].includes(status) ? status : 502, reason: \"inbox_unavailable\" };\n}\nreturn { json: inboxDecision($json) };"
+      }
+    },
+    {
+      "id": "acknowledge-inbox",
+      "name": "Acknowledge Inbox",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        3080,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: $json.http_status === 200, code: $json.reason ?? 'accepted' } }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      }
+    },
+    {
+      "id": "outbox-available",
+      "name": "Outbox available",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Outbox available",
+              "leftValue": "={{ $json.action === 'claim' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "claim-outbound",
+      "name": "Claim outbound",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.id + '/claim' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Internal API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "deliver-shared",
+      "name": "Deliver shared",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3740,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.CONTATOCERTO_DELIVERY_WORKFLOW_ID }}",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "audio-notice",
+      "name": "Audio notice",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        640
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Audio notice",
+              "leftValue": "={{ $json.action === 'notice' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "acknowledge-ignored-or-rejected",
+      "name": "Acknowledge ignored or rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2860,
+        880
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: $json.http_status === 200, code: $json.reason ?? 'accepted' } }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      }
+    },
+    {
+      "id": "acknowledge-audio-notice",
+      "name": "Acknowledge audio notice",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2860,
+        640
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: $json.http_status === 200, code: $json.reason ?? 'accepted' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "one-shot-audio-notice",
+      "name": "One-shot audio notice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        640
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.EVOLUTION_API_BASE_URL + '/message/sendText/' + encodeURIComponent($vars.EVOLUTION_INSTANCE) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { number: $json.inbound.phone_e164.slice(1), text: $json.text } }}",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ContatoCerto Evolution"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "inspect-audio-notice",
+      "name": "Inspect audio notice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        640
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction transportDecision(response, message) {\n  response = httpResponse(response);\n  const code = response?.statusCode;\n  const key = response?.body?.key;\n  if (Number.isInteger(code) && code >= 200 && code < 300\n    && key?.fromMe === true && typeof key.id === \"string\" && key.id.trim()\n    && key.id.length <= 255 && key.remoteJid === `${message.recipient_phone_e164.slice(1)}@s.whatsapp.net`) {\n    return { action: \"sent\", payload: { processing_token: message.processing_token, provider_message_id: key.id } };\n  }\n  // Evolution 2.3.7 wraps even post-send exceptions in BadRequestException (400).\n  // Status alone (including a proxy's 429) is NOT proof that sending never ran.\n  // This exact authGuard rejection occurs before the send controller. Everything\n  // else is retained, pending provider reconciliation rather than a blind retry.\n  if (code === 401 && response.body?.status === 401 && response.body?.error === \"Unauthorized\"\n    && response.body?.response?.message === \"Unauthorized\") {\n    return { action: \"failed\", payload: { processing_token: message.processing_token, error_code: `transport_http_${code}` } };\n  }\n  return { action: \"hold\", payload: { processing_token: message.processing_token, reason: \"transport_outcome_unknown\" } };\n}\nconst source = $('Acknowledge audio notice').item.json;\nconst outcome = transportDecision($json, { recipient_phone_e164: source.inbound.phone_e164 });\nif (outcome.action !== 'sent') throw new Error('audio_notice_reconciliation_required');\nreturn { json: { action: 'complete', provider_message_id: outcome.payload.provider_message_id, transport_notice: true } };"
+      }
+    }
+  ],
+  "connections": {
+    "Evolution webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate event": {
+      "main": [
+        [
+          {
+            "node": "Text input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text input": {
+      "main": [
+        [
+          {
+            "node": "Channel Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audio input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio input": {
+      "main": [
+        [
+          {
+            "node": "Audio binary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audio notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio binary": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Groq",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Groq": {
+      "main": [
+        [
+          {
+            "node": "Primary transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Primary transcript": {
+      "main": [
+        [
+          {
+            "node": "Primary succeeded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Primary succeeded": {
+      "main": [
+        [
+          {
+            "node": "Channel Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Restore audio for fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore audio for fallback": {
+      "main": [
+        [
+          {
+            "node": "Transcribe OpenAI fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe OpenAI fallback": {
+      "main": [
+        [
+          {
+            "node": "Fallback transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback transcript": {
+      "main": [
+        [
+          {
+            "node": "Fallback succeeded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback succeeded": {
+      "main": [
+        [
+          {
+            "node": "Channel Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audio notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Channel Inbox": {
+      "main": [
+        [
+          {
+            "node": "Inspect Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inspect Inbox": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge Inbox": {
+      "main": [
+        [
+          {
+            "node": "Outbox available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outbox available": {
+      "main": [
+        [
+          {
+            "node": "Claim outbound",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Claim outbound": {
+      "main": [
+        [
+          {
+            "node": "Deliver shared",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio notice": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge audio notice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acknowledge ignored or rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge audio notice": {
+      "main": [
+        [
+          {
+            "node": "One-shot audio notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One-shot audio notice": {
+      "main": [
+        [
+          {
+            "node": "Inspect audio notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 165,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": false
+  },
+  "pinData": {},
+  "tags": []
+}

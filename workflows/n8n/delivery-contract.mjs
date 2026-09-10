@@ -1,6 +1,14 @@
 // Pure functions embedded unchanged in n8n Code nodes by build-workflows.mjs.
 // No credentials, HTTP calls or model calls belong in this module.
+export function httpResponse(response) {
+  if (typeof response?.body !== "string") return response;
+  if (!response.body.trim()) return { ...response, body: null };
+  try { return { ...response, body: JSON.parse(response.body) }; }
+  catch { return { ...response, body: null }; }
+}
+
 export function claimDecision(response, expectedProvider) {
+  response = httpResponse(response);
   if (response?.statusCode === 204) return { action: "stop", reason: "empty" };
   if (response?.statusCode === 409) return { action: "stop", reason: "busy" };
   if (response?.statusCode !== 200) throw new Error("outbox_claim_unavailable");
@@ -23,6 +31,7 @@ export function claimDecision(response, expectedProvider) {
 }
 
 export function transportDecision(response, message) {
+  response = httpResponse(response);
   const code = response?.statusCode;
   const key = response?.body?.key;
   if (Number.isInteger(code) && code >= 200 && code < 300
@@ -30,15 +39,19 @@ export function transportDecision(response, message) {
     && key.id.length <= 255 && key.remoteJid === `${message.recipient_phone_e164.slice(1)}@s.whatsapp.net`) {
     return { action: "sent", payload: { processing_token: message.processing_token, provider_message_id: key.id } };
   }
-  // Only explicit client/auth/rate-limit rejection is safe to retry. A 5xx or
-  // timeout can happen after acceptance; hold it until the provider is checked.
-  if ([400, 401, 403, 404, 422, 429].includes(code)) {
+  // Evolution 2.3.7 wraps even post-send exceptions in BadRequestException (400).
+  // Status alone (including a proxy's 429) is NOT proof that sending never ran.
+  // This exact authGuard rejection occurs before the send controller. Everything
+  // else is retained, pending provider reconciliation rather than a blind retry.
+  if (code === 401 && response.body?.status === 401 && response.body?.error === "Unauthorized"
+    && response.body?.response?.message === "Unauthorized") {
     return { action: "failed", payload: { processing_token: message.processing_token, error_code: `transport_http_${code}` } };
   }
   return { action: "hold", payload: { processing_token: message.processing_token, reason: "transport_outcome_unknown" } };
 }
 
 export function confirmationDecision(response, message, outcome) {
+  response = httpResponse(response);
   const expected = outcome.action === "sent" ? ["sent"] : outcome.action === "failed" ? ["pending", "failed"] : ["processing"];
   const body = response?.body;
   if (response?.statusCode === 200 && body?.id === message.id && expected.includes(body.status)
@@ -47,6 +60,7 @@ export function confirmationDecision(response, message, outcome) {
   }
   if (outcome.action === "sent") return {
     action: "hold", id: message.id,
+    provider_message_id: outcome.payload.provider_message_id,
     payload: { processing_token: message.processing_token, reason: "confirmation_pending" },
   };
   throw new Error("outbox_confirmation_unavailable");

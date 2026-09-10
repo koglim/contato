@@ -57,7 +57,7 @@ jobs:
       - name: Verify generated n8n exports
         run: |
           pnpm build:workflows
-          git diff --exit-code -- workflows/n8n/shared-delivery.json workflows/n8n/outbox-dispatcher.json workflows/n8n/inbox-recovery.json
+          git diff --exit-code -- workflows/n8n/shared-delivery.json workflows/n8n/outbox-dispatcher.json workflows/n8n/inbox-recovery.json workflows/n8n/gateway.json
 
       - name: B2 300 synthetic cases (mocked proposals, not model quality)
         run: pnpm --filter @contatocerto/api eval:b2 --split=all --summary --report=b2-frozen-report.json

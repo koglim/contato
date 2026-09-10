@@ -40,7 +40,7 @@ test("acceptance must match the recipient and provider message id; only proven r
     response({ key: { ...accepted.body.key, remoteJid: "another-recipient@s.whatsapp.net" } })]) {
     assert.equal(transportDecision(result, item).action, "hold");
   }
-  assert.equal(transportDecision(response({}, 429), item).action, "failed");
+  assert.equal(transportDecision(response({}, 429), item).action, "hold");
 });
 
 test("a lost sent confirmation never triggers another transport call or failure", () => {

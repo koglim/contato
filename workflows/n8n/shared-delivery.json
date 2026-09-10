@@ -26,7 +26,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "function claimDecision(response, expectedProvider) {\n  if (response?.statusCode === 204) return { action: \"stop\", reason: \"empty\" };\n  if (response?.statusCode === 409) return { action: \"stop\", reason: \"busy\" };\n  if (response?.statusCode !== 200) throw new Error(\"outbox_claim_unavailable\");\n  const message = response.body;\n  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;\n  const purposes = [\"customer_reply\", \"professional_contact_notification\", \"professional_reply\", \"customer_contact_update\"];\n  if (!uuid.test(message?.id ?? \"\") || !purposes.includes(message?.purpose)\n    || !Number.isInteger(message?.attempt_count) || message.attempt_count < 0) throw new Error(\"outbox_claim_invalid\");\n  if (message.status === \"sent\") return { action: \"stop\", reason: \"sent\" };\n  if (message.status !== \"processing\" || !uuid.test(message.processing_token ?? \"\")\n    || !/^[a-z][a-z0-9_-]{0,62}$/u.test(expectedProvider ?? \"\") || message.provider !== expectedProvider\n    || !/^\\+[1-9][0-9]{7,14}$/u.test(message.recipient_phone_e164 ?? \"\")\n    || message.message_type !== \"text\" || typeof message.text_content !== \"string\"\n    || !message.text_content.trim() || message.text_content.length > 2000) throw new Error(\"outbox_claim_invalid\");\n  return { action: \"send\", message: {\n    id: message.id, purpose: message.purpose, provider: message.provider,\n    recipient_phone_e164: message.recipient_phone_e164, text_content: message.text_content,\n    processing_token: message.processing_token,\n  } };\n}\nreturn { json: claimDecision($json, $vars.EVOLUTION_PROVIDER) };"
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction claimDecision(response, expectedProvider) {\n  response = httpResponse(response);\n  if (response?.statusCode === 204) return { action: \"stop\", reason: \"empty\" };\n  if (response?.statusCode === 409) return { action: \"stop\", reason: \"busy\" };\n  if (response?.statusCode !== 200) throw new Error(\"outbox_claim_unavailable\");\n  const message = response.body;\n  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;\n  const purposes = [\"customer_reply\", \"professional_contact_notification\", \"professional_reply\", \"customer_contact_update\"];\n  if (!uuid.test(message?.id ?? \"\") || !purposes.includes(message?.purpose)\n    || !Number.isInteger(message?.attempt_count) || message.attempt_count < 0) throw new Error(\"outbox_claim_invalid\");\n  if (message.status === \"sent\") return { action: \"stop\", reason: \"sent\" };\n  if (message.status !== \"processing\" || !uuid.test(message.processing_token ?? \"\")\n    || !/^[a-z][a-z0-9_-]{0,62}$/u.test(expectedProvider ?? \"\") || message.provider !== expectedProvider\n    || !/^\\+[1-9][0-9]{7,14}$/u.test(message.recipient_phone_e164 ?? \"\")\n    || message.message_type !== \"text\" || typeof message.text_content !== \"string\"\n    || !message.text_content.trim() || message.text_content.length > 2000) throw new Error(\"outbox_claim_invalid\");\n  return { action: \"send\", message: {\n    id: message.id, purpose: message.purpose, provider: message.provider,\n    recipient_phone_e164: message.recipient_phone_e164, text_content: message.text_content,\n    processing_token: message.processing_token,\n  } };\n}\nreturn { json: claimDecision($json, $vars.EVOLUTION_PROVIDER) };"
       }
     },
     {
@@ -90,7 +90,8 @@
             "response": {
               "fullResponse": true,
               "neverError": true,
-              "responseFormat": "json"
+              "responseFormat": "text",
+              "outputPropertyName": "body"
             }
           }
         }
@@ -114,7 +115,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "function transportDecision(response, message) {\n  const code = response?.statusCode;\n  const key = response?.body?.key;\n  if (Number.isInteger(code) && code >= 200 && code < 300\n    && key?.fromMe === true && typeof key.id === \"string\" && key.id.trim()\n    && key.id.length <= 255 && key.remoteJid === `${message.recipient_phone_e164.slice(1)}@s.whatsapp.net`) {\n    return { action: \"sent\", payload: { processing_token: message.processing_token, provider_message_id: key.id } };\n  }\n  // Only explicit client/auth/rate-limit rejection is safe to retry. A 5xx or\n  // timeout can happen after acceptance; hold it until the provider is checked.\n  if ([400, 401, 403, 404, 422, 429].includes(code)) {\n    return { action: \"failed\", payload: { processing_token: message.processing_token, error_code: `transport_http_${code}` } };\n  }\n  return { action: \"hold\", payload: { processing_token: message.processing_token, reason: \"transport_outcome_unknown\" } };\n}\nconst message = $('Validate claim').item.json.message;\nreturn { json: { message, outcome: transportDecision($json, message) } };"
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction transportDecision(response, message) {\n  response = httpResponse(response);\n  const code = response?.statusCode;\n  const key = response?.body?.key;\n  if (Number.isInteger(code) && code >= 200 && code < 300\n    && key?.fromMe === true && typeof key.id === \"string\" && key.id.trim()\n    && key.id.length <= 255 && key.remoteJid === `${message.recipient_phone_e164.slice(1)}@s.whatsapp.net`) {\n    return { action: \"sent\", payload: { processing_token: message.processing_token, provider_message_id: key.id } };\n  }\n  // Evolution 2.3.7 wraps even post-send exceptions in BadRequestException (400).\n  // Status alone (including a proxy's 429) is NOT proof that sending never ran.\n  // This exact authGuard rejection occurs before the send controller. Everything\n  // else is retained, pending provider reconciliation rather than a blind retry.\n  if (code === 401 && response.body?.status === 401 && response.body?.error === \"Unauthorized\"\n    && response.body?.response?.message === \"Unauthorized\") {\n    return { action: \"failed\", payload: { processing_token: message.processing_token, error_code: `transport_http_${code}` } };\n  }\n  return { action: \"hold\", payload: { processing_token: message.processing_token, reason: \"transport_outcome_unknown\" } };\n}\nconst message = $('Validate claim').item.json.message;\nreturn { json: { message, outcome: transportDecision($json, message) } };"
       }
     },
     {
@@ -145,7 +146,8 @@
             "response": {
               "fullResponse": true,
               "neverError": false,
-              "responseFormat": "json"
+              "responseFormat": "text",
+              "outputPropertyName": "body"
             }
           }
         }
@@ -171,7 +173,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "function confirmationDecision(response, message, outcome) {\n  const expected = outcome.action === \"sent\" ? [\"sent\"] : outcome.action === \"failed\" ? [\"pending\", \"failed\"] : [\"processing\"];\n  const body = response?.body;\n  if (response?.statusCode === 200 && body?.id === message.id && expected.includes(body.status)\n    && (outcome.action !== \"hold\" || body.delivery_status === \"reconciliation_required\")) {\n    return { action: \"complete\", id: message.id, status: body.status, needs_reconciliation: outcome.action === \"hold\" };\n  }\n  if (outcome.action === \"sent\") return {\n    action: \"hold\", id: message.id,\n    payload: { processing_token: message.processing_token, reason: \"confirmation_pending\" },\n  };\n  throw new Error(\"outbox_confirmation_unavailable\");\n}\nconst context = $('Classify transport').item.json;\nreturn { json: confirmationDecision($json, context.message, context.outcome) };"
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction confirmationDecision(response, message, outcome) {\n  response = httpResponse(response);\n  const expected = outcome.action === \"sent\" ? [\"sent\"] : outcome.action === \"failed\" ? [\"pending\", \"failed\"] : [\"processing\"];\n  const body = response?.body;\n  if (response?.statusCode === 200 && body?.id === message.id && expected.includes(body.status)\n    && (outcome.action !== \"hold\" || body.delivery_status === \"reconciliation_required\")) {\n    return { action: \"complete\", id: message.id, status: body.status, needs_reconciliation: outcome.action === \"hold\" };\n  }\n  if (outcome.action === \"sent\") return {\n    action: \"hold\", id: message.id,\n    provider_message_id: outcome.payload.provider_message_id,\n    payload: { processing_token: message.processing_token, reason: \"confirmation_pending\" },\n  };\n  throw new Error(\"outbox_confirmation_unavailable\");\n}\nconst context = $('Classify transport').item.json;\nreturn { json: confirmationDecision($json, context.message, context.outcome) };"
       }
     },
     {
@@ -235,7 +237,8 @@
             "response": {
               "fullResponse": true,
               "neverError": false,
-              "responseFormat": "json"
+              "responseFormat": "text",
+              "outputPropertyName": "body"
             }
           }
         }
@@ -261,7 +264,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const expected = $('Check confirmation').item.json.id;\nif ($json.statusCode !== 200 || $json.body?.id !== expected || $json.body?.delivery_status !== 'reconciliation_required') throw new Error('outbox_reconciliation_required');\nreturn { json: { action: 'complete', id: expected, status: 'processing', needs_reconciliation: true } };"
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst context = $('Check confirmation').item.json;\nconst response = httpResponse($json);\nif (response.statusCode !== 200 || response.body?.id !== context.id || response.body?.delivery_status !== 'reconciliation_required') throw new Error('outbox_reconciliation_required');\nreturn { json: { action: 'complete', id: context.id, provider_message_id: context.provider_message_id, status: 'processing', needs_reconciliation: true } };"
       }
     },
     {
@@ -275,7 +278,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "return { json: $json };"
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nreturn { json: $json };"
       }
     }
   ],
@@ -409,7 +412,8 @@
     "executionOrder": "v1",
     "executionTimeout": 55,
     "saveDataSuccessExecution": "none",
-    "saveDataErrorExecution": "all",
+    "saveDataErrorExecution": "none",
+    "saveExecutionProgress": false,
     "saveManualExecutions": false
   },
   "pinData": {},
