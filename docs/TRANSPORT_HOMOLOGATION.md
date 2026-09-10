@@ -257,3 +257,15 @@ Próximo checkpoint: homologação controlada e alertas/recibos operacionais, de
 de durabilidade da mídia/avisos, reconciliação administrativa Outbox, depois
 avaliação B2 paga somente com autorização. Identidade/onboarding e demais etapas
 da V1 continuam pendentes; este transporte não as conclui.
+
+### Registro de QA
+
+Run inicial [34499232704](https://github.com/koglim/contato/actions/runs/34499232704):
+lint/typecheck/build, 303 API + 12 web + 40 workflows, B2 300 + readiness18,
+127 integrações iniciais e migrations/rollbacks/reaplicação passaram. Na segunda
+rodada houve uma falha preexistente probabilística no fixture B2: UUID concatenado
+ao nome do serviço gerou oito ou mais dígitos, removidos corretamente pelo
+sanitizador de PII, divergindo da asserção de texto literal. Os quatro testes
+novos de transporte passaram nas duas rodadas. Correção restrita ao fixture:
+suffix único somente alfabético; preservadas proteção, corpus e asserção estrita.
+O CI final deve ser conferido no SHA posterior, não considerar esse run aprovado.

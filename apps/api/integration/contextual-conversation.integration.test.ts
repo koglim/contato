@@ -264,7 +264,12 @@ for (const dependency of ["model","geocoder"] as const) {
 async function fixture() {
   const serviceId = randomUUID(), categoryId = randomUUID();
   const serviceIds = [serviceId];
-  const name = `Encanador${serviceId.replaceAll("-", "")}`;
+  // Keep uniqueness without random phone-like digit runs in public labels.
+  // Otherwise the PII sanitizer correctly removes some UUID suffixes, making
+  // exact fallback/replay assertions probabilistic. Do not weaken that guard.
+  const suffix = serviceId.replaceAll("-", "").replace(/[0-9]/gu, digit => String.fromCharCode(103 + Number(digit)));
+  const name = `Encanador${suffix}`;
+  assert.match(name, /^[A-Za-z]+$/u);
   const phone = `+5566${BigInt(`0x${randomUUID().replaceAll("-", "").slice(0, 8)}`).toString().padStart(10, "0")}`;
   const professionalIds = [randomUUID(), randomUUID()];
   await query("INSERT INTO service_categories(id,name,slug) VALUES ($1::uuid,'B2 fixture',$1::text)", [categoryId]);
