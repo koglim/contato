@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { emptyMemory, validateContextualQuestion, type ContextualDecision, type ContextualReplyContext } from "./contextual.contract.js";
-import { contextualQuestionContext, contextualClarificationText, contextualCatalogText } from "./contextual.reply.js";
+import { contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 
 const slot = (value: string) => ({ value, source: "user_explicit" as const, inboundId: randomUUID() });
 test("B2 asks only missing fields and distinguishes ambiguous location", () => {
@@ -44,4 +44,22 @@ test("B2 deterministic fallback and catalog reply do not claim availability or c
   assert.match(contextualClarificationText({ target: "location", services: ["Encanador"], location: "Centro", reason: "ambiguous" }), /ainda não ficou clara/);
   assert.match(contextualCatalogText(["Encanador"]), /Isso não confirma profissionais/);
   assert.match(contextualCatalogText([]), /Não identifiquei/);
+});
+
+test("Persisted deterministic fallbacks are reusable only for their current validated question context", () => {
+  const contexts: ContextualReplyContext[] = [
+    {target:"location",services:["Reparo 24h"],location:null,reason:"missing"},
+    {target:"location",services:["Encanador"],location:"Centro",reason:"ambiguous"},
+    {target:"service",services:[],location:"Sinop",reason:"missing"},
+    {target:"service_confirmation",services:["Encanador"],location:null,reason:"ambiguous"},
+  ];
+  for (const context of contexts) {
+    const text=contextualClarificationText(context);
+    assert.equal(validatePersistedContextualQuestion(text,context),text);
+    assert.throws(()=>validatePersistedContextualQuestion(`${text} Enviei seu contato.`,context));
+  }
+  assert.throws(()=>validatePersistedContextualQuestion(contextualClarificationText(contexts[0]),{...contexts[0],services:["Eletricista"]}));
+  assert.throws(()=>validatePersistedContextualQuestion("Já selecionei o profissional?",contexts[0]));
+  const question="Em qual cidade precisa desse atendimento?";
+  assert.equal(validatePersistedContextualQuestion(question,contexts[0]),question);
 });

@@ -206,6 +206,61 @@ test("Recovery after context expiration preserves confirmed slots but cannot sel
   }finally{await f.cleanup();}
 });
 
+test("Recovery preserves a changed memory revision and its old checkpoint without applying a stale choice", async () => {
+  const f=await fixture(), inbox=new PostgresChannelInboundMessageRepository(), context=new PostgresContextualRepository();
+  try {
+    f.set(async()=>basic({speech_act:"request"}));
+    await f.receive(`Preciso de ${f.name}`);
+    const payload={provider:"b2-test",provider_message_id:randomUUID(),phone_e164:f.phone,raw_text:"em Sinop",country_code:"BR",limit:3};
+    const registered=await inbox.createOrFind(payload,{contextual:true});
+    const record=await inbox.claim(registered.record.id,randomUUID(),60);assert.ok(record);
+    const snapshot=await context.acquire(record,"fake");
+    const proposal=basic({speech_act:"request",location:{text:"Sinop",evidence:"Sinop"}});
+    await context.saveProposal(record,snapshot,proposal);await context.release(snapshot);
+    await inbox.markFailed(record.id,record.processingToken!,"internal_error");
+    const memory={...snapshot.memory,location:{value:"Vera",source:"user_explicit",inboundId:randomUUID()}};
+    await query("UPDATE contextual_memories SET revision=revision+1,memory=$2::jsonb WHERE customer_id=$1",[snapshot.customerId,JSON.stringify(memory)]);
+    await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE id=$1",[record.id]);
+    const calls=f.calls(),recovered=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
+    assert.equal(recovered.json().status,"processed",recovered.body);
+    assert.deepEqual((await f.state()).memory,memory);assert.equal((await f.state()).revision,snapshot.revision+1);
+    const checkpoint=(await query("SELECT proposal,context_revision FROM contextual_turns WHERE inbound_id=$1",[record.id])).rows[0];
+    assert.deepEqual(checkpoint.proposal,proposal);assert.equal(checkpoint.context_revision,snapshot.revision);
+    const replay=await f.receive(payload.raw_text,payload.provider_message_id);
+    assert.equal(replay.json().duplicate,true);assert.equal(replay.json().result.status,"clarification");
+    assert.equal(f.calls(),calls);assert.equal(f.geoCalls(),0);
+    assert.equal((await query("SELECT id FROM search_requests WHERE service_id=$1",[f.serviceId])).rows.length,0);
+    assert.equal((await query("SELECT id FROM contacts WHERE customer_id=$1",[snapshot.customerId])).rows.length,0);
+  } finally {await f.cleanup();}
+});
+
+for (const dependency of ["model","geocoder"] as const) {
+  test(`Autonomous recovery with unavailable ${dependency} persists one safe fallback and replays without external work`,async()=>{
+    const f=await fixture(), inbox=new PostgresChannelInboundMessageRepository(), context=new PostgresContextualRepository();
+    try {
+      f.set(async()=> {if(dependency==="model") throw new Error("private provider failure");return basic({speech_act:"request",location:{text:"Sinop",evidence:"Sinop"}});});
+      if(dependency==="geocoder") f.setGeo(async()=>{throw new Error("private geocoder failure");});
+      const payload={provider:"b2-test",provider_message_id:randomUUID(),phone_e164:f.phone,raw_text:`Preciso de ${f.name} em Sinop`,country_code:"BR",limit:3};
+      const registered=await inbox.createOrFind(payload,{contextual:true}), record=await inbox.claim(registered.record.id,randomUUID(),60);assert.ok(record);
+      const snapshot=await context.acquire(record,"fake");
+      await query("UPDATE channel_inbound_messages SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1",[record.id]);
+      await query("UPDATE contextual_memories SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE customer_id=$1",[snapshot.customerId]);
+      assert.equal((await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers})).statusCode,204);
+      await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE id=$1",[record.id]);
+      const recovered=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
+      assert.equal(recovered.json().status,"processed",recovered.body);
+      const calls=f.calls(),geo=f.geoCalls();
+      const replay=await f.receive(payload.raw_text,payload.provider_message_id);
+      assert.equal(replay.json().duplicate,true);assert.equal(replay.json().result.status,"fallback");
+      assert.doesNotMatch(replay.body,/private provider|private geocoder/);
+      assert.deepEqual((await f.state()).memory,snapshot.memory);
+      assert.equal(f.calls(),calls);assert.equal(f.geoCalls(),geo);
+      assert.equal((await query("SELECT id FROM search_requests WHERE service_id=$1",[f.serviceId])).rows.length,0);
+      assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE channel_inbound_message_id=$1",[record.id])).rows.length,1);
+    }finally{await f.cleanup();}
+  });
+}
+
 async function fixture() {
   const serviceId = randomUUID(), categoryId = randomUUID();
   const serviceIds = [serviceId];
@@ -448,6 +503,8 @@ test("B2 semantic hypothesis requires confirmation; selection uses shown candida
     assert.equal((await query("SELECT COUNT(*)::int count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 1);
     // Legacy partial processing can predate B2's atomic commit: selectionKey recovery must precede any interpretation.
     await query("DELETE FROM channel_outbound_messages WHERE id=$1", [chosen.json().outbound.id]);
+    // This specific compatibility fixture predates B2, so it has no contextual turn to reuse.
+    await query("DELETE FROM contextual_turns WHERE inbound_id=$1", [chosen.json().message_id]);
     // Simulate a legacy checkpoint without the post-019 context snapshot; the durable selectionKey is still authoritative.
     await query("UPDATE channel_inbound_messages SET status='failed', result=NULL, processed_at=NULL, context_fingerprint=NULL, error_code='legacy_partial_fixture' WHERE id=$1", [chosen.json().message_id]);
     const beforeRecoveryCalls = f.calls();

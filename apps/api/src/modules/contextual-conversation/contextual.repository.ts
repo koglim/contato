@@ -66,6 +66,9 @@ export class PostgresContextualRepository {
       const proposal = sameContext ? turn.rows[0].proposal : null;
       if (turn.rows[0].proposal !== null && !contextualProposalSchema.safeParse(turn.rows[0].proposal).success) throw new InboxPermanentError("persisted_proposal_invalid");
       if (turn.rows[0].reply_draft !== null && (turn.rows[0].reply_draft.length < 5 || turn.rows[0].reply_draft.length > 240)) throw new InboxPermanentError("persisted_draft_invalid");
+      // A prior attempt belongs to its original memory revision even if the domain row has not changed.
+      // Preserve the checkpoint and ask for confirmation instead of reinterpreting an old choice under new facts.
+      if (turn.rows[0].context_revision !== claimed.rows[0].revision) throw new InboxContextChangedError();
       return { customerId, token, revision: claimed.rows[0].revision, memory, proposal, draft: sameContext ? turn.rows[0].reply_draft : null,
         conversationId: current?.id ?? null, fingerprint: current?.fingerprint ?? "none", pendingSlot: current?.pending_slot ?? null };
     });

@@ -1,5 +1,5 @@
 import { safeOpportunityText } from "../bilateral-contact/bilateral-contact.policy.js";
-import type { ContextualDecision, ContextualReplyContext } from "./contextual.contract.js";
+import { validateContextualQuestion, type ContextualDecision, type ContextualReplyContext } from "./contextual.contract.js";
 
 export const CONTEXTUAL_COST_POLICY = "Usar o ContatoCerto é gratuito para o cliente. O valor do serviço é combinado e pago diretamente ao profissional. Sua busca continua de onde parou.";
 export const CONTEXTUAL_FALLBACK = "Não consegui entender sua mensagem com segurança agora. Sua busca foi preservada. Pode me dizer o que precisa ou o que quer corrigir?";
@@ -26,6 +26,12 @@ export function contextualClarificationText(context: ContextualReplyContext): st
     ? `Você precisa de ${safeOpportunityText(context.services[0], 120)} para esse problema? Pode confirmar ou explicar melhor.`
     : `Esse pedido pode envolver ${context.services.map(name => safeOpportunityText(name, 120)).join(" ou ")}. Qual desses atendimentos você precisa?`;
   return confirmation.length <= 240 ? confirmation : "Pode explicar melhor qual atendimento você precisa para esse problema?";
+}
+
+export function validatePersistedContextualQuestion(draft: string, context: ContextualReplyContext): string {
+  // Deterministic fallbacks may contain catalogue numbers or multiple sentences.
+  // Trust only an exact match recomputed from the current validated context; all other drafts retain the model guard.
+  return draft === contextualClarificationText(context) ? draft : validateContextualQuestion({ target: context.target, question: draft }, context);
 }
 
 export function contextualCatalogText(names: string[]): string {

@@ -23,7 +23,7 @@ import { parseBilateralConfirmation } from "../bilateral-contact/bilateral-conta
 import { resolveProfessionalSelection } from "../selection-command/professional-selection.resolver.js";
 import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider } from "./contextual.contract.js";
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
-import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText } from "./contextual.reply.js";
+import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
 export { CONTEXTUAL_COST_POLICY } from "./contextual.reply.js";
@@ -112,7 +112,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
       let question = snapshot.draft;
       const questionContext = fallback ? null : contextualQuestionContext(decision, service?.status === "resolved", location?.status === "resolved");
       if (questionContext && question) {
-        try { validateContextualQuestion({ target: questionContext.target, question }, questionContext); }
+        try { validatePersistedContextualQuestion(question, questionContext); }
         catch { throw new InboxPermanentError("persisted_draft_invalid"); }
       }
       if (questionContext && !question && this.provider.composeQuestion) {
