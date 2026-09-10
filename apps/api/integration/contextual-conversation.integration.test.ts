@@ -233,7 +233,7 @@ test("B2 semantic hypothesis requires confirmation; selection uses shown candida
     assert.equal((await query("SELECT COUNT(*)::int count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 1);
     // Legacy partial processing can predate B2's atomic commit: selectionKey recovery must precede any interpretation.
     await query("DELETE FROM channel_outbound_messages WHERE id=$1", [chosen.json().outbound.id]);
-    await query("UPDATE channel_inbound_messages SET status='failed', result=NULL WHERE id=$1", [chosen.json().message_id]);
+    await query("UPDATE channel_inbound_messages SET status='failed', result=NULL, processed_at=NULL, error_code='legacy_partial_fixture' WHERE id=$1", [chosen.json().message_id]);
     const beforeRecoveryCalls = f.calls();
     const recovered = await f.receive("quero o segundo", selectionId);
     assert.equal(recovered.statusCode, 200, recovered.body); assert.equal(recovered.json().result.result.kind, "selected");
