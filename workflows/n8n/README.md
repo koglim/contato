@@ -1,6 +1,6 @@
-# Consumidores da Outbox — exports para homologação
+# Consumidores Inbox/Outbox — exports para homologação
 
-Os dois JSONs são importáveis e **inativos**. Foram gerados com nodes nativos
+Os três JSONs são importáveis e **inativos**. Foram gerados com nodes nativos
 HTTP Request 4.2, Code 2, Execute Workflow 1.2 e Schedule Trigger 1.2. A versão
 instalada do n8n e o export atual do gateway ainda precisam ser confirmados.
 Testes de contrato e PostgreSQL com provider simulado não equivalem à execução
@@ -8,7 +8,8 @@ do motor n8n nem ao envio WhatsApp real.
 
 ## Importação manual
 
-1. Aplicar migration 017 e a versão correspondente da API em homologação.
+1. Conferir/aplicar todas as migrations pendentes, inclusive 017, 018 e 019,
+   e a versão correspondente da API em homologação, mantendo B2 desligada.
 2. Importar `shared-delivery.json`. Vincular credenciais Header Auth:
    `ContatoCerto Internal API` (header `X-Internal-Key`) e
    `ContatoCerto Evolution` (header `apikey`). Valores somente no cofre do n8n.
@@ -16,12 +17,15 @@ do motor n8n nem ao envio WhatsApp real.
    de homologação e que a lease da API é de pelo menos 60 segundos.
 4. Testar manualmente o subworkflow com resultado de claim real. Entrada é o
    envelope HTTP `{ statusCode, body }`, sem headers ou chave dentro do JSON.
-5. Importar `outbox-dispatcher.json`; configurar o ID do subworkflow. Manter ambos
+5. Importar `outbox-dispatcher.json`; configurar o ID do subworkflow. Manter todos
    inativos até aprovar os cenários abaixo com números de teste autorizados.
 6. No gateway existente, preservar a Inbox e o claim por ID. Após claim, chamar
    **o mesmo subworkflow** passando o envelope HTTP, com execução por item e
    espera pela conclusão. Remover o envio direto desse ramo somente durante a
    homologação manual, depois de conferir o export atual. Não duplicar transporte.
+7. Importar `inbox-recovery.json` inativo, vincular somente `ContatoCerto Internal API`.
+   Não possui node de Evolution/envio. Homologar fila vazia, dois consumidores,
+   reinício/lease, FIFO e quarentena antes de autorizar o agendamento.
 
 Não há URL, ID de instância real ou secret incluído nos exports. URLs/IDs são
 parâmetros `$vars`; se a edição/versão do n8n não oferecer Variables, configurar
@@ -43,6 +47,22 @@ Transportes usam 15s, confirmações 5s por chamada com três tentativas. O tran
 **não** tem retry automático; apenas a API agenda nova tentativa após rejeição
 comprovada. O dispatcher consulta a cada 10s, com teto de 10 itens/45s por ciclo.
 Uma execução iniciada antes desse teto pode concluir depois; timeout externo 105s.
+
+## Recuperação de entradas
+
+`inbox-recovery.json` usa o mesmo `CONTATOCERTO_API_BASE_URL` e Header Auth,
+sem parâmetro novo. Agenda a cada 10s, máximo dez entradas ou 45s para iniciar
+chamadas. `POST /internal/channel/inbound/next/process`: 204 encerra normalmente;
+200 informa ID/status, sem texto/telefone/token; resposta inesperada interrompe
+com código estável. Timeout HTTP 70s; workflow 120s. Sem retry HTTP cego.
+
+A API faz claim/efeitos/conclusão; o workflow não muda SQL/leases. Saída persistida
+é entregue pelo dispatcher compartilhado, nunca diretamente pelo recovery.
+Confirmação HTTP perdida após commit não exige nova geração: a Outbox já existe.
+FIFO e quarentena podem deixar entradas bloqueadas com 204: consultar o diagnóstico
+e alertar operador, sem liberar continuidade automaticamente. Contratos/admin em
+[INBOX_RECOVERY.md](../../docs/INBOX_RECOVERY.md). Não confundir fim do código com
+ativação em produção; nenhuma alteração foi feita no n8n instalado.
 
 ## Proteções
 
@@ -80,9 +100,9 @@ JIDs `@lid` são ignorados até existir resolução confiável; nunca inventar t
 
 O export do gateway atual não foi fornecido nesta execução. Não foi substituído
 nem alegada compatibilidade com seus nodes de áudio. Áudio, autenticação da
-origem, aceitação durável e recuperação da Inbox ainda precisam da integração
-com esse export e da versão instalada. Os dois workflows entregam a saída;
-não constituem recuperação de entrada anterior à Inbox.
+origem e aceitação durável ainda precisam da integração com esse export e da
+versão instalada. Recovery só recupera o que **já foi persistido na Inbox**;
+eventos perdidos antes dela continuam responsabilidade do gateway/transporte.
 
 ## Desenvolvimento
 

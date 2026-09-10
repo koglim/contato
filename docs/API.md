@@ -636,9 +636,9 @@ O `markFailed` exige o `processing_token` da lease atual, é idempotente para to
 
 Há uma janela residual inevitável: a Evolution pode aceitar a mensagem e o n8n cair antes de confirmar `/sent`; após a lease expirar, um novo claim poderá reenviá-la. A arquitetura evita perda da intenção e duplicações lógicas usuais, mas não promete exactly-once matemático.
 
-Falhas controladas do router preservam seus códigos HTTP. A lease da Inbox é controlada por `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` (60 segundos por padrão), permitindo recuperar processamento abandonado sem uma transação aberta em chamadas de IA ou geocoding; falhas de transporte da Outbox seguem a política de retry acima.
+Falhas controladas do router preservam seus códigos HTTP. A lease da Inbox é controlada por `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` (60 segundos por padrão). B2 mantém IA/geocoder fora da transação final. Desde a 019, o caminho legado engloba o router na transação da Inbox e pode manter lock durante geocoding legado, com limites de tempo; detalhes em [INBOX_RECOVERY.md](INBOX_RECOVERY.md). Falhas de transporte da Outbox seguem a política de retry acima.
 
-Há uma limitação conhecida: uma queda depois do Customer Router concluir e antes de a inbox registrar `processed` pode levar a nova execução após a lease. Portanto o mecanismo fornece idempotência persistida para entregas normais at-least-once, não exactly-once matemático de transporte.
+A janela histórica entre o efeito do Customer Router e a conclusão da Inbox foi fechada no caminho 019 por transação compartilhada e fencing. Entradas anteriores com possíveis efeitos parciais são isoladas para reconciliação, não executadas cegamente. A entrega externa continua at-least-once, sujeita a recibo/retenção; não há promessa de exatamente uma entrega WhatsApp.
 
 - `400`: `validation_error`, com detalhes de validação.
 - `401`: `unauthorized`.
@@ -675,3 +675,15 @@ clarification, information, matched, no_matches ou fallback. Envelope, Outbox,
 claim/sent/failed e entrega compartilhada permanecem iguais. Nenhuma memória ou
 evidência da IA é incluída. Replay usa a Outbox mesmo com a B2 desligada.
 Veja [B2_CONTEXTUAL_CONVERSATION.md](B2_CONTEXTUAL_CONVERSATION.md).
+# Recuperação operacional da Inbox (019)
+
+`POST /internal/channel/inbound/next/process`: autenticação `X-Internal-Key`,
+um item por chamada, 204 sem item elegível ou 200 `{ id, status }`; status
+`processed | retry_scheduled | quarantined | processing`. Não envia WhatsApp
+nem retorna telefone/texto/token. A Outbox resultante usa a entrega compartilhada.
+
+`GET /internal/channel/inbound/queue-status`: diagnóstico agregado sem PII.
+`POST /internal/channel/inbound/:id/disposition`: corpo estrito com `request_id`,
+`operator_id` (UUIDs), `action: retry | close` e razão enumerada. Idempotente e
+auditado; 404 inexistente, 409 conflito/ação insegura. Não concede consentimento.
+Contrato completo, backoff, quarentena e rollout: [INBOX_RECOVERY.md](INBOX_RECOVERY.md).

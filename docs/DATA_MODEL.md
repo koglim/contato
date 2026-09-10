@@ -92,3 +92,13 @@ Valores monetários usam inteiros em centavos, nunca `FLOAT`. A restrição de `
 - Um contato recusado não bloqueia outro contato da mesma busca, mas seu histórico,
   snapshot e selected_at permanecem; uma retomada não inventa uma nova oportunidade.
 - Down bloqueia com P0015 diante de dados incompatíveis, sem apagar eventos/PII.
+# Adição 019 — Inbox recuperável
+
+`channel_inbound_messages`: `recovery_state`, `attempt_count`, `total_attempts`,
+`next_attempt_at`, `lease_expires_at`, `quarantined_at`, `recovery_reason`,
+`recovered_at`, `context_fingerprint`. Estado operacional separado do status
+histórico; nenhuma entrada é falsamente marcada como concluída para liberar FIFO.
+`channel_inbound_recovery_events`: ação/razão/data, chave idempotente, operador
+declarado e hash opcional do conflito; FK RESTRICT e updates proibidos. Sem
+cópia de telefone/texto/token. Índices de elegibilidade e ordem por telefone.
+Down P0019 protege dados incompatíveis. [Detalhes](INBOX_RECOVERY.md).

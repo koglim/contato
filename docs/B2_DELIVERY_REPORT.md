@@ -40,8 +40,30 @@ paga de avaliação foi realizado. A V1 inteira não está concluída.
 
 Proposta concreta de modelos, catálogo, limites, custos e critérios:
 [B2_HOMOLOGATION_PLAN.md](B2_HOMOLOGATION_PLAN.md). O mesmo documento define o
-próximo checkpoint de recuperação autônoma da Inbox (ainda não implementado).
-**Nenhuma migration, variável de ambiente ou dependência nova nesta revisão.**
+checkpoint de recuperação autônoma da Inbox. A implementação 019 foi acrescentada
+posteriormente; ver seção abaixo e [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
+**A revisão B2.2 não criou migration; o checkpoint Inbox posterior cria a 019.
+Nenhuma variável ou dependência nova na recuperação.**
+
+## Checkpoint posterior — Inbox autônoma (10/09/2026)
+
+Base aprovada `916dbf6d004ab85e816be554cec0095457da0e9a` preservada. A recuperação
+agora está implementada na API: claim autenticado/FIFO, backoff, limite de cinco,
+fencing em todas as fronteiras de efeito, quarentena, disposição auditada e
+diagnóstico agregado. Export n8n gerado **inativo**, sem envio de WhatsApp.
+
+Novas integrações cobrem queda antes/depois da proposta/rascunho, rollback após
+busca/Outbox, memória/TTL alterados, concorrência, erro de IA/geocoder e replay.
+Fallback determinístico persistido é reconhecido por igualdade exata com o texto
+calculado para o contexto atual, sem afrouxar validação de saída da IA. O legado
+também passa a ter efeitos e resposta na mesma transação; geocoding legado pode
+ocorrer durante esse lock limitado, risco documentado.
+
+Contagens, CI por SHA, matriz dos 30 cenários, rollout e limites do checkpoint:
+[INBOX_RECOVERY.md](INBOX_RECOVERY.md). Tabelas B2.2 abaixo são evidência histórica,
+não a contagem do HEAD atual. Corpus 300, readiness 18, hashes, prompts/modelos
+candidatos e separação simulado/real/humano permanecem intactos. B2 continua
+desligada; nenhuma avaliação paga, homologação de transporte ou ativação ocorreu.
 
 ## Entrega
 
@@ -133,7 +155,7 @@ em [evaluations/b2/README.md](../apps/api/evaluations/b2/README.md).
   marcador de fila no inbound. Down recusa registros contextuais existentes com
   P0018; não apagar dados para forçar rollback. 001–017 intactas.
 - Ordem manual futura: revisar/aprovar → aplicar todas as migrations pendentes,
-  incluindo 017 e 018 quando ausentes → publicar API com B2
+  incluindo 017, 018 e 019 quando ausentes → publicar API com B2
   desligada → avaliação/homologação → ativar somente após autorização.
 - Fallback operacional: desligar flag conserva replay já persistido; não desfaz
   dados. Preferir correção progressiva se o down estiver protegido.
@@ -147,9 +169,10 @@ Catálogo acima de 100 serviços requer estratégia de recuperação avaliada.
 ## Riscos e ponto de continuidade
 
 1. Homologação B2/modelo real e revisão humana: não executadas, bloqueiam ativação.
-2. Inbounds recuperáveis dependem de replay pelo transporte/operador. FIFO evita
-   ultrapassagem, mas entrada abandonada bloqueia as seguintes até recuperação;
-   worker/admin autônomo de Inbox não foi criado nesta B2.
+2. Recovery/admin agora implementados na 019. O acionamento contínuo ainda exige
+   homologar/importar/ativar o export; nenhuma execução agendada foi instalada.
+   Quarentena bloqueia o cliente até disposição explícita; casos legados com
+   efeitos incertos exigem reconciliação, não retry automático.
 3. Transporte n8n/Evolution, autenticidade, áudio, crash entre envio externo e
    confirmação, obsolescência de mensagens e observabilidade exigem homologação.
 4. Respostas críticas são deliberadamente determinísticas; paráfrases sensíveis

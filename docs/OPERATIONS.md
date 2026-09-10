@@ -26,6 +26,28 @@ sem PII. Contadores de retenção/dead-letter e crescimento da idade exigem
 investigação. Alertas automáticos, SLOs e painel de operação ainda não estão
 implantados; não confundir endpoint de diagnóstico com monitoramento ativo.
 
+`GET /internal/channel/inbound/queue-status` acrescenta diagnóstico da entrada:
+elegíveis, backoff, processamento, leases vencidas, quarentena/encerramento, idade,
+tentativas, recuperações e fencing. Sem telefone, texto, prompt ou token. Alertas
+iniciais e significados estão em [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
+
+## Incidente de entrada (Inbox)
+
+1. Conferir SHA/migrations e diagnóstico agregado; restringir investigação de um
+   ID a pessoal autorizado. Não publicar payload/execuções em chamados.
+2. Entradas recuperáveis são processadas por `/internal/channel/inbound/next/process`;
+   204 é normal, inclusive durante backoff. O export agendado está inativo no repo.
+3. Quarentena não libera FIFO. Reconciliar evidências; usar `:id/disposition` com
+   request_id, operator_id, ação/razão estritas. Retry/close são auditados e
+   idempotentes, sem representar consentimento ou compartilhar contatos.
+4. Não alterar SQL manualmente para zerar contagem, remover token ou apagar evento.
+   Resultado/proposta corruptos e legado com efeitos incertos não admitem retry
+   cego. `close` preserva evidências e libera a continuidade explicitamente.
+5. B2 desligada mantém entradas contextuais aguardando, sem consumi-las pelo
+   caminho legado. Monitorar essa fila; ativação continua exigindo homologação.
+6. Operador declarado via chave interna não é RBAC individual. Manter endpoint
+   restrito e registrar responsabilidade operacional fora de logs com PII.
+
 ## Incidente de entrega
 
 1. Identificar ambiente, SHA e ID da Outbox usando acesso restrito. Consultar
@@ -38,7 +60,8 @@ implantados; não confundir endpoint de diagnóstico com monitoramento ativo.
    acesso restrito. Se a API estiver indisponível, preservar a execução e manter
    envio pausado até reconciliar; não classificar timeout como rejeição.
 5. Não apagar tokens, recibos, reservas ou vínculos para liberar retry. A interface
-   de recuperação administrativa auditada ainda precisa ser implementada.
+   de recuperação administrativa da **Outbox** ainda precisa ser implementada;
+   a disposição da Inbox não libera hold/dead-letter de transporte.
 6. Depois de resolver a causa, homologar um caso de teste autorizado e acompanhar
    a fila. Comunicar impacto, ações e estado final sem expor dados pessoais.
 
@@ -62,19 +85,27 @@ implantados; não confundir endpoint de diagnóstico com monitoramento ativo.
 ## Ordem de release deste checkpoint (manual, após revisão)
 
 1. Revisar a branch/CI e confirmar backup restaurável e ambiente de homologação.
-2. Pausar consumidores que usariam a nova versão; aplicar 017 pelo runner de banco.
-3. Publicar a API compatível com 017; verificar `/health/db` e diagnóstico da fila.
-4. Publicar o web correspondente para preservar a allowlist e formulário somente
-   leitura de status/telefone.
+2. Pausar ingresso e consumidores durante a troca; conferir `pgmigrations` e
+   aplicar todas as pendentes pelo runner, incluindo **017, 018 e 019**. Não
+   presumir 017/018 existentes. Não executar migrations no startup da API.
+3. Publicar API compatível com 019, B2 desligada. Não manter réplicas antigas
+   gravando sem fencing. Verificar `/health/db` e diagnósticos Inbox/Outbox.
+4. Frontend permanece inalterado neste checkpoint. Preservar allowlist e status/
+   telefone somente leitura; isso ainda não oferece identidade multiusuário.
 5. Importar exports **inativos** e configurar credenciais/parâmetros conforme
    [workflows/n8n/README.md](../workflows/n8n/README.md). Conferir versão e export do
    gateway antes de substituir seu ramo de transporte.
-6. Homologar gateway + dispatcher, números distintos, falha/lease/replay e ausência
-   de duplicação. Ativar somente com autorização do operador.
+6. Homologar gateway + dispatcher + recovery, números distintos, queda/lease/FIFO,
+   quarentena/admin e ausência de duplicação lógica. Ativar somente com autorização.
 
-Não há nova variável API/web. Parâmetros não secretos e credenciais n8n estão
+Não há nova variável API/web neste checkpoint de Inbox. Manter
+`CONTEXTUAL_CONVERSATION_ENABLED=false`; modelo/chave B2 conservam seus contratos.
+Parâmetros não secretos e credenciais n8n estão
 listados no README dos workflows. A lease existente precisa comportar os timeouts.
 
 Rollback 017 é protegido quando há recibos/retenções. Não limpar registros para
 forçá-lo nem voltar a uma API que ignore retenções. Preferir correção roll-forward;
 restauração integral só após avaliação do operador e reconciliação de envios.
+018/019 também têm down protegido quando há dados incompatíveis. Nunca excluir
+memória, eventos ou quarentena para forçar downgrade. Casos legados classificados
+`legacy_effects_uncertain` no upgrade exigem análise antes de retomar a fila.

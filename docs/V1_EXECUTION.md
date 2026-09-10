@@ -15,15 +15,15 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | Busca, resolução e ranking | Implementado | API + PostGIS, fair-v1, pool 20 / página 3 / teto 6 |
 | Escolha e contato bilateral | Implementado | Transação, consentimento, snapshots, selectionKey |
 | Resposta profissional e retomada | Implementado | Migration 015, recusa preserva outra busca |
-| Inbox / Outbox | Parcial, estabilizada | Recibo/retenção 017, limite de abandono, FIFO independente e diagnóstico; recuperação Inbox/admin ainda pendentes |
+| Inbox / Outbox | Implementação de recuperação disponível; homologação pendente | 017/019: recibos, leases, FIFO, backoff, fencing, quarentena/admin e diagnóstico; consumidor agendado inativo |
 | Revalidação da primeira escolha | Corrigida (F04) | Status, serviço/catálogo, contato canônico e cobertura obrigatórios em nova seleção/apresentação |
-| Entrega n8n | Parcial / homologação pendente | Dois exports inativos testados; gateway de produção/versões ainda não fornecidos |
+| Entrega n8n | Parcial / homologação pendente | Três exports inativos testados: entrega compartilhada, dispatcher Outbox e recovery Inbox; gateway/versões reais pendentes |
 | Conversa contextual híbrida | Implementação B2 disponível, desligada | Memória/hipóteses, controlador, perguntas fundamentadas, persistência e corpus 300; modelo real/revisão humana pendentes |
 | Identidade e onboarding | Ausente | Acesso demonstrativo com profissional fixo |
 | Painel | Parcial | Allowlist no BFF fecha F02; status/telefone somente leitura; falta ownership individual |
 | Conclusão / avaliações | Ausente como jornada | Tabelas existem; estados e interfaces não |
 | Assinatura / cobrança | Ausente | Gateway, preço e políticas ainda pendentes de decisão |
-| Administração / operação | Parcial | Diagnóstico sem PII, logs sanitizados e runbook; papéis/alertas/recuperação auditada pendentes |
+| Administração / operação | Parcial | Diagnóstico sem PII, logs sanitizados, disposição auditada da Inbox; papéis individuais, alertas ativos e administração Outbox pendentes |
 | QA | Parcial | Baseline ampliado pela suíte B2 e corpus; resultados/SHA exatos no relatório B2; falta browser, carga, modelo e transporte reais |
 
 ## Entregas publicadas e evidência
@@ -39,6 +39,7 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | `1cd80a6` | Sanitização de logs e runbook operacional | [34404857753](https://github.com/koglim/contato/actions/runs/34404857753) |
 | `ba57af4` | B2: contexto, hipóteses, perguntas fundamentadas, recuperação, FIFO e corpus 300 | [34475297400](https://github.com/koglim/contato/actions/runs/34475297400) |
 | `883544c` | B2.2: pedidos interrogativos, catálogo informativo, composição e jornadas Inbox | [34478125708](https://github.com/koglim/contato/actions/runs/34478125708) |
+| `103a7cb` | Inbox autônoma: FIFO/fencing, retry/quarentena/admin, recuperação B2 e legado | [34484998845](https://github.com/koglim/contato/actions/runs/34484998845) |
 
 Checkpoint anterior à B2: `1cd80a6e699dbabdc64199a7b62026e72062e60a`.
 Lint, typecheck, build, 276 testes API + 12 web + 7 workflows passaram localmente
@@ -59,7 +60,15 @@ testes API + 12 web + 7 workflows, 96 integrações duas vezes, 300 casos congel
 e 18 adicionais. A retomada por janela do avaliador acrescenta um teste no próximo
 checkpoint. [B2_HOMOLOGATION_PLAN.md](B2_HOMOLOGATION_PLAN.md) propõe modelos,
 catálogo, orçamento e gates; nenhuma chamada paga executada. A recuperação
-autônoma da Inbox está especificada ali e continua pendente antes da operação pública.
+autônoma da Inbox foi implementada no checkpoint 019 abaixo; sua ativação e
+homologação operacional continuam pendentes antes da operação pública.
+
+Checkpoint 019 parte de `916dbf6d004ab85e816be554cec0095457da0e9a` sem alterar
+o corpus/prompt B2. Acrescenta claim FIFO por telefone, cinco tentativas efetivas,
+backoff, fencing, quarentena e disposição auditada. Proposta/rascunho reutilizados
+somente na mesma revisão; contexto alterado pede confirmação sem novos efeitos.
+O consumidor n8n gerado permanece inativo. Evidências por cenário, limites e
+ordem de publicação em [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
 
 ## Checkpoints e ordem
 
@@ -91,8 +100,10 @@ seu aceite conversacional real ainda está pendente. D–I não foram concluída
 1. Obter versões de n8n/Evolution e export sanitizado do gateway atual. Conectar
    em homologação o transporte compartilhado, autenticação, texto/áudio e entrada
    durável sem duplicar o envio imediato. Não reescrever a API bilateral pronta.
-2. Completar recuperação de Inbox/admin e política de obsolescência por finalidade;
-   uma retenção não pode ser liberada apagando evidência. Instrumentar alertas.
+2. Homologar recuperação Inbox/admin implementada na 019, incluindo reinício do
+   consumidor e casos em quarentena. Completar administração da Outbox e política
+   de obsolescência por finalidade; não liberar retenção apagando evidência.
+   Instrumentar alertas e validar carga/duração dos locks legados.
 3. Homologar B2: autorizar modelos/orçamento, executar comparação no development,
    congelar configuração e avaliar heldout com revisão humana. Corpus e runner
    estão em `apps/api/evaluations/b2`; controles e limites em
@@ -106,12 +117,14 @@ seu aceite conversacional real ainda está pendente. D–I não foram concluída
 
 Release manual, configuração n8n, incidente/rollback e ensaio de backup estão em
 [OPERATIONS.md](OPERATIONS.md) e [workflows/n8n/README.md](../workflows/n8n/README.md).
-Para B2, conferir e aplicar todas as migrations pendentes, incluindo 017 e 018
+Para B2/Inbox, conferir e aplicar todas as migrations pendentes, incluindo 017, 018 e 019
 quando ausentes, antes da API; não supor que o ambiente já aplicou a 017.
-Novas variáveis: `CONTEXTUAL_CONVERSATION_ENABLED=false` e
+Variáveis já introduzidas pela B2: `CONTEXTUAL_CONVERSATION_ENABLED=false` e
 `CONTEXTUAL_CONVERSATION_MODEL` (sem default); `OPENAI_API_KEY` é reutilizada.
 Publicar primeiro com B2 desligada, avaliar/homologar e só ativar mediante decisão
 manual. Nenhuma dessas ações em produção foi executada.
+O checkpoint Inbox não acrescenta variáveis nem dependências. Pausar ingresso e
+consumidores durante a troca para 019; não manter réplicas antigas sem fencing.
 
 ## Decisões e dependências externas
 

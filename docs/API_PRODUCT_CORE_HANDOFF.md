@@ -271,3 +271,11 @@ próxima página, confirmação de envio e proteção de rollback. Testes usam I
 serviços/repositórios reais e banco descartável do CI, sem integração de produção.
 O consumidor futuro deve continuar confirmando por ID/lease, sem enviar mensagens
 fora da Outbox. A etapa não garante entrega externa até o consumidor ser integrado.
+# Continuidade: recuperação autônoma 019
+
+Implementado consumidor interno da Inbox e export n8n inativo; contrato e runbook
+em [INBOX_RECOVERY.md](INBOX_RECOVERY.md). Instalação/homologação/ativação não
+executadas. Não recriar notificações bilaterais: recuperação e replay usam os
+mesmos efeitos transacionais, selectionKey, consentimento e Outbox existentes.
+Aplicar todas as migrations pendentes (017/018/019 incluídas) antes da nova API,
+sem réplicas antigas processando durante a troca. B2 continua desligada.

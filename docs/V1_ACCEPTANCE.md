@@ -20,7 +20,7 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T06 | Próprio/grupo/evento inválido | Parcial: normalizador ignora; integração no webhook pendente |
 | T07 | Autenticidade do webhook | Não executado; chave interna da API não autentica origem Evolution |
 | T08 | Replay do inbound | Aprovado automatizado: Inbox, contato/Outbox únicos e conteúdo persistido |
-| T09 | ID com payload conflitante | Aprovado automatizado: conflito sem sobrescrita |
+| T09 | ID com payload conflitante | Conflito sem sobrescrita, quarentena/auditoria e FIFO bloqueado até disposição; evidência 019 em INBOX_RECOVERY.md |
 | T10 | Fila vazia | Aprovado automatizado: 204 na API e gate não autoriza transporte |
 | T11 | Claim já enviado | Aprovado automatizado: sent sem payload de novo envio e gate encerra |
 | T12 | Dois consumidores | Aprovado automatizado: claims concorrentes PostgreSQL; n8n real pendente |
@@ -55,13 +55,13 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T41 | Anonimização/retenção | Parcial: logs sanitizados; política de expurgo/dados imutáveis pendente |
 | T42 | Backup/restauração | Não executado; runbook sem alegação de ensaio realizado |
 | T43 | Carga/providers lentos | Parcial: testes de corrida/leases; carga e SLOs não medidos |
-| T44 | Migrations/rollback | CI B2 cobre 018, down protegido P0018, rollback compatível 018–008 e reaplicação; SHA exato no relatório |
+| T44 | Migrations/rollback | CI ampliado até 019: proteção P0019, preservação de 018 e proteções anteriores, down compatível 019–008 e reaplicação 008–019; evidência por SHA em INBOX_RECOVERY.md |
 | T45 | Regionalismos/abreviações | Corpus B2 inclui casos sintéticos; execução com propostas simuladas não mede compreensão real |
 | T46 | Problema sem profissão | Aprovado automatizado: hipótese ligada ao catálogo real, confirmação antes da promoção; modelo real pendente |
 | T47 | Dados fora de ordem | Teste PostgreSQL B2 de cidade antes do serviço; preservação de slots e no_matches |
 | T48 | Correção de contexto | Aprovado Inbox/PostgreSQL: correção de serviço e cidade, nova busca, outro slot/histórico preservados; geocoder simulado |
 | T49 | FAQ no meio da busca | Aprovado: custo/catálogo/interrupção preservam busca e hipóteses, não compõem pergunta desnecessária; replay sem IA |
-| T50 | Rajada durante processamento | Fila/lease/fencing testados; recuperação autônoma ainda NÃO implementada, bloqueia operação pública; critérios de limite/quarentena/FIFO em B2_HOMOLOGATION_PLAN.md |
+| T50 | Rajada durante processamento | Recuperação autônoma implementada: FIFO/data+ID, fencing, backoff/limite, quarentena/admin e export inativo; integrações reais e evidências em INBOX_RECOVERY.md. Motor n8n, carga e acionamento real ainda não homologados |
 | T51 | Paráfrases de comandos | Número/nome/comandos exatos reutilizam controlador existente, sem IA; paráfrases sensíveis não reconhecidas pedem esclarecimento |
 | T52 | Negação/hipótese/citação | Regressões determinísticas + corpus adversarial; recusa não equivale a descrição de defeito negado; avaliação real pendente |
 | T53 | Prompt injection contextual | Schema/evidência/catálogo, limites e ações restritas testados; resistência semântica universal não comprovada |

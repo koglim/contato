@@ -115,18 +115,20 @@ nunca copiar conversas pessoais ou chaves para relatórios públicos.
 ## Publicação futura
 
 Após aprovação: conferir `pgmigrations` no ambiente alvo e aplicar **todas** as
-migrations pendentes na ordem, incluindo **017 e 018 quando ausentes**, antes da
+migrations pendentes na ordem, incluindo **017, 018 e 019 quando ausentes**, antes da
 API. Não aplicar apenas 018 supondo 017 existente. Publicar com
 `CONTEXTUAL_CONVERSATION_ENABLED=false`; avaliar/homologar; ativação é uma decisão
 manual posterior. `CONTEXTUAL_CONVERSATION_MODEL` e `OPENAI_API_KEY` permanecem
 os mesmos contratos. Nenhuma variável do EasyPanel foi alterada.
 
-## Próximo checkpoint obrigatório: recuperação autônoma da Inbox
+## Gate operacional: recuperação autônoma da Inbox
 
-**Pendente de implementação; necessário antes da operação pública.** Não é
-resolvido pelo dispatcher de Outbox nem pelo fato de uma entrada retornar 409.
+**Implementado no checkpoint 019, ainda não ativado/homologado em operação.**
+Contrato, evidências, migração e riscos em [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
+O dispatcher da Outbox não substitui o consumidor de entradas. Homologar o
+export inativo e suas credenciais/alertas continua necessário antes do público.
 
-Proposta para o checkpoint:
+Critérios de implementação e homologação (mantidos como referência):
 
 1. Worker interno autenticado, desligável, reivindica atomicamente a entrada
    elegível mais antiga de cada cliente. Lease/token + `SKIP LOCKED` e validação
