@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { query, withTransaction, type DatabaseClient } from "../../database/connection.js";
-import { CONTEXTUAL_POLICY, CONTEXTUAL_VERSION, contextualMemorySchema, type ContextualMemory } from "./contextual.contract.js";
+import { CONTEXTUAL_POLICY, CONTEXTUAL_VERSION, contextualMemorySchema, contextualProposalSchema, type ContextualMemory } from "./contextual.contract.js";
+import { InboxFenceError, InboxPermanentError, InboxContextChangedError, liveInboxLeaseSql } from "../channel-inbox/inbox-recovery.policy.js";
 import type { ChannelInboundMessageRecord } from "../channel-inbox/channel-inbox.types.js";
 
 export class ContextualBusyError extends Error {}
@@ -22,6 +23,7 @@ export async function contextualFingerprint(client: DatabaseClient, customerId: 
 export class PostgresContextualRepository {
   async acquire(record: ChannelInboundMessageRecord, model: string): Promise<ContextualSnapshot> {
     const customerId = await withTransaction(async client => {
+      await this.fence(client, record);
       await client.query(`UPDATE channel_inbound_messages SET contextual_queue = TRUE WHERE id = $1`, [record.id]);
       const customer = await client.query<{ id: string }>(`INSERT INTO customers(phone_e164) VALUES ($1)
         ON CONFLICT(phone_e164) DO UPDATE SET phone_e164 = EXCLUDED.phone_e164 RETURNING id`, [record.phoneE164]);
@@ -33,6 +35,7 @@ export class PostgresContextualRepository {
       return customerId;
     });
     return withTransaction(async client => {
+      await this.fence(client, record);
       await client.query(`SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE`, [customerId]);
       const token = randomUUID();
       const claimed = await client.query<{ revision: number; memory: unknown; conversation_fingerprint: string | null }>(`UPDATE contextual_memories SET lease_token = $2,
@@ -42,15 +45,18 @@ export class PostgresContextualRepository {
       // Arrival order, not UUID or completion order. A later turn stays recoverable in the Inbox.
       const older = await client.query(`SELECT i.id FROM channel_inbound_messages i
         JOIN channel_inbound_messages current ON current.id = $2
-        WHERE i.phone_e164 = $1 AND i.contextual_queue AND i.status <> 'processed'
+        WHERE i.phone_e164 = $1 AND (i.status <> 'processed' OR i.recovery_state = 'quarantined') AND i.recovery_state <> 'closed'
           AND (i.created_at, i.id) < (current.created_at, current.id) LIMIT 1`, [record.phoneE164, record.id]);
       if (older.rows.length) throw new ContextualBusyError();
       const current = await contextualFingerprint(client, customerId);
-      const memory = contextualMemorySchema.parse(claimed.rows[0].memory);
+      if (record.contextFingerprint && record.contextFingerprint !== (current?.fingerprint ?? "none")) throw new InboxContextChangedError();
+      const parsedMemory = contextualMemorySchema.safeParse(claimed.rows[0].memory);
+      if (!parsedMemory.success) throw new InboxPermanentError("conversation_state_invalid");
+      const memory = parsedMemory.data;
       if (memory.conversationId !== (current?.id ?? null) || (current && claimed.rows[0].conversation_fingerprint !== current.fingerprint)) {
         const knownService = current?.resolved_service ?? (current?.pending_slot === "location" ? current.service_text.slice(0, 200) : null);
-        memory.service = knownService ? { value: knownService, source: "domain", inboundId: record.id } : null;
-        memory.location = current?.location_text ? { value: current.location_text, source: "domain", inboundId: record.id } : null;
+        memory.service = knownService ? { value: knownService, source: "domain", inboundId: record.id } : current ? null : memory.service;
+        memory.location = current?.location_text ? { value: current.location_text, source: "domain", inboundId: record.id } : current ? null : memory.location;
         memory.hypotheses = [];
         memory.conversationId = current?.id ?? null;
       }
@@ -58,6 +64,8 @@ export class PostgresContextualRepository {
       // Never execute a proposal against a different memory revision.
       const sameContext = turn.rows[0].context_revision === claimed.rows[0].revision && turn.rows[0].context_fingerprint === (current?.fingerprint ?? "none");
       const proposal = sameContext ? turn.rows[0].proposal : null;
+      if (turn.rows[0].proposal !== null && !contextualProposalSchema.safeParse(turn.rows[0].proposal).success) throw new InboxPermanentError("persisted_proposal_invalid");
+      if (turn.rows[0].reply_draft !== null && (turn.rows[0].reply_draft.length < 5 || turn.rows[0].reply_draft.length > 240)) throw new InboxPermanentError("persisted_draft_invalid");
       return { customerId, token, revision: claimed.rows[0].revision, memory, proposal, draft: sameContext ? turn.rows[0].reply_draft : null,
         conversationId: current?.id ?? null, fingerprint: current?.fingerprint ?? "none", pendingSlot: current?.pending_slot ?? null };
     });
@@ -76,25 +84,29 @@ export class PostgresContextualRepository {
   }
 
   async saveProposal(record: ChannelInboundMessageRecord, snapshot: ContextualSnapshot, proposal: unknown) {
-    const result = await query(`UPDATE contextual_turns t SET proposal = $3::jsonb, reply_draft = NULL, context_revision = $4, context_fingerprint = $5
+    await withTransaction(async client => {
+    await this.fence(client, record);
+    const result = await client.query(`UPDATE contextual_turns t SET proposal = $3::jsonb, reply_draft = NULL, context_revision = $4, context_fingerprint = $5
       FROM contextual_memories m WHERE t.inbound_id = $1 AND t.customer_id = m.customer_id
       AND m.lease_token = $2 AND m.lease_expires_at > NOW() AND m.revision = $4 RETURNING t.inbound_id`,
     [record.id, snapshot.token, JSON.stringify(proposal), snapshot.revision, snapshot.fingerprint]);
     if (!result.rows.length) throw new ContextualBusyError();
+    });
   }
 
   async saveDraft(record: ChannelInboundMessageRecord, snapshot: ContextualSnapshot, draft: string) {
-    const result = await query(`UPDATE contextual_turns t SET reply_draft = $3 FROM contextual_memories m
+    await withTransaction(async client => {
+    await this.fence(client, record);
+    const result = await client.query(`UPDATE contextual_turns t SET reply_draft = $3 FROM contextual_memories m
       WHERE t.inbound_id = $1 AND t.customer_id = m.customer_id AND m.lease_token = $2
         AND m.lease_expires_at > NOW() AND m.revision = t.context_revision RETURNING t.inbound_id`, [record.id, snapshot.token, draft]);
     if (!result.rows.length) throw new ContextualBusyError();
+    });
   }
 
   async commit<T>(record: ChannelInboundMessageRecord, snapshot: ContextualSnapshot, apply: (client: DatabaseClient) => Promise<{ value: T; memory: ContextualMemory }>) {
     return withTransaction(async client => {
-      const inbound = await client.query(`SELECT id FROM channel_inbound_messages WHERE id = $1
-        AND status = 'processing' AND processing_token = $2 FOR UPDATE`, [record.id, record.processingToken]);
-      if (!inbound.rows.length) throw new ContextualBusyError();
+      await this.fence(client, record);
       await client.query(`SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE`, [snapshot.customerId]);
       const lease = await client.query(`SELECT customer_id FROM contextual_memories WHERE customer_id = $1
         AND lease_token = $2 AND revision = $3 AND lease_expires_at > NOW() FOR UPDATE`, [snapshot.customerId, snapshot.token, snapshot.revision]);
@@ -109,5 +121,11 @@ export class PostgresContextualRepository {
 
   async release(snapshot: ContextualSnapshot) {
     await query(`UPDATE contextual_memories SET lease_token = NULL, lease_expires_at = NULL WHERE customer_id = $1 AND lease_token = $2`, [snapshot.customerId, snapshot.token]);
+  }
+
+  private async fence(client: DatabaseClient, record: ChannelInboundMessageRecord) {
+    const result = await client.query(`SELECT id FROM channel_inbound_messages WHERE id = $1 AND processing_token = $2
+      AND ${liveInboxLeaseSql} FOR UPDATE`, [record.id, record.processingToken]);
+    if (!result.rows.length) throw new InboxFenceError();
   }
 }

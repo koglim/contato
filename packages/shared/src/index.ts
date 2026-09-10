@@ -140,3 +140,5 @@ export { dashboardMutationSchema, updateSelfServiceProfileSchema } from "./schem
 export { channelOutboundQueueStatusSchema } from "./schemas/channel-outbound.js";
 export type { ChannelOutboundQueueStatus } from "./types/channel-outbound.js";
 export { contextualMessageSchema } from "./schemas/contextual-message.js";
+export { inboxRecoveryResponseSchema, inboxDispositionSchema, inboxDispositionResponseSchema, inboxQueueStatusSchema } from "./schemas/inbox-recovery.js";
+export type { InboxDisposition } from "./schemas/inbox-recovery.js";

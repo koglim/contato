@@ -1,9 +1,16 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 export type SqlValue = string | number | boolean | Date | null;
 export type DatabaseClient = Pick<PoolClient, "query">;
 
 let pool: Pool | undefined;
+const transactionScope = new AsyncLocalStorage<DatabaseClient>();
+
+// Used only by the legacy Inbox unit of work. Injected repositories still work normally.
+export function inDatabaseTransaction<T>(client: DatabaseClient, operation: () => Promise<T>) {
+  return transactionScope.run(client, operation);
+}
 
 function getPool() {
   if (!pool) {
@@ -24,10 +31,12 @@ export async function checkDatabaseConnection() {
 }
 
 export async function query<T extends QueryResultRow>(text: string, values: SqlValue[] = []) {
-  return getPool().query<T>(text, values);
+  return (transactionScope.getStore() ?? getPool()).query<T>(text, values);
 }
 
 export async function withTransaction<T>(callback: (client: DatabaseClient) => Promise<T>) {
+  const current = transactionScope.getStore();
+  if (current) return callback(current);
   const client = await getPool().connect();
 
   try {

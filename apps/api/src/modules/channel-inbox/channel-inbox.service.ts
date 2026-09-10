@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { customerSearchMessageResponseSchema, opportunityMessageSchema, contextualMessageSchema, type ChannelInboundMessageInput } from "@contatocerto/shared";
+import { channelInboundMessageResponseSchema, customerSearchMessageResponseSchema, opportunityMessageSchema, contextualMessageSchema, type ChannelInboundMessageInput } from "@contatocerto/shared";
+import { InboxFenceError, InboxPermanentError, InboxContextChangedError } from "./inbox-recovery.policy.js";
+import { PostgresCustomerRepository } from "../customers/customer.repository.js";
 import type { ContextualInboxHandler } from "../contextual-conversation/contextual.service.js";
 import type { ProfessionalOpportunityService } from "../professional-opportunity/professional-opportunity.service.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
@@ -70,6 +72,10 @@ function sameInboundPayload(record: ChannelInboundMessageRecord, input: ChannelI
     && record.limitValue === input.limit;
 }
 
+class InboxOutcomeError extends Error {
+  constructor(readonly outcome: Exclude<ChannelInboxOutcome, { kind: "response" }>) { super(outcome.kind); }
+}
+
 export class DefaultChannelInboxService implements ChannelInboxService {
   constructor(
     private readonly repository: ChannelInboundMessageRepository,
@@ -84,9 +90,12 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
     const registered = await this.repository.createOrFind(input, this.contextualConversation ? { contextual: true } : undefined);
     if (!sameInboundPayload(registered.record, input)) {
+      await this.repository.recordPayloadConflict?.(registered.record.id, input);
       return { kind: "channel_message_payload_conflict" };
     }
+    if (registered.record.recoveryState === "quarantined" || registered.record.recoveryState === "closed") return { kind: "channel_message_processing" };
     if (registered.record.status === "processed") return this.replay(registered.record);
+    if (registered.record.contextualQueue && !this.contextualConversation) return { kind: "channel_message_processing" };
 
     const processingToken = randomUUID();
     const claimed = await this.repository.claim(
@@ -100,10 +109,22 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       return { kind: "channel_message_processing" };
     }
 
+    return this.processClaimed(claimed);
+  }
+
+  async processClaimed(claimed: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
+    const processingToken = claimed.processingToken;
+    if (!processingToken) return { kind: "channel_message_processing" };
     try {
+      if (claimed.result !== null) throw new InboxPermanentError("conversation_state_invalid");
       const opportunity = await this.professionalOpportunities?.handle(claimed);
       if (opportunity) return { kind: "response", response: opportunity };
-      if (this.contextualConversation) return await this.contextualConversation.handle(claimed);
+      if (this.contextualConversation) {
+        const outcome = await this.contextualConversation.handle(claimed);
+        if (outcome.kind !== "response") await this.failOrDefer(claimed.id, processingToken, outcome.kind);
+        return outcome;
+      }
+      const operation = async (): Promise<ChannelInboxOutcome> => {
       const routed = await this.customerSearchRouter.route({
         phone_e164: claimed.phoneE164,
         raw_text: claimed.rawText,
@@ -112,8 +133,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         selectionKey: claimed.id,
       });
       if (routed.kind !== "response") {
-        await this.repository.markFailed(claimed.id, processingToken, routed.kind);
-        return routed;
+        throw new InboxOutcomeError(routed);
       }
 
       const result = customerSearchMessageResponseSchema.parse(routed.response);
@@ -137,20 +157,35 @@ export class DefaultChannelInboxService implements ChannelInboxService {
           matchIds: presentedMatchIds,
         },
       });
-      if (!outbound) return { kind: "channel_message_processing" };
+      if (!outbound) throw new InboxFenceError();
       return {
         kind: "response",
-        response: {
+        response: channelInboundMessageResponseSchema.parse({
           message_id: claimed.id,
           duplicate: false,
           reply_text: outbound.textContent,
           outbound: { id: outbound.id, status: outbound.status },
           result: publicResult(result),
-        },
+        }),
       };
+      };
+      return this.repository.runAtomic ? await this.repository.runAtomic(claimed, operation) : await operation();
     } catch (error) {
+      if (error instanceof InboxContextChangedError) return this.contextChangedReply(claimed);
+      if (error instanceof InboxFenceError) {
+        await this.repository.recordFence?.(claimed.id, processingToken);
+        return { kind: "channel_message_processing" };
+      }
+      if (error instanceof InboxOutcomeError) {
+        await this.failOrDefer(claimed.id, processingToken, error.outcome.kind);
+        return error.outcome;
+      }
+      if (error instanceof InboxPermanentError) {
+        await this.repository.markFailed(claimed.id, processingToken, error.code);
+        return { kind: "channel_message_result_invalid" };
+      }
       if (error instanceof MatchReservationConflictError) {
-        await this.repository.markFailed(claimed.id, processingToken, "show_more_reservation_conflict");
+        await this.failOrDefer(claimed.id, processingToken, "show_more_reservation_conflict");
         return { kind: "selection_show_more_pending" };
       }
       await this.repository.markFailed(claimed.id, processingToken, errorCodeFor(error));
@@ -163,7 +198,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     if (contextual.success) {
       const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id);
       // B2 is atomic: a missing Outbox is corruption, never a reason to regenerate or execute again.
-      if (!outbound) return { kind: "channel_message_result_invalid" };
+      if (!outbound) return this.invalidResult(record.id);
       return { kind: "response", response: { message_id: record.id, duplicate: true, reply_text: outbound.textContent,
         outbound: { id: outbound.id, status: outbound.status }, result: contextual.data } };
     }
@@ -172,7 +207,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       return response ? { kind: "response", response } : { kind: "channel_message_result_invalid" };
     }
     const parsed = customerSearchMessageResponseSchema.safeParse(record.result);
-    if (!parsed.success) return { kind: "channel_message_result_invalid" };
+    if (!parsed.success) return this.invalidResult(record.id);
     const result = parsed.data;
     const replyText = presentRouteResult(result, this.messagePresenter);
     const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id)
@@ -194,5 +229,31 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         result: publicResult(result),
       },
     };
+  }
+
+  private async invalidResult(id: string): Promise<ChannelInboxOutcome> {
+    await this.repository.quarantineResult?.(id);
+    return { kind: "channel_message_result_invalid" };
+  }
+
+  private async contextChangedReply(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
+    if (!this.repository.runAtomic) throw new InboxContextChangedError();
+    return this.repository.runAtomic(record,async()=>{
+      const customer=await new PostgresCustomerRepository().findOrCreateByPhoneE164(record.phoneE164);
+      const result={route:"contextual" as const,customer_id:customer.id,status:"clarification" as const};
+      const text="Sua busca mudou ou expirou enquanto essa mensagem aguardava. Não fiz uma nova escolha. Quer continuar a busca atual ou retomar o pedido anterior?";
+      const outbound=await this.repository.markProcessedAndCreateOutbound({id:record.id,processingToken:record.processingToken!,customerId:customer.id,
+        conversationId:null,searchRequestId:null,result,outbound:{channelInboundMessageId:record.id,provider:record.provider,
+          recipientPhoneE164:record.phoneE164,textContent:text,searchRequestId:null,matchIds:[]}});
+      if(!outbound) throw new InboxFenceError();
+      return {kind:"response",response:channelInboundMessageResponseSchema.parse({message_id:record.id,duplicate:false,
+        reply_text:outbound.textContent,outbound:{id:outbound.id,status:outbound.status},result})};
+    },true);
+  }
+
+  private async failOrDefer(id: string, token: string, code: string) {
+    if (this.repository.deferContention && ["channel_message_processing", "conversation_processing", "selection_show_more_pending", "show_more_reservation_conflict"].includes(code)) {
+      await this.repository.deferContention(id, token);
+    } else await this.repository.markFailed(id, token, code);
   }
 }

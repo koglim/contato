@@ -23,6 +23,10 @@ export type ChannelInboundMessageRecord = {
   errorCode: string | null;
   processingToken: string | null;
   processingStartedAt: Date | null;
+  recoveryState?: "active" | "quarantined" | "closed";
+  contextualQueue?: boolean;
+  attemptCount?: number;
+  contextFingerprint?: string | null;
 };
 
 export type MarkProcessedInboundMessage = {
@@ -44,6 +48,11 @@ export interface ChannelInboundMessageRepository {
   claim(id: string, processingToken: string, processingLeaseSeconds: number): Promise<ChannelInboundMessageRecord | null>;
   markProcessedAndCreateOutbound(input: MarkProcessedInboundMessageWithOutbound): Promise<ChannelOutboundMessageRecord | null>;
   markFailed(id: string, processingToken: string, errorCode: string): Promise<boolean>;
+  recordPayloadConflict?(id: string, input: ChannelInboundMessageInput): Promise<void>;
+  quarantineResult?(id: string): Promise<void>;
+  recordFence?(id: string, token: string): Promise<void>;
+  deferContention?(id: string, token: string): Promise<void>;
+  runAtomic?<T>(record: ChannelInboundMessageRecord, operation: () => Promise<T>, acknowledgeContextChange?: boolean): Promise<T>;
 }
 
 export type ChannelInboxOutcome =
@@ -59,4 +68,5 @@ export type ChannelInboxOutcome =
 
 export interface ChannelInboxService {
   receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome>;
+  processClaimed?(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome>;
 }

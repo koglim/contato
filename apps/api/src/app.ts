@@ -70,6 +70,8 @@ import { DefaultChannelOutboundService } from "./modules/channel-outbox/channel-
 import { PostgresChannelOutboundMessageRepository } from "./modules/channel-outbox/channel-outbox.repository.js";
 import type { ChannelOutboundMessageRepository, ChannelOutboundService } from "./modules/channel-outbox/channel-outbox.types.js";
 import { readChannelOutboundConfig, type ChannelOutboundConfig } from "./config/channel-outbound.js";
+import { InboxRecoveryService } from "./modules/channel-inbox/inbox-recovery.service.js";
+import { inboxRecoveryRoutes } from "./modules/channel-inbox/inbox-recovery.routes.js";
 
 type AppDependencies = {
   contextualConversation?: ContextualInboxHandler;
@@ -283,6 +285,9 @@ export function buildApp({
   app.register(searchConversationRoutes, { prefix: "/internal/search/conversations", service: resolvedSearchConversationService, internalApiKey });
   app.register(customerSearchRoutes, { prefix: "/internal/customer-search", router: resolvedCustomerSearchRouter, internalApiKey });
   app.register(channelInboxRoutes, { prefix: "/internal/channel/inbound", service: resolvedChannelInboxService, internalApiKey });
+  app.register(inboxRecoveryRoutes, { prefix: "/internal/channel/inbound", internalApiKey,
+    service: new InboxRecoveryService(resolvedChannelInboxService, (channelInboxConfig ?? readChannelInboxConfig()).processingLeaseSeconds,
+      Boolean(contextualConversation) || readContextualConfig().enabled) });
   app.register(channelOutboundRoutes, { prefix: "/internal/channel/outbound", service: resolvedChannelOutboundService, internalApiKey });
 
   return app;

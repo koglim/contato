@@ -29,22 +29,24 @@ function fake(results: QueryResultRow[][]) {
 }
 
 test("inbox repository uses the provider-scoped key and claims with a recoverable lease", async () => {
-  const current = fake([[row()], [row({ status: "processing", processing_token: id, processing_started_at: new Date() })], [{ id }], [outboundRow()], [{ id }]]);
+  const current = fake([[row()], [], [row({ status: "processing", processing_token: id, processing_started_at: new Date() })], [{ id }], [outboundRow()], [{ id }]]);
   const created = await current.repository.createOrFind({ provider: "test", provider_message_id: "msg-001", phone_e164: "+5566999999999", raw_text: "Sinop", country_code: "BR", limit: 3 });
   assert.equal(created.created, true);
   assert.match(current.calls[0]!.text, /ON CONFLICT \(provider, provider_message_id\) DO NOTHING/u);
   assert.match(current.calls[0]!.text, /phone_e164, raw_text, country_code, limit_value/u);
   assert.equal((await current.repository.claim(id, randomUUID(), 60))?.status, "processing");
-  assert.match(current.calls[1]!.text, /status IN \('received', 'failed'\)/u);
-  assert.match(current.calls[1]!.text, /processing_started_at <=/u);
+  assert.match(current.calls[2]!.text, /status IN \('received', 'failed'\)/u);
+  assert.match(current.calls[1]!.text, /lease_expires_at/);
+  assert.match(current.calls[2]!.text, /FOR UPDATE OF i SKIP LOCKED/);
+  assert.match(current.calls[2]!.text, /older.created_at,older.id/);
   const token = randomUUID();
   const outbound = await current.repository.markProcessedAndCreateOutbound({ id, processingToken: token, result: { customer_id: randomUUID(), route: "started", conversation: { conversation_id: null, conversation_status: "completed", result: { status: "needs_location", stage: "location_resolution", reason: "unresolved", interpretation: { status: "interpreted", raw_text: "x", service_text: "x", location_text: "Sinop", country_code: "BR", interpretation: { service_strategy: "full_message", location_strategy: "locative_phrase" } }, orchestration: null } } } as never, customerId: randomUUID(), conversationId: null, searchRequestId: null, outbound: { channelInboundMessageId: id, provider: "test", recipientPhoneE164: "+5566999999999", textContent: "Em qual cidade você precisa do atendimento?", searchRequestId: null, matchIds: [] } });
   assert.equal(outbound?.status, "pending");
-  assert.match(current.calls[2]!.text, /result = \$6::jsonb/u);
-  assert.match(current.calls[3]!.text, /INSERT INTO channel_outbound_messages/u);
-  assert.match(current.calls[3]!.text, /purpose/u);
-  assert.match(current.calls[3]!.text, /'customer_reply'/u);
-  assert.match(current.calls[3]!.text, /ON CONFLICT \(channel_inbound_message_id\) WHERE channel_inbound_message_id IS NOT NULL/u);
+  assert.match(current.calls[3]!.text, /result = \$6::jsonb/u);
+  assert.match(current.calls[4]!.text, /INSERT INTO channel_outbound_messages/u);
+  assert.match(current.calls[4]!.text, /purpose/u);
+  assert.match(current.calls[4]!.text, /'customer_reply'/u);
+  assert.match(current.calls[4]!.text, /ON CONFLICT \(channel_inbound_message_id\) WHERE channel_inbound_message_id IS NOT NULL/u);
   assert.equal(await current.repository.markFailed(id, token, "internal_error"), true);
-  assert.match(current.calls[4]!.text, /status = 'failed'/u);
+  assert.match(current.calls[5]!.text, /status = 'failed'/u);
 });

@@ -1,5 +1,6 @@
 import { channelInboundMessageResponseSchema, contextualMessageSchema, type ChannelInboundMessageResponse, type CustomerSearchMessageResponse } from "@contatocerto/shared";
-import { query, type DatabaseClient } from "../../database/connection.js";
+import { type DatabaseClient } from "../../database/connection.js";
+import { InboxFenceError, InboxPermanentError } from "../channel-inbox/inbox-recovery.policy.js";
 import { readSearchConversationConfig } from "../../config/search-conversation.js";
 import { PostgresCatalogRepository } from "../catalog/catalog.repository.js";
 import { PostgresServiceResolutionRepository } from "../service-resolution/service-resolution.repository.js";
@@ -93,7 +94,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
           decision = controlContextualProposal(record.rawText, record.id, proposal, snapshot.memory, catalog, explicitService);
           this.failures = 0;
         } catch (error) {
-          if (error instanceof ContextualBusyError) throw error;
+          if (error instanceof ContextualBusyError || error instanceof InboxFenceError || error instanceof InboxPermanentError) throw error;
           fallback = true;
           if (providerAttempted && ++this.failures >= 5) this.circuitUntil = Date.now() + 60_000;
         }
@@ -110,6 +111,10 @@ export class ContextualConversationService implements ContextualInboxHandler {
       const captured = snapshot;
       let question = snapshot.draft;
       const questionContext = fallback ? null : contextualQuestionContext(decision, service?.status === "resolved", location?.status === "resolved");
+      if (questionContext && question) {
+        try { validateContextualQuestion({ target: questionContext.target, question }, questionContext); }
+        catch { throw new InboxPermanentError("persisted_draft_invalid"); }
+      }
       if (questionContext && !question && this.provider.composeQuestion) {
         try {
           await this.repository.reserveBudget(snapshot.customerId);
@@ -122,7 +127,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
           } finally { clearTimeout(timer); }
           await this.repository.saveDraft(record, snapshot, question);
         } catch (error) {
-          if (error instanceof ContextualBusyError) throw error;
+          if (error instanceof ContextualBusyError || error instanceof InboxFenceError || error instanceof InboxPermanentError) throw error;
           // A failed composer is also a completed wording decision. Reuse its fallback after a DB retry.
           question = contextualClarificationText(questionContext);
           await this.repository.saveDraft(record, snapshot, question);
@@ -224,8 +229,6 @@ export class ContextualConversationService implements ContextualInboxHandler {
       });
     } catch (error) {
       if (error instanceof ContextualBusyError) {
-        await query(`UPDATE channel_inbound_messages SET status = 'failed', error_code = 'contextual_processing', processing_token = NULL,
-          processing_started_at = NULL WHERE id = $1 AND processing_token = $2`, [record.id, record.processingToken]);
         return { kind: "channel_message_processing" };
       }
       throw error;
