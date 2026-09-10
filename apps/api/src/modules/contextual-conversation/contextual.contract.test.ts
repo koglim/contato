@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
-import { controlContextualProposal, contextualProposalSchema, emptyMemory, type ContextualProposal } from "./contextual.contract.js";
+import { controlContextualProposal, contextualProposalSchema, emptyMemory, validateContextualQuestion, type ContextualProposal } from "./contextual.contract.js";
 import { readContextualConfig } from "../../config/contextual-conversation.js";
 
 const catalog = [{ key: "encanador", name: "Encanador", description: null }];
@@ -54,6 +54,12 @@ test("B2 disabled by default and requires explicit configuration", () => {
   assert.equal(readContextualConfig({}).enabled, false);
   assert.throws(() => readContextualConfig({ CONTEXTUAL_CONVERSATION_ENABLED: "yes" }));
   assert.throws(() => readContextualConfig({ CONTEXTUAL_CONVERSATION_ENABLED: "true" }));
+});
+test("B2 natural questions cannot contain financial, private or completed-action claims", () => {
+  assert.equal(validateContextualQuestion({ question: "Em qual cidade você precisa resolver esse vazamento?" }), "Em qual cidade você precisa resolver esse vazamento?");
+  for (const question of ["Já selecionei Ana, tudo certo?", "Custa R$ 10, aceita?", "Ligue +5566999999999?", "Enviei seu contato?", "Acesse https://example.com?", "Me informe sua senha?", "O profissional está disponível?"]) {
+    assert.throws(() => validateContextualQuestion({ question }));
+  }
 });
 test("B2 public contract excludes memory, evidence and raw text", () => {
   const response = { message_id: randomUUID(), duplicate: false, reply_text: "Qual cidade?", outbound: { id: randomUUID(), status: "pending" }, result: { route: "contextual", customer_id: randomUUID(), status: "needs_location" } };

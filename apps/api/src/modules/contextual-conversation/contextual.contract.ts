@@ -19,7 +19,18 @@ export type ContextualMemory = z.infer<typeof contextualMemorySchema>;
 export const emptyMemory = (): ContextualMemory => ({ conversationId: null, service: null, location: null, hypotheses: [] });
 export type ContextualCatalogItem = { key: string; name: string; description: string | null };
 export type ContextualInput = { message: string; service: string | null; location: string | null; pending: string | null; hypotheses: string[]; catalog: ContextualCatalogItem[] };
-export interface ContextualProvider { readonly model: string; interpret(input: ContextualInput): Promise<unknown> }
+export type ContextualReplyContext = { target: "service" | "location" | "service_confirmation"; services: string[]; location: string | null };
+export const contextualQuestionSchema = z.object({ question: z.string().trim().min(5).max(240) }).strict();
+export function validateContextualQuestion(value: unknown): string {
+  const text = contextualQuestionSchema.parse(value).question;
+  // Only a clarifying question may be model-written. Financial/contact/action blocks remain immutable.
+  if (!text.endsWith("?") || /[\d$€£@]|https?:|\n|[.!]/iu.test(text)
+    || /\b(?:encontrei|selecionei|selecionado|enviei|avisei|confirmado|garanto|garantido|gratis|gratuito|gratuita|custa|cobro|telefone|contato|pagamento|pague|pix|senha|token|disponivel)\b/u.test(normalizeContextualText(text))) {
+    throw new Error("contextual_question_invalid");
+  }
+  return text;
+}
+export interface ContextualProvider { readonly model: string; interpret(input: ContextualInput): Promise<unknown>; composeQuestion?(input: ContextualReplyContext): Promise<unknown> }
 export const normalizeContextualText = (value: string) => value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
 export type ContextualDecision = { kind: "delegate" | "search" | "clarify" | "faq_cost" | "out_of_scope"; memory: ContextualMemory; correction: boolean };

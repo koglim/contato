@@ -18,8 +18,9 @@ import { parseGlobalConversationCommand, parseSelectionConversationCommand } fro
 import { presentSelectionMessage } from "../selection-message/selection-message.presenter.js";
 import { presentGlobalConversationMessage } from "../global-conversation-commands/global-conversation-message.presenter.js";
 import { presentMatches } from "../message-presentation/message-presentation.service.js";
-import { safeOpportunityText } from "../bilateral-contact/bilateral-contact.policy.js";
-import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, type ContextualDecision, type ContextualProvider } from "./contextual.contract.js";
+import { safeOpportunityText, parseBilateralConfirmation } from "../bilateral-contact/bilateral-contact.policy.js";
+import { resolveProfessionalSelection } from "../selection-command/professional-selection.resolver.js";
+import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider, type ContextualReplyContext } from "./contextual.contract.js";
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
@@ -45,14 +46,23 @@ export class ContextualConversationService implements ContextualInboxHandler {
       const global = parseGlobalConversationCommand(record.rawText);
       const command = parseSelectionConversationCommand(record.rawText);
       const confirmation = normalizeContextualText(record.rawText);
+      let namedSelection = false;
+      if (!global && snapshot.pendingSlot === "selection" && snapshot.conversationId) {
+        const current = await new PostgresSearchConversationRepository().findById(snapshot.conversationId);
+        if (current?.searchRequestId) {
+          const shown = await new PostgresSelectionMatchRepository().listShown(current.searchRequestId);
+          namedSelection = resolveProfessionalSelection(record.rawText, shown).kind !== "unresolved";
+        }
+      }
       let decision: ContextualDecision = { kind: "clarify", memory: snapshot.memory, correction: false };
       let fallback = false;
-      if (global || (snapshot.pendingSlot === "selection" && (command !== null || /^(sim|confirmo|confirmar|nao)$/.test(confirmation)))) {
+      if (global || (snapshot.pendingSlot === "selection" && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null))) {
         decision = { kind: "delegate", memory: snapshot.memory, correction: false };
       } else if (snapshot.memory.hypotheses.length === 1 && /^(sim|isso|isso mesmo|confirmo)$/.test(confirmation)) {
         const hypothesis = snapshot.memory.hypotheses[0];
         decision = { kind: "search", correction: false, memory: { ...snapshot.memory, service: { value: hypothesis.name, source: "user_confirmation", inboundId: record.id }, hypotheses: [] } };
       } else {
+        let providerAttempted = false;
         try {
           const catalog = (await this.catalog.listServices({})).slice(0, CONTEXTUAL_POLICY.maxCatalog)
             .map(item => ({ key: item.slug, name: item.name.slice(0, 200), description: item.description?.slice(0, 200) ?? null }));
@@ -60,11 +70,12 @@ export class ContextualConversationService implements ContextualInboxHandler {
           if (!proposal) {
             if (this.circuitUntil > Date.now()) throw new Error("contextual_circuit_open");
             await this.repository.reserveBudget(snapshot.customerId);
+            providerAttempted = true;
             let timer: ReturnType<typeof setTimeout> | undefined;
             try {
               proposal = await Promise.race([
-                this.provider.interpret({ message: stripPrivate(record.rawText), service: snapshot.memory.service?.value ?? null,
-                  location: snapshot.memory.location?.value ?? null, pending: snapshot.pendingSlot,
+                this.provider.interpret({ message: stripPrivate(record.rawText), service: snapshot.memory.service ? stripPrivate(snapshot.memory.service.value) : null,
+                  location: snapshot.memory.location ? stripPrivate(snapshot.memory.location.value) : null, pending: snapshot.pendingSlot,
                   hypotheses: snapshot.memory.hypotheses.map(item => item.name), catalog }),
                 new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("contextual_timeout")), CONTEXTUAL_POLICY.timeoutMs); }),
               ]);
@@ -82,7 +93,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
         } catch (error) {
           if (error instanceof ContextualBusyError) throw error;
           fallback = true;
-          if (++this.failures >= 5) this.circuitUntil = Date.now() + 60_000;
+          if (providerAttempted && ++this.failures >= 5) this.circuitUntil = Date.now() + 60_000;
         }
       }
 
@@ -95,6 +106,23 @@ export class ContextualConversationService implements ContextualInboxHandler {
         catch { fallback = true; decision = { kind: "clarify", memory: snapshot.memory, correction: false }; }
       }
       const captured = snapshot;
+      let question = snapshot.draft;
+      const target: ContextualReplyContext["target"] | null = fallback ? null : decision.memory.hypotheses.length ? "service_confirmation"
+        : decision.kind === "search" && service?.status !== "resolved" ? "service"
+        : decision.kind === "search" && location?.status !== "resolved" ? "location" : null;
+      if (target && !question && this.provider.composeQuestion) {
+        try {
+          await this.repository.reserveBudget(snapshot.customerId);
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            question = validateContextualQuestion(await Promise.race([
+              this.provider.composeQuestion({ target, services: decision.memory.hypotheses.length ? decision.memory.hypotheses.map(item => item.name) : decision.memory.service ? [decision.memory.service.value] : [], location: decision.memory.location?.value ?? null }),
+              new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("contextual_question_timeout")), CONTEXTUAL_POLICY.timeoutMs); }),
+            ]));
+          } finally { clearTimeout(timer); }
+          await this.repository.saveDraft(record, snapshot, question);
+        } catch (error) { if (error instanceof ContextualBusyError) throw error; question = null; }
+      }
       return await this.repository.commit(record, captured, async client => {
         const execute = client.query.bind(client);
         const transaction = <T>(callback: (connection: DatabaseClient) => Promise<T>) => callback(client);
@@ -132,6 +160,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
           text = memory.hypotheses.length === 1
             ? `Você precisa de ${safeOpportunityText(memory.hypotheses[0].name, 120)} para esse problema? Pode confirmar ou explicar melhor.`
             : `Esse pedido pode envolver ${memory.hypotheses.map(item => safeOpportunityText(item.name, 120)).join(" ou ")}. Qual desses atendimentos você precisa?`;
+          text = question ?? text;
         } else if (!fallback && decision.kind === "search") {
           // Never change context underneath a pending consent or a page not yet acknowledged as sent.
           const pending = conversationId ? await execute(`SELECT c.id FROM search_conversations c WHERE c.id = $1 AND
@@ -150,9 +179,11 @@ export class ContextualConversationService implements ContextualInboxHandler {
             }
             if (!memory.service || service?.status !== "resolved" || !service.match) {
               status = "needs_service"; text = "Qual serviço você precisa? Pode me contar o que aconteceu.";
+              text = question ?? text;
             } else if (!memory.location || location?.status !== "resolved" || !location.match) {
               status = "needs_location";
               text = memory.location ? "Essa localização ainda não ficou clara. Pode informar a cidade e o estado ou um bairro de referência?" : `Em qual cidade você precisa de ${safeOpportunityText(memory.service.value, 120)}?`;
+              text = question ?? text;
             } else {
               const match = location.match;
               const matching = await new PostgresMatchingRepository(transaction).search({ raw_text: record.rawText,
@@ -177,6 +208,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
           }
         }
         if (fallback) { status = "fallback"; memory = captured.memory; }
+        await execute(`UPDATE contextual_turns SET error_code = $2 WHERE inbound_id = $1`, [record.id, fallback ? "contextual_fallback" : null]);
         memory.conversationId = (await conversations.findActiveByCustomerId(captured.customerId))?.id ?? null;
         result ??= contextualMessageSchema.parse({ route: "contextual", customer_id: captured.customerId, status });
         const outbound = await new PostgresChannelInboundMessageRepository(execute, transaction).markProcessedAndCreateOutbound({

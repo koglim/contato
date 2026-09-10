@@ -13,6 +13,77 @@ after(closeDatabaseConnection);
 const headers = { "x-internal-key": "b2-integration" };
 const basic = (overrides: Partial<ContextualProposal> = {}): ContextualProposal => ({ intent: "search", services: [], location: null, uncertain: false, ...overrides });
 
+test("B2 natural clarification is persisted before effects; retry does not regenerate", async () => {
+  const f = await fixture();
+  try {
+    f.setCompose(async input => { assert.equal(input.target, "location"); return { question: "Em qual cidade você precisa desse atendimento?" }; });
+    await query(`CREATE FUNCTION b2_fail_outbound() RETURNS trigger AS $$ BEGIN
+      IF NEW.recipient_phone_e164 = '${f.phone}' THEN RAISE EXCEPTION 'injected B2 outbox failure'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
+    await query("CREATE TRIGGER b2_fail_outbound BEFORE INSERT ON channel_outbound_messages FOR EACH ROW EXECUTE FUNCTION b2_fail_outbound()");
+    const id = randomUUID(), text = `preciso de ${f.name}`;
+    assert.equal((await f.receive(text, id)).statusCode, 500);
+    assert.equal((await query("SELECT id FROM search_conversations WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows.length, 0);
+    const calls = f.calls(), compositions = f.compositions();
+    await query("DROP TRIGGER b2_fail_outbound ON channel_outbound_messages"); await query("DROP FUNCTION b2_fail_outbound()");
+    const retry = await f.receive(text, id); assert.equal(retry.statusCode, 200, retry.body);
+    assert.equal(retry.json().reply_text, "Em qual cidade você precisa desse atendimento?");
+    assert.equal(f.calls(), calls); assert.equal(f.compositions(), compositions);
+    await f.sent(retry.json().outbound.id);
+    const replay = await f.receive(text, id); assert.equal(replay.json().outbound.status, "sent");
+    assert.equal(replay.json().reply_text, retry.json().reply_text); assert.equal(f.calls(), calls);
+  } finally {
+    await query("DROP TRIGGER IF EXISTS b2_fail_outbound ON channel_outbound_messages"); await query("DROP FUNCTION IF EXISTS b2_fail_outbound()");
+    await f.cleanup();
+  }
+});
+
+test("B2 budget exhaustion and model timeout preserve slots with a useful fallback", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic()); await f.receive(`Preciso de ${f.name}`);
+    const before = await f.state(), calls = f.calls();
+    await query(`UPDATE contextual_budgets SET calls=20 WHERE scope IN (SELECT id::text FROM customers WHERE phone_e164=$1)`, [f.phone]);
+    const exhausted = await f.receive("Na verdade é em Vera"); assert.equal(exhausted.statusCode, 200, exhausted.body);
+    assert.equal(exhausted.json().result.status, "fallback"); assert.equal(f.calls(), calls);
+    assert.deepEqual((await f.state()).memory, before.memory);
+    await query(`DELETE FROM contextual_budgets WHERE scope IN (SELECT id::text FROM customers WHERE phone_e164=$1)`, [f.phone]);
+    f.set(() => new Promise(() => {}));
+    const timeout = await f.receive("Ainda preciso desse atendimento"); assert.equal(timeout.statusCode, 200, timeout.body);
+    assert.equal(timeout.json().result.status, "fallback"); assert.deepEqual((await f.state()).memory, before.memory);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 global command wins over model and stored hypotheses", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic()); await f.receive(`Preciso de ${f.name}`);
+    const calls = f.calls();
+    f.set(async () => { throw new Error("model must not execute for global command"); });
+    const result = await f.receive("cancelar"); assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().result.route, "global_command"); assert.equal(f.calls(), calls);
+    assert.equal((await f.state()).id, null); assert.equal((await f.state()).memory.service, null);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 old proposal cannot be reused after an external context change", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic()); await f.receive(`Preciso de ${f.name}`);
+    const state = await f.state();
+    const inbox = new PostgresChannelInboundMessageRepository(), repository = new PostgresContextualRepository();
+    const registered = await inbox.createOrFind({ provider: "b2-test", provider_message_id: randomUUID(), phone_e164: f.phone, raw_text: "quanto custa usar?", country_code: "BR", limit: 3 });
+    const record = await inbox.claim(registered.record.id, randomUUID(), 60); assert.ok(record);
+    const snapshot = await repository.acquire(record, "fake");
+    await repository.saveProposal(record, snapshot, basic({ intent: "faq_cost" }));
+    await query("UPDATE search_conversations SET location_text='Sorriso' WHERE id=$1", [state.id]);
+    let effects = 0;
+    await assert.rejects(repository.commit(record, snapshot, async () => { effects++; return { value: true, memory: snapshot.memory }; }));
+    assert.equal(effects, 0); await repository.release(snapshot);
+    const renewed = await repository.acquire(record, "fake"); assert.equal(renewed.proposal, null);
+    assert.equal(renewed.memory.location?.value, "Sorriso"); await repository.release(renewed);
+  } finally { await f.cleanup(); }
+});
+
 async function fixture() {
   const serviceId = randomUUID(), categoryId = randomUUID();
   const name = `Encanador${serviceId.replaceAll("-", "")}`;
@@ -28,7 +99,10 @@ async function fixture() {
   }
   let calls = 0, geoCalls = 0;
   let next: (text: string) => Promise<unknown> = async () => basic();
-  const provider: ContextualProvider = { model: "unit-fake-no-model-call", async interpret(input) { calls++; return next(input.message); } };
+  let compose: ContextualProvider["composeQuestion"];
+  let compositions = 0;
+  const provider: ContextualProvider = { model: "unit-fake-no-model-call", async interpret(input) { calls++; return next(input.message); },
+    async composeQuestion(input) { compositions++; if (!compose) throw new Error("no fake composer configured"); return compose(input); } };
   const contextual = new ContextualConversationService(provider, { async resolve(input) {
     geoCalls++;
     return { status: "resolved", query: input.query, country_code: "BR", provider: "fake", candidates: [],
@@ -67,7 +141,8 @@ async function fixture() {
       await client.query("DELETE FROM service_categories WHERE id=$1", [categoryId]);
     });
   };
-  return { name, phone, serviceId, app, receive, sent, state, cleanup, calls: () => calls, geoCalls: () => geoCalls, set: (fn: typeof next) => { next = fn; } };
+  return { name, phone, serviceId, app, receive, sent, state, cleanup, calls: () => calls, geoCalls: () => geoCalls, compositions: () => compositions,
+    set: (fn: typeof next) => { next = fn; }, setCompose: (fn: NonNullable<typeof compose>) => { compose = fn; } };
 }
 
 test("B2 real Inbox retains both slots, FAQ preserves context, correction revalidates and replay uses one Outbox", async () => {
@@ -107,9 +182,10 @@ test("B2 semantic hypothesis requires confirmation; selection uses shown candida
     await f.sent(confirmed.json().outbound.id);
     const selectionId = randomUUID();
     const chosen = await f.receive("quero o segundo", selectionId); assert.equal(chosen.statusCode, 200, chosen.body);
+    assert.equal(chosen.json().result.result.kind, "selected");
     const replay = await f.receive("quero o segundo", selectionId);
     assert.equal(replay.json().outbound.id, chosen.json().outbound.id); assert.equal(replay.json().duplicate, true);
-    assert.equal((await query("SELECT COUNT(*)::int count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count <= 1, true);
+    assert.equal((await query("SELECT COUNT(*)::int count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 1);
   } finally { await f.cleanup(); }
 });
 

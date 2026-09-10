@@ -59,6 +59,9 @@ jobs:
           pnpm build:workflows
           git diff --exit-code -- workflows/n8n/shared-delivery.json workflows/n8n/outbox-dispatcher.json
 
+      - name: B2 300 synthetic cases (mocked proposals, not model quality)
+        run: pnpm --filter @contatocerto/api eval:b2 --split=all
+
       - name: Apply all migrations
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
@@ -118,6 +121,19 @@ jobs:
               OR to_regclass('channel_outbound_recipient_queue_idx') IS NULL
               OR NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name = '017_add_outbound_delivery_receipt') THEN
               RAISE EXCEPTION 'migration 017 is incomplete';
+            END IF;
+          END $$;
+          SQL
+
+      - name: Verify migration 018 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name = '018_add_contextual_conversation')
+              OR to_regclass('contextual_memories') IS NULL OR to_regclass('contextual_turns') IS NULL
+              OR to_regclass('contextual_budgets') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'contextual_turns' AND column_name = 'reply_draft') THEN
+              RAISE EXCEPTION 'migration 018 is incomplete';
             END IF;
           END $$;
           SQL

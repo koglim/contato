@@ -7,6 +7,7 @@ export class ContextualBusyError extends Error {}
 export type ContextualSnapshot = {
   customerId: string; token: string; revision: number; memory: ContextualMemory; proposal: unknown;
   conversationId: string | null; fingerprint: string; pendingSlot: string | null;
+  draft: string | null;
 };
 
 export async function contextualFingerprint(client: DatabaseClient, customerId: string) {
@@ -33,9 +34,9 @@ export class PostgresContextualRepository {
     return withTransaction(async client => {
       await client.query(`SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE`, [customerId]);
       const token = randomUUID();
-      const claimed = await client.query<{ revision: number; memory: unknown }>(`UPDATE contextual_memories SET lease_token = $2,
+      const claimed = await client.query<{ revision: number; memory: unknown; conversation_fingerprint: string | null }>(`UPDATE contextual_memories SET lease_token = $2,
         lease_expires_at = NOW() + ($3 * INTERVAL '1 second') WHERE customer_id = $1
-        AND (lease_token IS NULL OR lease_expires_at <= NOW()) RETURNING revision, memory`, [customerId, token, CONTEXTUAL_POLICY.leaseSeconds]);
+        AND (lease_token IS NULL OR lease_expires_at <= NOW()) RETURNING revision, memory, conversation_fingerprint`, [customerId, token, CONTEXTUAL_POLICY.leaseSeconds]);
       if (!claimed.rows[0]) throw new ContextualBusyError();
       // Arrival order, not UUID or completion order. A later turn stays recoverable in the Inbox.
       const older = await client.query(`SELECT t.inbound_id FROM contextual_turns t
@@ -45,16 +46,18 @@ export class PostgresContextualRepository {
       if (older.rows.length) throw new ContextualBusyError();
       const current = await contextualFingerprint(client, customerId);
       const memory = contextualMemorySchema.parse(claimed.rows[0].memory);
-      if (memory.conversationId !== (current?.id ?? null)) {
-        memory.service = current?.resolved_service ? { value: current.resolved_service, source: "domain", inboundId: record.id } : null;
+      if (memory.conversationId !== (current?.id ?? null) || (current && claimed.rows[0].conversation_fingerprint !== current.fingerprint)) {
+        const knownService = current?.resolved_service ?? (current?.pending_slot === "location" ? current.service_text.slice(0, 200) : null);
+        memory.service = knownService ? { value: knownService, source: "domain", inboundId: record.id } : null;
         memory.location = current?.location_text ? { value: current.location_text, source: "domain", inboundId: record.id } : null;
         memory.hypotheses = [];
         memory.conversationId = current?.id ?? null;
       }
-      const turn = await client.query<{ proposal: unknown; context_revision: number }>(`SELECT proposal, context_revision FROM contextual_turns WHERE inbound_id = $1`, [record.id]);
+      const turn = await client.query<{ proposal: unknown; reply_draft: string | null; context_revision: number; context_fingerprint: string | null }>(`SELECT proposal, reply_draft, context_revision, context_fingerprint FROM contextual_turns WHERE inbound_id = $1`, [record.id]);
       // Never execute a proposal against a different memory revision.
-      const proposal = turn.rows[0].context_revision === claimed.rows[0].revision ? turn.rows[0].proposal : null;
-      return { customerId, token, revision: claimed.rows[0].revision, memory, proposal,
+      const sameContext = turn.rows[0].context_revision === claimed.rows[0].revision && turn.rows[0].context_fingerprint === (current?.fingerprint ?? "none");
+      const proposal = sameContext ? turn.rows[0].proposal : null;
+      return { customerId, token, revision: claimed.rows[0].revision, memory, proposal, draft: sameContext ? turn.rows[0].reply_draft : null,
         conversationId: current?.id ?? null, fingerprint: current?.fingerprint ?? "none", pendingSlot: current?.pending_slot ?? null };
     });
   }
@@ -72,10 +75,17 @@ export class PostgresContextualRepository {
   }
 
   async saveProposal(record: ChannelInboundMessageRecord, snapshot: ContextualSnapshot, proposal: unknown) {
-    const result = await query(`UPDATE contextual_turns t SET proposal = $3::jsonb, context_revision = $4
+    const result = await query(`UPDATE contextual_turns t SET proposal = $3::jsonb, reply_draft = NULL, context_revision = $4, context_fingerprint = $5
       FROM contextual_memories m WHERE t.inbound_id = $1 AND t.customer_id = m.customer_id
       AND m.lease_token = $2 AND m.lease_expires_at > NOW() AND m.revision = $4 RETURNING t.inbound_id`,
-    [record.id, snapshot.token, JSON.stringify(proposal), snapshot.revision]);
+    [record.id, snapshot.token, JSON.stringify(proposal), snapshot.revision, snapshot.fingerprint]);
+    if (!result.rows.length) throw new ContextualBusyError();
+  }
+
+  async saveDraft(record: ChannelInboundMessageRecord, snapshot: ContextualSnapshot, draft: string) {
+    const result = await query(`UPDATE contextual_turns t SET reply_draft = $3 FROM contextual_memories m
+      WHERE t.inbound_id = $1 AND t.customer_id = m.customer_id AND m.lease_token = $2
+        AND m.lease_expires_at > NOW() AND m.revision = t.context_revision RETURNING t.inbound_id`, [record.id, snapshot.token, draft]);
     if (!result.rows.length) throw new ContextualBusyError();
   }
 
@@ -89,8 +99,8 @@ export class PostgresContextualRepository {
         AND lease_token = $2 AND revision = $3 AND lease_expires_at > NOW() FOR UPDATE`, [snapshot.customerId, snapshot.token, snapshot.revision]);
       if (!lease.rows.length || ((await contextualFingerprint(client, snapshot.customerId))?.fingerprint ?? "none") !== snapshot.fingerprint) throw new ContextualBusyError();
       const result = await apply(client);
-      await client.query(`UPDATE contextual_memories SET memory = $2::jsonb, revision = revision + 1,
-        lease_token = NULL, lease_expires_at = NULL, updated_at = NOW() WHERE customer_id = $1`, [snapshot.customerId, JSON.stringify(contextualMemorySchema.parse(result.memory))]);
+      await client.query(`UPDATE contextual_memories SET memory = $2::jsonb, revision = revision + 1, conversation_fingerprint = $3,
+        lease_token = NULL, lease_expires_at = NULL, updated_at = NOW() WHERE customer_id = $1`, [snapshot.customerId, JSON.stringify(contextualMemorySchema.parse(result.memory)), (await contextualFingerprint(client, snapshot.customerId))?.fingerprint ?? "none"]);
       await client.query(`UPDATE contextual_turns SET status = 'completed' WHERE inbound_id = $1`, [record.id]);
       return result.value;
     });

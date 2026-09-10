@@ -50,8 +50,9 @@ proposta anterior. Rollback não deixa busca ou contato sem Outbox.
 
 ## Limites e operação
 
-Política `b2.1`: 6 s por interpretação, sem retry do SDK, 900 tokens máximos de
-saída, 20 chamadas/cliente/hora, 1.000 globais/hora, lease 30 s. Quotas são
+Política `b2.1`: 6 s por chamada, sem retry do SDK, 900 tokens máximos de
+interpretação e 300 de composição, até duas chamadas por turno,
+20 chamadas/cliente/hora, 1.000 globais/hora, lease 30 s. Quotas são
 reservadas no banco antes da chamada e compartilhadas entre réplicas; até erros
 consomem quota. Circuit breaker local: cinco erros, pausa de 60 s. Não é orçamento
 monetário: preço/modelo e orçamento financeiro precisam de decisão antes de ativar.
@@ -67,12 +68,22 @@ autorizada. Desligar flag não desfaz efeitos nem perde replay.
 
 Os testes com provider simulado comprovam controle e persistência, não compreensão
 ou naturalidade de um modelo. Integração usa PostgreSQL/PostGIS reais e simula
-somente modelo e geocoder. Textos críticos continuam no presenter determinístico;
-**redação livre fundamentada pós-resultado ainda não está implementada**. Portanto
-este checkpoint não conclui B2 nem comprova a experiência conversacional pedida.
+somente modelo e geocoder. Textos críticos continuam no presenter determinístico.
+Perguntas de esclarecimento são geradas a partir do resultado real da resolução
+e campos faltantes, com schema/limites e rejeição de afirmações financeiras,
+contatos e ações concluídas. Rascunho validado é persistido antes dos efeitos;
+falha de composição usa pergunta determinística sem perder a interpretação.
+Não se permite reescrever livremente preços, consentimento ou listas de pessoas.
+Guardas textuais não são prova de segurança semântica universal: revisão humana
+de perguntas e avaliação adversarial real continuam obrigatórias antes de ativar.
 Paráfrases de comandos sensíveis não reconhecidas são esclarecidas, nunca
 executadas pela confiança do modelo. Catálogo acima de 100 serviços requer
 estratégia de recuperação avaliada; não declarar cobertura ilimitada.
+
+Corpus sintético e protocolo em
+[evaluations/b2](../apps/api/evaluations/b2/README.md): 210 casos de desenvolvimento
+e 90 reservados, com preparação multi-turno, versões e hashes. O modo simulado
+não valida naturalidade, qualidade de um modelo nem custos/latência externos.
 
 Documentação do contrato OpenAI consultada:
 [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).

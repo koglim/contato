@@ -4,6 +4,7 @@ exports.up = (pgm) => {
       customer_id UUID PRIMARY KEY REFERENCES customers(id) ON DELETE RESTRICT,
       memory JSONB NOT NULL DEFAULT '{"conversationId":null,"service":null,"location":null,"hypotheses":[]}',
       revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+      conversation_fingerprint TEXT,
       lease_token UUID, lease_expires_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CHECK ((lease_token IS NULL) = (lease_expires_at IS NULL))
@@ -12,7 +13,9 @@ exports.up = (pgm) => {
       inbound_id UUID PRIMARY KEY REFERENCES channel_inbound_messages(id) ON DELETE RESTRICT,
       customer_id UUID NOT NULL REFERENCES contextual_memories(customer_id) ON DELETE RESTRICT,
       context_revision INTEGER NOT NULL,
+      context_fingerprint TEXT,
       proposal JSONB,
+      reply_draft TEXT CHECK (reply_draft IS NULL OR length(reply_draft) BETWEEN 5 AND 240),
       model TEXT NOT NULL,
       version TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed')),
