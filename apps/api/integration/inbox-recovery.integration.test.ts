@@ -223,6 +223,8 @@ test("Migration 019 refuses destructive rollback and preserves evidence/schema/0
     await assert.rejects(rollbackThrough('019_add_inbox_recovery'),error=>/P0019/.test(String((error as {stderr?:string}).stderr)));
     assert.deepEqual(await f.state(a.id),before);
     assert.equal((await query("SELECT name FROM pgmigrations WHERE name IN ('018_add_contextual_conversation','019_add_inbox_recovery')")).rows.length,2);
+    const index=(await query("SELECT pg_get_expr(indpred,indrelid) AS predicate FROM pg_index WHERE indexrelid='channel_inbound_recovery_phone_idx'::regclass")).rows[0];
+    assert.match(index.predicate,/quarantined/);assert.match(index.predicate,/closed/);
     assert.equal((await query("SELECT id FROM channel_inbound_recovery_events WHERE inbound_id=$1",[a.id])).rows.length,1);
     await assert.rejects(query("UPDATE channel_inbound_recovery_events SET reason='changed' WHERE inbound_id=$1",[a.id]),error=>(error as {code:string}).code==='P0019');
   }finally{await f.cleanup();}

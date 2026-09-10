@@ -44,7 +44,7 @@ exports.up = (pgm) => {
     CREATE INDEX channel_inbound_recovery_queue_idx ON channel_inbound_messages(created_at,id)
       WHERE status <> 'processed' AND recovery_state = 'active';
     CREATE INDEX channel_inbound_recovery_phone_idx ON channel_inbound_messages(phone_e164,created_at,id)
-      WHERE status <> 'processed' AND recovery_state <> 'closed';
+      WHERE (status <> 'processed' OR recovery_state = 'quarantined') AND recovery_state <> 'closed';
   `);
 };
 
