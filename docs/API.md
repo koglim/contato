@@ -1,5 +1,9 @@
 # API interna
 
+Checklist cumulativo de compatibilidade, migrations 017–020 e variáveis:
+[CUMULATIVE_REVIEW.md](CUMULATIVE_REVIEW.md). A ordem de atualização é banco antes
+da API; B2 permanece desligada e os cinco exports n8n permanecem inativos.
+
 ## Diagnóstico de entrega
 
 `GET /internal/channel/outbound/queue-status` exige `X-Internal-Key`, é somente

@@ -41,6 +41,22 @@ Token desconhecido, hash divergente e callback expirado sem resultado aceito
 retornam 409. Se efeitos já foram concluídos antes de uma divergência tardia,
 eles não são revertidos nem executados novamente: análise humana é necessária.
 
+### Quarentena da Inbox também bloqueia o consumidor de mídia
+
+Claim, resultado e expurgo verificam a Inbox com locks na ordem mídia → Inbox.
+Se ela foi colocada em quarentena por conflito de payload textual ou encerrada
+pelo operador, o consumidor remove os bytes e mantém a mídia em quarentena,
+sem modificar o estado/auditoria da Inbox e sem criar aviso. Expiração não é
+autorização para liberar FIFO. Retry administrativo de `media_pending` é rejeitado
+com `inbound_retry_unsafe`; encerramento explícito continua disponível após revisão.
+Regressões unitárias e PostgreSQL cobrem claim, resultado válido/falho e expurgo,
+inclusive depois do encerramento administrativo.
+
+Erros de transporte anteriores ao handler não viram 500: JSON inválido retorna
+400, corpo excessivo 413 e content-type incompatível 415, com código sanitizado
+`transport_input_invalid`. A allowlist MIME consulta apenas propriedades próprias;
+`constructor` e `__proto__` não são formatos aceitos.
+
 ## Avisos, Outbox e FIFO
 
 Longo, formato não suportado, conteúdo inválido, falha dos dois transcritores ou

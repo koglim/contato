@@ -31,7 +31,7 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T17 | Ordenação por destinatário | Parcial: FIFO das notificações independentes; respostas inline preservam exceção de consentimento |
 | T18 | Pergunta de contexto obsoleto | Não implementado; precisa regra por finalidade, sem descartar contato bilateral pelo TTL |
 | T19 | Pool/páginas/teto | Aprovado automatizado na suíte existente de ranking/paginação |
-| T20 | Página retida/terminal | Parcial: reserva/concorrência preservadas; recuperação administrativa auditada pendente |
+| T20 | Página retida/terminal | Parcial: reserva/concorrência e disposição auditada de holds implementadas; política de obsolescência e fechamento de páginas terminais ainda exige definição/homologação |
 | T21 | Escolha antes de aviso enviado | Aprovado automatizado: shown_at e consentimento exigidos |
 | T22 | Escolhas concorrentes | Aprovado automatizado: mesma transação e selectionKey |
 | T23 | Suspensão após apresentação | Aprovado PostgreSQL: primeira seleção também revalida e não cria contato |
@@ -95,3 +95,13 @@ simulados; versões fixadas e exports inativos. Nenhuma variável/credential nov
 Publicação futura: todas as migrations pendentes (017–020 quando aplicável) antes
 da API; depois cinco workflows ainda inativos e homologação autorizada. B2 off.
 Não houve deploy/merge/envio/avaliação paga. V1 comercial continua incompleta.
+
+## Evidência cumulativa — 2026-09-10
+
+[CUMULATIVE_REVIEW.md](CUMULATIVE_REVIEW.md) consolida a revisão contra main,
+correções e gates operacionais. Código `137feeb56bbe5b39f57250ac85f8137215ae56ce`,
+[CI success](https://github.com/koglim/contato/actions/runs/34514506480):
+311 API + 12 web + 40 workflows, 150 PostgreSQL antes e depois da reaplicação,
+migrations até 020, B2 300 + 18 simulados. Novas regressões provam que resultado
+ou expurgo de áudio não contornam quarentena/encerramento da Inbox. Nenhum item
+de homologação real acima foi promovido a aprovado por consequência desses mocks.

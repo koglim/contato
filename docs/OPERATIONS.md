@@ -6,13 +6,13 @@ evidência disponível. Nenhuma operação deste documento deve usar produção 
 ambiente de teste.
 
 O próximo ensaio de transporte já tem candidato versionado para **n8n 1.123.21 /
-Evolution 2.3.7**, quatro exports inativos e runbook específico em
+Evolution 2.3.7**, cinco exports inativos e runbook específico em
 [TRANSPORT_HOMOLOGATION.md](TRANSPORT_HOMOLOGATION.md). Antes de importar,
 rotacionar segredos encontrados no export original; configurar JWT dedicado,
 Variables/credentials, borda/TLS e alertas sanitizados. Não salvar dados de
-execução/binary/headers. A exceção de aviso de áudio direto não é durável entre
-webhooks; exige decisão explícita antes da operação pública. Nenhuma variável
-API ou migration nova; nova Variable n8n: EVOLUTION_WEBHOOK_ORIGIN.
+execução/binary/headers. Áudio e avisos usam a admissão durável da 020, sem envio
+direto no gateway. A revisão cumulativa, o inventário de variáveis e a ordem
+completa estão em [CUMULATIVE_REVIEW.md](CUMULATIVE_REVIEW.md).
 
 ## Logs e diagnóstico
 
@@ -68,9 +68,10 @@ iniciais e significados estão em [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
 4. Se o resultado for desconhecido, usar `/hold` e preservar evidências com
    acesso restrito. Se a API estiver indisponível, preservar a execução e manter
    envio pausado até reconciliar; não classificar timeout como rejeição.
-5. Não apagar tokens, recibos, reservas ou vínculos para liberar retry. A interface
-   de recuperação administrativa da **Outbox** ainda precisa ser implementada;
-   a disposição da Inbox não libera hold/dead-letter de transporte.
+5. Não apagar tokens, recibos, reservas ou vínculos para liberar retry. A disposição
+   administrativa da Outbox retida está implementada na 020, exige evidências e
+   registra auditoria. Não confundir esse recurso com a disposição da Inbox nem
+   com autorização para reenviar dead-letter ou fechar páginas indiscriminadamente.
 6. Depois de resolver a causa, homologar um caso de teste autorizado e acompanhar
    a fila. Comunicar impacto, ações e estado final sem expor dados pessoais.
 
@@ -95,18 +96,19 @@ iniciais e significados estão em [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
 
 1. Revisar a branch/CI e confirmar backup restaurável e ambiente de homologação.
 2. Pausar ingresso e consumidores durante a troca; conferir `pgmigrations` e
-   aplicar todas as pendentes pelo runner, incluindo **017, 018 e 019**. Não
+   aplicar todas as pendentes pelo runner, incluindo **017, 018, 019 e 020**. Não
    presumir 017/018 existentes. Não executar migrations no startup da API.
-3. Publicar API compatível com 019, B2 desligada. Não manter réplicas antigas
+3. Publicar API compatível com 020, B2 desligada. Não manter réplicas antigas
    gravando sem fencing. Verificar `/health/db` e diagnósticos Inbox/Outbox.
-4. Frontend permanece inalterado neste checkpoint. Preservar allowlist e status/
-   telefone somente leitura; isso ainda não oferece identidade multiusuário.
+4. Publicar web do mesmo SHA cumulativo: ele inclui a proteção do BFF e status/
+   telefone somente leitura. Isso ainda não oferece identidade multiusuário.
 5. Importar exports **inativos** e configurar credenciais/parâmetros conforme
    [workflows/n8n/README.md](../workflows/n8n/README.md). Conferir versão e export do
    gateway antes de substituir seu ramo de transporte; usar o novo gateway
    inativo e o runbook específico, preservando instance:key.id histórico.
-6. Homologar gateway + dispatcher + recovery, números distintos, queda/lease/FIFO,
-   quarentena/admin e ausência de duplicação lógica. Ativar somente com autorização.
+6. Homologar os cinco componentes (gateway, shared delivery, dispatcher, recovery
+   e media consumer), números distintos, queda/lease/FIFO, quarentena/admin e
+   ausência de duplicação lógica. Ativar somente com autorização.
 
 Não há nova variável API/web neste checkpoint de Inbox. Manter
 `CONTEXTUAL_CONVERSATION_ENABLED=false`; modelo/chave B2 conservam seus contratos.
@@ -116,7 +118,7 @@ listados no README dos workflows. A lease existente precisa comportar os timeout
 Rollback 017 é protegido quando há recibos/retenções. Não limpar registros para
 forçá-lo nem voltar a uma API que ignore retenções. Preferir correção roll-forward;
 restauração integral só após avaliação do operador e reconciliação de envios.
-018/019 também têm down protegido quando há dados incompatíveis. Nunca excluir
+018/019/020 também têm down protegido quando há dados incompatíveis. Nunca excluir
 memória, eventos ou quarentena para forçar downgrade. Casos legados classificados
 `legacy_effects_uncertain` no upgrade exigem análise antes de retomar a fila.
 

@@ -398,3 +398,13 @@ transporte HTTP sempre ocorrem fora das transações. Disposições administrati
 serializadas preservam recibos, tentativas e histórico append-only, sem consentimento.
 Ver [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md) para invariantes, limites,
 privacidade, riscos de resultado externo incerto e identidade administrativa declarada.
+
+### Revisão cumulativa: fronteira entre mídia e Inbox
+
+Claim, resultado e expurgo de mídia conferem o placeholder da Inbox sob lock na
+ordem mídia → Inbox. Uma quarentena imposta por outro caminho ou encerramento
+administrativo impede transcrição/aviso posterior e não pode ser desfeito pelo
+worker. Bytes podem ser expurgados sem alterar a disposição da entrada nem liberar
+FIFO. Retry administrativo não ressuscita um placeholder sem mídia utilizável.
+Evidências, inventário completo e gates de integração em
+[CUMULATIVE_REVIEW.md](CUMULATIVE_REVIEW.md). Nenhuma migration nova nessa correção.

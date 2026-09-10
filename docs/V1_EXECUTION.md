@@ -179,3 +179,17 @@ Evidência da020: `25f1995e15e6e77d5d88bad06499cd77d0a383fb`,
 success: API306/web12/workflows40; PostgreSQL144×2, migrations/down/reaplicação020,
 B2 simulado300 e readiness18. Consolidação posterior deve conferir CI do próprio
 SHA; ver registro no runbook de durabilidade. Homologação real continua pendente.
+
+## Revisão cumulativa final — 2026-09-10
+
+Comparação com main `5c20bd92cb13d8867ca21bcc819104dbf76ce1ff`, correções
+`137feeb56bbe5b39f57250ac85f8137215ae56ce`,
+[CI success](https://github.com/koglim/contato/actions/runs/34514506480).
+Quarentena Inbox preservada por claim/resultado/expurgo de mídia; allowlist MIME,
+status HTTP de entrada inválida e chaves opcionais vazias corrigidos com regressões.
+API 311, web 12, workflows 40; PostgreSQL 150 × 2; migrations/rollback/reaplicação
+até 020; B2 300 + readiness 18 simulados. Instalação congelada, lint, typecheck,
+build e exports reproduzíveis aprovados. Nenhuma migration ou variável nova.
+Inventário, sequência de atualização, riscos e limites de aceite estão em
+[CUMULATIVE_REVIEW.md](CUMULATIVE_REVIEW.md). B2 off, workflows inativos; somente
+integração controlada de desenvolvimento preparada, não liberação pública/V1.

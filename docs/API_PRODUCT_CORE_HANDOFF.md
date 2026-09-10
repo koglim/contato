@@ -3,12 +3,15 @@
 > Estado atual: [V1_EXECUTION.md](V1_EXECUTION.md). As rodadas abaixo são histórico,
 > não instruções para reconstruir módulos ou modificar migrations já aplicadas.
 > A base atual inclui resposta profissional/retomada (015), retry (016) e
-> recibo/retenção de entrega (017). A execução V1 também corrige elegibilidade
+> recibo/retenção de entrega (017), memória B2 (018), recuperação da Inbox (019)
+> e áudio durável/disposição de transporte (020). A execução V1 corrige elegibilidade
 > de toda nova seleção e limita o autosserviço do painel no BFF.
 >
 > Os novos exports de consumidor estão em `workflows/n8n`, inativos. Nenhum
-> workflow instalado foi alterado; faltam versão/export do gateway e homologação
-> com números autorizados. Não ativar nem interpretar teste simulado como entrega real.
+> workflow instalado foi alterado; versões e cinco exports candidatos estão
+> registrados, mas falta homologação real com números autorizados. Não ativar nem
+> interpretar teste simulado como entrega real. Estado e ordem de integração:
+> [CUMULATIVE_REVIEW.md](CUMULATIVE_REVIEW.md).
 
 ## Rodada atual: `feat/bilateral-contact`
 
