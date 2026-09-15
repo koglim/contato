@@ -80,6 +80,13 @@ async function insertIndependent(status: "pending" | "processing" = "pending", p
   return result.rows[0]!.id;
 }
 
+async function removeDispatcherFixtures(ids: string[], withTransportAudit = false) {
+  if (withTransportAudit) await query("TRUNCATE channel_transport_events");
+  await query("DELETE FROM channel_outbound_messages WHERE id = ANY($1::uuid[])", [`{${ids.join(",")}}`]);
+  await query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[]))", [`{${ids.join(",")}}`]);
+  await query("DELETE FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[])", [`{${ids.join(",")}}`]);
+}
+
 test("dispatcher claims distinct pending messages concurrently with PostgreSQL row locking", { concurrency: false }, async () => {
   const firstId = await insertIndependent();
   const secondId = await insertIndependent();
@@ -175,6 +182,89 @@ test("dispatcher uses the same claim contract for customer replies and professio
     await query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[]))", [[customerId] as unknown as string]);
     await query("DELETE FROM channel_inbound_messages WHERE provider = 'dispatcher-test' AND provider_message_id = ANY($1::text[])", [[customerId] as unknown as string]);
   }
+});
+
+test("a recent customer reply can be claimed and retried inside its five-minute lifetime", { concurrency: false }, async () => {
+  const id = await insertIndependent("pending", null, null, "customer_reply");
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    const first = await repository.claim(id, randomUUID(), 60);
+    assert.equal(first?.id, id);
+    assert.equal(first?.purpose, "customer_reply");
+    assert.equal(await repository.markFailed(id, {
+      processing_token: first!.processingToken!,
+      error_code: "transport_timeout",
+    }), true);
+    await query("UPDATE channel_outbound_messages SET next_attempt_at = clock_timestamp() - INTERVAL '1 second' WHERE id = $1", [id]);
+    const retry = await repository.claim(id, randomUUID(), 60);
+    assert.equal(retry?.id, id);
+    assert.equal(retry?.attemptCount, 2);
+  } finally { await removeDispatcherFixtures([id]); }
+});
+
+test("next claim closes an expired customer reply and records one immutable transport event", { concurrency: false }, async () => {
+  const id = await insertIndependent("pending", null, null, "customer_reply");
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    await query("UPDATE channel_outbound_messages SET created_at = clock_timestamp() - INTERVAL '5 minutes 1 second' WHERE id = $1", [id]);
+    assert.equal(await repository.claimNextPending(randomUUID(), 60), null);
+    const closed = (await query<{status:string;processing_token:string|null;last_error_code:string|null;administrative_closed_at:Date|null}>(
+      "SELECT status,processing_token,last_error_code,administrative_closed_at FROM channel_outbound_messages WHERE id=$1", [id],
+    )).rows[0]!;
+    assert.deepEqual({ status: closed.status, token: closed.processing_token, reason: closed.last_error_code }, {
+      status: "failed", token: null, reason: "customer_reply_expired",
+    });
+    assert.ok(closed.administrative_closed_at);
+    assert.equal((await query("SELECT id FROM channel_transport_events WHERE outbound_id=$1 AND action='close' AND reason='customer_reply_expired'", [id])).rows.length, 1);
+    assert.equal(await repository.claimNextPending(randomUUID(), 60), null);
+    assert.equal((await query("SELECT id FROM channel_transport_events WHERE outbound_id=$1", [id])).rows.length, 1);
+  } finally { await removeDispatcherFixtures([id], true); }
+});
+
+test("individual claim returns 410 without delivery data for an expired customer reply", { concurrency: false }, async () => {
+  const id = await insertIndependent("pending", null, null, "customer_reply");
+  const app = buildApp({ internalApiKey: "expired-reply-test" });
+  try {
+    await query("UPDATE channel_outbound_messages SET created_at = clock_timestamp() - INTERVAL '6 minutes' WHERE id = $1", [id]);
+    const response = await app.inject({ method: "POST", url: `/internal/channel/outbound/${id}/claim`, headers: { "x-internal-key": "expired-reply-test" } });
+    assert.equal(response.statusCode, 410, response.body);
+    assert.deepEqual(response.json(), { error: "outbound_message_expired" });
+    assert.doesNotMatch(response.body, /text_content|processing_token|recipient_phone_e164|Mensagem de teste/u);
+    const row = (await query<{status:string;administrative_closed_at:Date|null}>("SELECT status,administrative_closed_at FROM channel_outbound_messages WHERE id=$1", [id])).rows[0]!;
+    assert.equal(row.status, "failed");
+    assert.ok(row.administrative_closed_at);
+  } finally { await app.close(); await removeDispatcherFixtures([id], true); }
+});
+
+test("an old professional notification remains eligible", { concurrency: false }, async () => {
+  const id = await insertIndependent();
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    await query("UPDATE channel_outbound_messages SET created_at = clock_timestamp() - INTERVAL '13 days' WHERE id = $1", [id]);
+    const claimed = await repository.claimNextPending(randomUUID(), 60);
+    assert.equal(claimed?.id, id);
+    assert.equal(claimed?.purpose, "professional_contact_notification");
+  } finally { await removeDispatcherFixtures([id]); }
+});
+
+test("concurrent consumers never receive an expired customer reply", { concurrency: false }, async () => {
+  const expired = await insertIndependent("pending", null, null, "customer_reply");
+  const recent = await insertIndependent("pending", null, null, "customer_reply");
+  const professional = await insertIndependent();
+  const repository = new PostgresChannelOutboundMessageRepository();
+  try {
+    await query("UPDATE channel_outbound_messages SET created_at = clock_timestamp() - INTERVAL '1 day' WHERE id = $1", [expired]);
+    const claims = await Promise.all([
+      repository.claimNextPending(randomUUID(), 60),
+      repository.claimNextPending(randomUUID(), 60),
+    ]);
+    assert.deepEqual(new Set(claims.map((claim) => claim?.id)), new Set([recent, professional]));
+    assert.equal(claims.some((claim) => claim?.id === expired), false);
+    const closed = (await query<{status:string;administrative_closed_at:Date|null}>("SELECT status,administrative_closed_at FROM channel_outbound_messages WHERE id=$1", [expired])).rows[0]!;
+    assert.equal(closed.status, "failed");
+    assert.ok(closed.administrative_closed_at);
+    assert.equal((await query("SELECT id FROM channel_transport_events WHERE outbound_id=$1 AND reason='customer_reply_expired'", [expired])).rows.length, 1);
+  } finally { await removeDispatcherFixtures([expired, recent, professional], true); }
 });
 
 test("independent business key serializes creation and replay preserves an already-sent message", async () => {

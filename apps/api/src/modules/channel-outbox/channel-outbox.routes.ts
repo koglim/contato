@@ -17,6 +17,7 @@ type ChannelOutboundRoutesOptions = { internalApiKey?: string; service: ChannelO
 
 function routeError(reply: { code(status: number): { send(payload: unknown): unknown } }, kind: string) {
   if (kind === "outbound_message_not_found") return reply.code(404).send({ error: kind });
+  if (kind === "outbound_message_expired") return reply.code(410).send({ error: kind });
   return reply.code(409).send({ error: kind });
 }
 

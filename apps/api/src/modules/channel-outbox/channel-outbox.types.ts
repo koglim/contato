@@ -23,6 +23,7 @@ export type ChannelOutboundMessageRecord = {
   lastErrorCode: string | null;
   sentAt: Date | null;
   nextAttemptAt: Date | null;
+  administrativeClosedAt: Date | null;
 };
 
 export type CreateChannelOutboundMessage = {
@@ -59,6 +60,7 @@ export type ChannelOutboundClaimOutcome =
   | { kind: "response"; response: ChannelOutboundMessageClaimResponse }
   | { kind: "outbound_message_not_found" }
   | { kind: "outbound_queue_empty" }
+  | { kind: "outbound_message_expired" }
   | { kind: "outbound_message_processing" };
 
 export type ChannelOutboundMutationOutcome =

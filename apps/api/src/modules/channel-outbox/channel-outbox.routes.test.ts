@@ -28,6 +28,10 @@ class FakeOutbox implements ChannelOutboundService {
   }
 }
 
+class ExpiredOutbox extends FakeOutbox {
+  override async claim() { return { kind: "outbound_message_expired" as const }; }
+}
+
 test("queue diagnostics authenticates, disables caching and rejects accidental private fields", async () => {
   const fake = new FakeOutbox();
   let calls = 0;
@@ -83,6 +87,22 @@ test("outbox route can claim the next pending message without an outbound id", a
   assert.equal(claim.json().purpose, "customer_reply");
   assert.equal(claim.json().recipient_phone_e164, "+5566999999999");
   await app.close();
+});
+
+test("individual claim returns 410 without delivery payload for an expired customer reply", async () => {
+  const app = buildApp({ channelOutboundService: new ExpiredOutbox(), internalApiKey });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/internal/channel/outbound/${outboundId}/claim`,
+      headers: { "x-internal-key": internalApiKey },
+    });
+    assert.equal(response.statusCode, 410);
+    assert.deepEqual(response.json(), { error: "outbound_message_expired" });
+    assert.equal(response.body.includes("text_content"), false);
+    assert.equal(response.body.includes("processing_token"), false);
+    assert.equal(response.body.includes("recipient_phone_e164"), false);
+  } finally { await app.close(); }
 });
 
 test("delivery hold requires internal authentication and a bounded reason without exposing content", async () => {

@@ -632,6 +632,16 @@ Após aceitação comprovada, `POST /internal/channel/outbound/:outboundId/sent`
 
 `CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` controla a lease e tem valor padrão de 60 segundos. PostgreSQL é a fonte de verdade. O endpoint interno `POST /internal/channel/outbound/next/claim` reserva atomicamente a próxima mensagem elegível; considera `pending` sem agendamento, `next_attempt_at <= NOW()` e leases `processing` vencidas. A fila vazia retorna `204 No Content`; o claim individual existente continua retornando `404` para um ID inexistente. A transação termina antes do envio externo.
 
+Uma `customer_reply` é elegível somente até cinco minutos após `created_at`.
+Antes de cada claim, replies pendentes/retryáveis ou com lease abandonada que
+atingiram esse limite são fechadas atomicamente como `failed`, com
+`administrative_closed_at`, `last_error_code=customer_reply_expired` e evento
+imutável `close` em `channel_transport_events`. O dispatcher nunca recebe seu
+texto, destinatário ou token. `/next/claim` continua procurando outra mensagem
+e retorna 204 quando não houver elegível; `/:outboundId/claim` retorna
+`410 { "error": "outbound_message_expired" }`. Mensagens `sent`, holds em
+reconciliação e outros purposes não são reinterpretados por essa política.
+
 ### Retry da Outbox (migration 016)
 
 Uma mensagem nova começa com `attempt_count = 0` e `next_attempt_at = NULL`. Cada claim incrementa o contador e cria uma lease. O consumidor confirma sucesso com `/sent` ou informa rejeição transitória com `/failed`; falhas 1–4 voltam a `pending` com `last_error_code` e backoff de 30, 60, 120 e 240 segundos. O array da política também contém 480s, mas a quinta falha já é terminal e não agenda sexta tentativa. Antes de `next_attempt_at` a mensagem não é elegível. `sent` nunca volta a `pending`; 017 também limita leases abandonadas.

@@ -20,7 +20,8 @@ function record(overrides: Partial<ChannelOutboundMessageRecord> = {}): ChannelO
   return {
     id, channelInboundMessageId: inboundId, purpose: "customer_reply", provider: "test", recipientPhoneE164: "+5566999999999", messageType: "text",
     textContent: "Em qual cidade você precisa do atendimento?", status: "pending", processingToken: null,
-    processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, nextAttemptAt: null, ...overrides,
+    processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, nextAttemptAt: null,
+    administrativeClosedAt: null, ...overrides,
   };
 }
 
@@ -34,7 +35,8 @@ class FakeRepository implements ChannelOutboundMessageRepository {
   async createOrFindForProcessedInbound() { return this.current ?? record(); }
   async createIndependent() { return this.current ?? record({ purpose: "professional_contact_notification", channelInboundMessageId: null }); }
   async claim(_id: string, token: string) {
-    if (!this.current || this.current.status === "sent" || this.current.status === "processing") return null;
+    if (!this.current || this.current.status === "sent" || this.current.status === "processing"
+      || this.current.administrativeClosedAt !== null) return null;
     this.current = { ...this.current, status: "processing", processingToken: token, processingStartedAt: new Date(), attemptCount: this.current.attemptCount + 1 };
     return this.current;
   }
@@ -119,6 +121,16 @@ test("claiming the next message treats an empty queue as a normal state", async 
   const current = context();
   current.repository.current = null;
   assert.deepEqual(await current.service.claimNextPending(), { kind: "outbound_queue_empty" });
+});
+
+test("an administratively expired customer reply has a distinct safe claim outcome", async () => {
+  const current = context();
+  current.repository.current = record({
+    status: "failed",
+    lastErrorCode: "customer_reply_expired",
+    administrativeClosedAt: new Date(),
+  });
+  assert.deepEqual(await current.service.claim(id), { kind: "outbound_message_expired" });
 });
 
 test("transient failure can report pending and the fifth failure remains dead-lettered", async () => {

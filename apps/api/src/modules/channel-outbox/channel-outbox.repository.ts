@@ -11,6 +11,7 @@ import type {
 } from "./channel-outbox.types.js";
 import type { ChannelOutboundQueueStatus, ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 import { OUTBOX_MAX_ATTEMPTS, OUTBOX_RETRY_BACKOFF_SECONDS } from "./channel-outbox.retry.js";
+import { CUSTOMER_REPLY_EXPIRY_REASON, CUSTOMER_REPLY_MAX_AGE_SECONDS } from "./channel-outbox.expiry.js";
 
 const retryBackoffSql = OUTBOX_RETRY_BACKOFF_SECONDS
   .map((seconds, index) => `WHEN ${index + 1} THEN ${seconds}`)
@@ -27,6 +28,46 @@ function exhaustAbandonedSql(leaseParameter: string, maxParameter: string) {
         AND attempt_count >= ${maxParameter}
         AND processing_started_at <= NOW() - (${leaseParameter} * INTERVAL '1 second')
       FOR UPDATE SKIP LOCKED)`;
+}
+
+function expireCustomerRepliesSql(
+  leaseParameter: string,
+  maxAttemptsParameter: string,
+  maxAgeParameter: string,
+  reasonParameter: string,
+  idPredicate = "TRUE",
+) {
+  return `expired_customer_reply_candidates AS (
+      SELECT expirable.id
+        FROM channel_outbound_messages AS expirable
+       WHERE ${idPredicate}
+         AND expirable.purpose = 'customer_reply'
+         AND expirable.administrative_closed_at IS NULL
+         AND expirable.delivery_hold_reason IS NULL
+         AND expirable.created_at <= clock_timestamp() - (${maxAgeParameter} * INTERVAL '1 second')
+         AND (
+           expirable.status = 'pending'
+           OR (expirable.status = 'failed' AND expirable.attempt_count < ${maxAttemptsParameter})
+           OR (expirable.status = 'processing' AND expirable.attempt_count < ${maxAttemptsParameter}
+             AND expirable.processing_started_at <= clock_timestamp() - (${leaseParameter} * INTERVAL '1 second'))
+         )
+       FOR UPDATE SKIP LOCKED
+    ), expired_customer_replies AS (
+      UPDATE channel_outbound_messages AS expired
+         SET status = 'failed', processing_token = NULL, processing_started_at = NULL,
+             next_attempt_at = NULL, last_error_code = ${reasonParameter},
+             administrative_closed_at = clock_timestamp()
+        FROM expired_customer_reply_candidates AS candidate
+       WHERE expired.id = candidate.id
+       RETURNING expired.id
+    ), customer_reply_expiry_audit AS (
+      INSERT INTO channel_transport_events(outbound_id,event_key,action,reason,payload_hash,result)
+      SELECT expired.id, 'customer_reply_expiry_v1', 'close', ${reasonParameter},
+        encode(digest(expired.id::text || ':' || ${reasonParameter}::text, 'sha256'), 'hex'),
+        jsonb_build_object('status','failed','reason',${reasonParameter}::text)
+        FROM expired_customer_replies AS expired
+      ON CONFLICT(outbound_id,event_key) DO NOTHING
+    )`;
 }
 
 // Independent business notifications are FIFO. Inline replies retain their
@@ -65,6 +106,7 @@ export type ChannelOutboundMessageRow = {
   last_error_code: string | null;
   sent_at: Date | null;
   next_attempt_at: Date | null;
+  administrative_closed_at: Date | null;
 };
 
 export type ChannelOutboxQuery = <T extends QueryResultRow>(text: string, values?: unknown[]) => Promise<{ rows: T[] }>;
@@ -73,14 +115,15 @@ export type ChannelOutboxTransaction = <T>(callback: (client: DatabaseClient) =>
 export const channelOutboundMessageColumns = `
   id, channel_inbound_message_id, purpose, provider, recipient_phone_e164, message_type, text_content,
   status, processing_token, processing_started_at, provider_message_id, attempt_count, last_error_code, sent_at,
-  next_attempt_at
+  next_attempt_at, administrative_closed_at
 `;
 
 const qualifiedChannelOutboundMessageColumns = `
   outbound.id, outbound.channel_inbound_message_id, outbound.purpose, outbound.provider,
   outbound.recipient_phone_e164, outbound.message_type, outbound.text_content, outbound.status,
   outbound.processing_token, outbound.processing_started_at, outbound.provider_message_id,
-  outbound.attempt_count, outbound.last_error_code, outbound.sent_at, outbound.next_attempt_at
+  outbound.attempt_count, outbound.last_error_code, outbound.sent_at, outbound.next_attempt_at,
+  outbound.administrative_closed_at
 `;
 
 export class MatchReservationConflictError extends Error {
@@ -109,6 +152,7 @@ export function toChannelOutboundMessageRecord(row: ChannelOutboundMessageRow): 
     lastErrorCode: row.last_error_code,
     sentAt: row.sent_at,
     nextAttemptAt: row.next_attempt_at,
+    administrativeClosedAt: row.administrative_closed_at,
   };
 }
 
@@ -259,12 +303,15 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
 
   async claim(id: string, processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<ChannelOutboundMessageRow>(
-      `WITH exhausted AS (${exhaustAbandonedSql("$3", "$4")})
+      `WITH ${expireCustomerRepliesSql("$3", "$4", "$5", "$6", "expirable.id = $1")},
+       exhausted AS (${exhaustAbandonedSql("$3", "$4")})
        UPDATE channel_outbound_messages AS outbound
        SET status = 'processing', processing_token = $2, processing_started_at = NOW(),
            next_attempt_at = NULL, attempt_count = attempt_count + 1
        WHERE id = $1
          AND attempt_count < $4 AND delivery_hold_reason IS NULL
+         AND administrative_closed_at IS NULL
+         AND (purpose <> 'customer_reply' OR created_at > clock_timestamp() - ($5 * INTERVAL '1 second'))
          AND ${recipientTurnSql}
          AND (
            (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
@@ -272,17 +319,22 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
            OR (status = 'processing' AND processing_started_at <= NOW() - ($3 * INTERVAL '1 second'))
          )
        RETURNING ${channelOutboundMessageColumns}`,
-      [id, processingToken, processingLeaseSeconds, OUTBOX_MAX_ATTEMPTS],
+      [id, processingToken, processingLeaseSeconds, OUTBOX_MAX_ATTEMPTS,
+        CUSTOMER_REPLY_MAX_AGE_SECONDS, CUSTOMER_REPLY_EXPIRY_REASON],
     );
     return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;
   }
 
   async claimNextPending(processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<ChannelOutboundMessageRow>(
-      `WITH exhausted AS (${exhaustAbandonedSql("$1", "$2")}), candidate AS (
+      `WITH ${expireCustomerRepliesSql("$1", "$2", "$4", "$5")},
+       exhausted AS (${exhaustAbandonedSql("$1", "$2")}), candidate AS (
          SELECT outbound.id
            FROM channel_outbound_messages AS outbound
           WHERE attempt_count < $2 AND delivery_hold_reason IS NULL
+            AND outbound.administrative_closed_at IS NULL
+            AND (outbound.purpose <> 'customer_reply'
+              OR outbound.created_at > clock_timestamp() - ($4 * INTERVAL '1 second'))
             AND ${recipientTurnSql}
             AND ((
             (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))
@@ -299,7 +351,8 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
          FROM candidate
         WHERE outbound.id = candidate.id
        RETURNING ${qualifiedChannelOutboundMessageColumns}`,
-      [processingLeaseSeconds, OUTBOX_MAX_ATTEMPTS, processingToken],
+      [processingLeaseSeconds, OUTBOX_MAX_ATTEMPTS, processingToken,
+        CUSTOMER_REPLY_MAX_AGE_SECONDS, CUSTOMER_REPLY_EXPIRY_REASON],
     );
     return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;
   }

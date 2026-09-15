@@ -10,6 +10,7 @@ import type {
   HoldOutboundInput,
 } from "./channel-outbox.types.js";
 import type { MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
+import { CUSTOMER_REPLY_EXPIRY_REASON } from "./channel-outbox.expiry.js";
 
 function claimResponse(record: ChannelOutboundMessageRecord) {
   if (record.status === "sent") return { id: record.id, status: "sent" as const, attempt_count: record.attemptCount, purpose: record.purpose };
@@ -46,6 +47,12 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
     const current = await this.repository.findById(id);
     if (!current) return { kind: "outbound_message_not_found" };
     if (current.status === "sent") return { kind: "response", response: claimResponse(current) };
+    if (current.purpose === "customer_reply"
+      && current.status === "failed"
+      && current.administrativeClosedAt !== null
+      && current.lastErrorCode === CUSTOMER_REPLY_EXPIRY_REASON) {
+      return { kind: "outbound_message_expired" };
+    }
     return { kind: "outbound_message_processing" };
   }
 

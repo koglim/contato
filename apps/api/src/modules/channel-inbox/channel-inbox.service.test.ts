@@ -88,6 +88,7 @@ class FakeRepository implements ChannelInboundMessageRepository {
     id: "55555555-5555-4555-8555-555555555555", channelInboundMessageId: messageId, purpose: "customer_reply", provider: input.provider,
     recipientPhoneE164: input.phone_e164, messageType: "text", textContent: "", status: "pending",
     processingToken: null, processingStartedAt: null, providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, nextAttemptAt: null,
+    administrativeClosedAt: null,
   };
   markedFailed: string | undefined;
   reservationConflict = false;
@@ -125,6 +126,7 @@ class FakeOutboundRepository implements ChannelOutboundMessageRepository {
       provider: inputValue.provider, recipientPhoneE164: inputValue.recipientPhoneE164, messageType: "text",
       textContent: inputValue.textContent, status: "pending", processingToken: null, processingStartedAt: null,
       providerMessageId: null, attemptCount: 0, lastErrorCode: null, sentAt: null, nextAttemptAt: null,
+      administrativeClosedAt: null,
     };
     return this.current;
   }

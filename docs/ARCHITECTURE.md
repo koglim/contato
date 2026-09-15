@@ -274,6 +274,16 @@ Inbounds que já estavam `processed` antes da introdução dessa tabela não sof
 
 Um replay usa o resultado persistido e a mesma Outbox, sem chamar o router; preserva o `outbound.id`, o texto original e informa se já está `sent`. Para registros legados sem Outbox, a recuperação idempotente também reconstrói as associações dos matches persistidos. O dispatcher separado usa `POST /internal/channel/outbound/next/claim` com `FOR UPDATE SKIP LOCKED`: reserva uma mensagem por vez, respeita `next_attempt_at`, recupera leases vencidas e termina a transação antes do transporte externo. Fila vazia retorna `204`, distinta de um ID inexistente (`404`). O consumidor confirma `/sent` ou `/failed`; falhas transitórias usam backoff 30/60/120/240/480 segundos e a quinta falha vira dead-letter. Somente uma confirmação `sent` válida preenche `matches.shown_at`; criação, falha e confirmações inválidas não o alteram. A API não chama a Evolution. A seleção bilateral agora cria a intenção profissional com idempotência de negócio; o consumidor n8n não foi alterado.
 
+`customer_reply` tem validade absoluta de cinco minutos a partir de `created_at`,
+incluindo retries. Os mesmos comandos SQL que reivindicam por fila ou ID primeiro
+travam com `SKIP LOCKED`, encerram replies expiradas ainda enviáveis e registram
+um evento `close` idempotente. O estado terminal reutiliza `failed`,
+`administrative_closed_at` e `last_error_code=customer_reply_expired`; não há novo
+enum ou migration. A seleção exclui a idade expirada mesmo quando outra transação
+está encerrando o registro. Holds não são alterados, porque representam resultado
+externo incerto e continuam dependentes de reconciliação. Notificações profissionais,
+respostas profissionais, atualizações de contato e notices preservam suas regras.
+
 `match-selection` seleciona um match já apresentado dentro de uma transação. Ela bloqueia a conversa, a busca e o match, valida cliente, estado `selection`, expiração e posição exibida, então seleciona o match, cria o contato e conclui a conversa. Customer Search e Inbox já usam essa operação através de `selection-command`.
 
 A seleção aceita uma `selectionKey` genérica para idempotência. A mesma chave no mesmo cliente, busca e conversa recupera o contato e match já selecionados sem nova escrita; uma chave reutilizada em contexto diferente retorna conflito controlado. O futuro adaptador de canal poderá usar o UUID de inbound como essa chave, sem acoplamento com n8n ou Evolution.
