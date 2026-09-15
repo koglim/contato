@@ -78,7 +78,7 @@ Arquivos existentes não são sobrescritos. Nenhum comando acima foi executado.
 Trilha JSON por turno: entrada/contexto permitido enviado, interpretação,
 decisão do controlador, contexto/saída da composição, texto final validado ou
 fallback, memória resultante e campos vazios para revisão humana. Usage inclui
-tokens/modelo efetivo/latência por estágio quando disponível. Versão b2.2 e hashes
+tokens/modelo efetivo/latência por estágio quando disponível. Versão b2.3 e hashes
 do prompt, catálogo e corpus identificam a rodada.
 
 **Fronteira explícita:** o runner não executa geocoder, matching, seleção ou
@@ -117,8 +117,8 @@ nunca copiar conversas pessoais ou chaves para relatórios públicos.
 Após aprovação: conferir `pgmigrations` no ambiente alvo e aplicar **todas** as
 migrations pendentes na ordem, incluindo **017, 018 e 019 quando ausentes**, antes da
 API. Não aplicar apenas 018 supondo 017 existente. Publicar com
-`CONTEXTUAL_CONVERSATION_ENABLED=false`; avaliar/homologar; ativação é uma decisão
-manual posterior. `CONTEXTUAL_CONVERSATION_MODEL` e `OPENAI_API_KEY` permanecem
+`CONVERSATION_AI_ENABLED=false`; avaliar/homologar; ativação é uma decisão
+manual posterior. `OPENAI_CONVERSATION_MODEL` e `OPENAI_API_KEY` permanecem
 os mesmos contratos. Nenhuma variável do EasyPanel foi alterada.
 
 ## Gate operacional: recuperação autônoma da Inbox

@@ -383,6 +383,15 @@ impedem remoção destrutiva. Rollback compatível é exercitado antes dos downs
 Ver [B2_CONTEXTUAL_CONVERSATION.md](B2_CONTEXTUAL_CONVERSATION.md) para o handler
 opcional, memória/hipóteses, fencing, quotas e limites do checkpoint. A ativação
 continua desabilitada; não equivale à conclusão comercial da V1.
+
+O orquestrador usa o SDK oficial na API, Responses/Structured Outputs e
+`store:false`. O modelo recebe somente mensagem sanitizada, slots confirmados,
+hipóteses limitadas, slot pendente e catálogo truncado. Saudações e conversa
+não transacional podem usar texto natural validado; qualquer serviço, cidade ou
+seleção retorna aos resolvers, geocoder, matching e transações existentes. A IA
+não recebe ferramentas nem autoridade para escolher profissional, expor contato
+ou alterar estado. A Outbox persiste o texto final, portanto retries e replay não
+voltam ao modelo. A flag canônica é `CONVERSATION_AI_ENABLED` e permanece false.
 # Checkpoint 019 — recuperação da Inbox
 
 Recuperação autenticada com claim atômico, ordem `(created_at,id)` por telefone,

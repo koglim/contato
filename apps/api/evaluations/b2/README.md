@@ -14,7 +14,7 @@ cobertos separadamente pelas integrações PostgreSQL reais.
 
 O corpus v1 continua congelado, inclusive os 90 reservados. `readiness.json`
 adiciona 18 casos de desenvolvimento com o catálogo de oito serviços do seed;
-não é holdout nem substitui o conjunto original. Versão do runtime/prompt: b2.2.
+não é holdout nem substitui o conjunto original. Versão do runtime/prompt: b2.3.
 
 ## Execução sem gasto
 

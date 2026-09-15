@@ -274,6 +274,7 @@ async function fixture() {
   const professionalIds = [randomUUID(), randomUUID()];
   await query("INSERT INTO service_categories(id,name,slug) VALUES ($1::uuid,'B2 fixture',$1::text)", [categoryId]);
   await query("INSERT INTO services(id,category_id,name,slug) VALUES ($1,$2,$3,$3)", [serviceId, categoryId, name]);
+  await query("INSERT INTO service_aliases(service_id,alias,normalized_alias) VALUES ($1,'tomada','tomada')", [serviceId]);
   for (const [index, id] of professionalIds.entries()) {
     await query("INSERT INTO professionals(id,display_name,slug,phone_e164,status) VALUES ($1::uuid,$2,$1::text,$3,'active')", [id, `Profissional ${index + 1}`, `+5566${Math.floor(Math.random() * 1e9).toString().padStart(9, "0")}`]);
     await query("INSERT INTO professional_services(professional_id,service_id) VALUES ($1,$2)", [id, serviceId]);
@@ -377,6 +378,51 @@ test("B2 polite questions use real catalog and location, but contact questions c
       assert.equal((await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows.length, 0);
     }
     assert.ok(f.calls() >= calls); assert.equal(f.geoCalls(), 1);
+  } finally { await f.cleanup(); }
+});
+
+test("conversation AI replies naturally to greetings, persists the reply and never invents protected facts", async () => {
+  const f = await fixture();
+  try {
+    const id = randomUUID();
+    f.set(async () => basic({ intent: "greeting", speech_act: "information", natural_reply: "Bom dia! 😊 Me conta como posso ajudar hoje?", confidence: "high" }));
+    const greeting = await f.receive("oi", id);
+    assert.equal(greeting.statusCode, 200, greeting.body);
+    assert.equal(greeting.json().result.status, "information");
+    assert.equal(greeting.json().reply_text, "Bom dia! 😊 Me conta como posso ajudar hoje?");
+    assert.equal((await f.state()).memory.service, null);
+    assert.equal((await f.state()).memory.location, null);
+    assert.equal(f.geoCalls(), 0);
+    const calls = f.calls();
+    const replay = await f.receive("oi", id);
+    assert.equal(replay.json().duplicate, true);
+    assert.equal(replay.json().outbound.id, greeting.json().outbound.id);
+    assert.equal(replay.json().reply_text, greeting.json().reply_text);
+    assert.equal(f.calls(), calls);
+
+    f.set(async () => basic({ intent: "greeting", speech_act: "information",
+      natural_reply: "Encontrei João por R$ 100. Ligue +5566999999999.", confidence: "high" }));
+    const guarded = await f.receive("bom dia");
+    assert.equal(guarded.statusCode, 200, guarded.body);
+    assert.match(guarded.json().reply_text, /Qual serviço/u);
+    assert.doesNotMatch(guarded.json().reply_text, /João|R\$|\+55/u);
+    assert.equal((await f.state()).memory.service, null);
+  } finally { await f.cleanup(); }
+});
+
+test("conversation AI extracts a catalog alias and city, then delegates facts to deterministic search", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", confidence: "high", natural_reply: null,
+      services: [{ key: f.name, evidence: "tomada" }], location: { text: "Cuiabá", evidence: "Cuiabá" } }));
+    const result = await f.receive("minha tomada queimou e estou em Cuiabá");
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().result.status, "matched");
+    assert.equal((await f.state()).memory.service.value, f.name);
+    assert.equal((await f.state()).memory.location.value, "Cuiabá");
+    assert.match(result.json().reply_text, /Profissional 1/u);
+    assert.doesNotMatch(result.json().reply_text, /telefone|\+55/u);
+    assert.equal(f.geoCalls(), 1);
   } finally { await f.cleanup(); }
 });
 

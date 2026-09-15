@@ -90,7 +90,8 @@ no banco descartável do CI. Nunca apagar registros reais para forçar rollback.
 ## Inventário final de variáveis e credenciais
 
 Nenhuma variável nova nesta revisão. Em relação à main, B2 acrescentou
-`CONTEXTUAL_CONVERSATION_ENABLED` e `CONTEXTUAL_CONVERSATION_MODEL`.
+`CONVERSATION_AI_ENABLED` e `OPENAI_CONVERSATION_MODEL` (os nomes
+`CONTEXTUAL_CONVERSATION_*` seguem como aliases temporários).
 Valores abaixo documentam o contrato atual, não alteram o ambiente instalado.
 
 ### API e runner de banco
@@ -114,8 +115,8 @@ Valores abaixo documentam o contrato atual, não alteram o ambiente instalado.
 | `SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS` | 60 |
 | `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` | 60 |
 | `CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` | 60; não reduzir abaixo do orçamento de entrega de 55s |
-| `CONTEXTUAL_CONVERSATION_ENABLED` | **false** |
-| `CONTEXTUAL_CONVERSATION_MODEL` | Vazio enquanto desligada; escolha depende de avaliação autorizada |
+| `CONVERSATION_AI_ENABLED` | **false**; aliases legados `CONTEXTUAL_CONVERSATION_*` continuam aceitos temporariamente |
+| `OPENAI_CONVERSATION_MODEL` | Vazio enquanto desligada; escolha depende de avaliação autorizada |
 
 B2 false não desliga fallback legado ou transcrição do n8n caso estes sejam
 ativados separadamente. `NODE_ENV=production` já pertence às imagens de produção.

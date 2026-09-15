@@ -23,7 +23,7 @@ import { parseBilateralConfirmation } from "../bilateral-contact/bilateral-conta
 import { resolveProfessionalSelection } from "../selection-command/professional-selection.resolver.js";
 import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider } from "./contextual.contract.js";
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
-import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
+import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
 export { CONTEXTUAL_COST_POLICY } from "./contextual.reply.js";
@@ -87,9 +87,10 @@ export class ContextualConversationService implements ContextualInboxHandler {
             await this.repository.saveProposal(record, snapshot, proposal);
           }
           const explicit = await this.services.resolve({ text: record.rawText });
-          // Semantic/fuzzy guesses alone do not become confirmed facts.
+          // Exact catalogue names and aliases are domain-confirmed facts. Fuzzy
+          // guesses and model-only semantic mappings remain hypotheses.
           const explicitService = explicit.status === "resolved" && explicit.match && explicit.match.method !== "fuzzy"
-            && (` ${normalizeContextualText(record.rawText)} `).includes(` ${normalizeContextualText(explicit.match.service.name)} `)
+            && (` ${normalizeContextualText(record.rawText)} `).includes(` ${normalizeContextualText(explicit.match.matched_term)} `)
             ? explicit.match.service.name : null;
           decision = controlContextualProposal(record.rawText, record.id, proposal, snapshot.memory, catalog, explicitService);
           this.failures = 0;
@@ -166,8 +167,14 @@ export class ContextualConversationService implements ContextualInboxHandler {
           text = CONTEXTUAL_COST_POLICY; status = "information";
         } else if (!fallback && decision.kind === "catalog_info") {
           text = contextualCatalogText(decision.catalogServices ?? []); status = "information";
+        } else if (!fallback && decision.kind === "greeting") {
+          text = decision.naturalReply ?? CONTEXTUAL_GREETING; status = "information";
+        } else if (!fallback && decision.kind === "small_talk") {
+          text = decision.naturalReply ?? CONTEXTUAL_SMALL_TALK; status = "information";
         } else if (!fallback && decision.kind === "out_of_scope") {
-          text = CONTEXTUAL_SCOPE; status = "information";
+          text = decision.naturalReply ?? CONTEXTUAL_SCOPE; status = "information";
+        } else if (!fallback && decision.kind === "clarify" && decision.naturalReply) {
+          text = decision.naturalReply;
         } else if (!fallback && memory.hypotheses.length) {
           text = question ?? contextualClarificationText(questionContext!);
         } else if (!fallback && decision.kind === "search") {

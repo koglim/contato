@@ -6,7 +6,7 @@ WhatsApp ou geocoder de produção é chamado pelas validações automáticas.
 ## Contrato e fronteiras
 
 A Inbox existente continua sendo a entrada. O handler B2 é opcional, depois do
-roteamento de oportunidades profissionais; `CONTEXTUAL_CONVERSATION_ENABLED=false`
+roteamento de oportunidades profissionais; `CONVERSATION_AI_ENABLED=false`
 preserva o caminho anterior. O replay reconhece resultados B2 mesmo com a flag
 desligada e usa o texto persistido na Outbox, sem regeneração.
 
@@ -24,6 +24,15 @@ hypothetical, negated ou unclear. Interrogação sozinha não bloqueia pedidos.
 `catalog_info` responde sobre serviços usando catálogo/evidências, sem iniciar
 busca nem alterar slots. Propostas b2.1 persistidas continuam legíveis.
 O contrato público da Inbox não mudou.
+
+Em b2.3, o mesmo Structured Output passou a exigir `confidence` (`high`,
+`medium` ou `low`) e `natural_reply`, além dos intents não transacionais
+`greeting` e `small_talk`. `natural_reply` só é utilizável para saudação,
+conversa breve, esclarecimento ou retorno de fora de escopo. A API limita o
+texto a 320 caracteres e rejeita telefone, e-mail, link, preço, disponibilidade,
+distância, prazo, credenciais e alegações de ações concluídas. Resposta rejeitada
+é substituída por texto determinístico; confiança baixa não altera memória nem
+inicia busca.
 
 Comandos globais exatos têm prioridade e não chamam IA. Seleção e consentimento
 reutilizam a mensagem original, os repositórios e a transação existentes. A IA
@@ -63,7 +72,7 @@ proposta anterior. Rollback não deixa busca ou contato sem Outbox.
 
 ## Limites e operação
 
-Política `b2.2`: 6 s por chamada, sem retry do SDK, 900 tokens máximos de
+Política `b2.3`: 6 s por chamada, sem retry do SDK, 900 tokens máximos de
 interpretação e 300 de composição, até duas chamadas por turno,
 20 chamadas/cliente/hora, 1.000 globais/hora, lease 30 s. Quotas são
 reservadas no banco antes da chamada e compartilhadas entre réplicas; até erros
@@ -71,9 +80,12 @@ consomem quota. Circuit breaker local: cinco erros, pausa de 60 s. Não é orça
 monetário: preço/modelo e orçamento financeiro precisam de decisão antes de ativar.
 Quotas antigas ainda exigem política operacional de retenção.
 
-Variáveis novas: `CONTEXTUAL_CONVERSATION_ENABLED` (default false) e
-`CONTEXTUAL_CONVERSATION_MODEL` (sem modelo escolhido por conveniência). Reutiliza
-`OPENAI_API_KEY`; não adicionar chave ao Git. Ordem futura, sempre manual:
+Variáveis canônicas: `CONVERSATION_AI_ENABLED` (default false),
+`OPENAI_CONVERSATION_MODEL` (sem modelo escolhido por conveniência) e
+`OPENAI_API_KEY`. Os aliases legados `CONTEXTUAL_CONVERSATION_ENABLED` e
+`CONTEXTUAL_CONVERSATION_MODEL` continuam aceitos temporariamente para não
+quebrar uma configuração em migração; quando definidos, os nomes canônicos têm
+prioridade. Não adicionar chave ao Git. Ordem futura, sempre manual:
 aplicar todas as migrations pendentes, incluindo 017 e 018 quando ausentes →
 publicar API com flag desligada → avaliar e revisar → ativação
 autorizada. Desligar flag não desfaz efeitos nem perde replay.
@@ -87,7 +99,7 @@ Perguntas de esclarecimento são geradas a partir do resultado real da resoluç�
 e campos faltantes, com schema/limites e rejeição de afirmações financeiras,
 contatos e ações concluídas. Rascunho validado é persistido antes dos efeitos;
 falha de composição usa pergunta determinística sem perder a interpretação.
-Em b2.2, também esse fallback é persistido antes dos efeitos. O plano de pergunta
+Em b2.3, também esse fallback é persistido antes dos efeitos. O plano de pergunta
 é compartilhado com o avaliador; `target` retornado precisa coincidir com o campo
 faltante/ambíguo. FAQ/interrupções não disparam composição sobre hipóteses lembradas.
 Não se permite reescrever livremente preços, consentimento ou listas de pessoas.
@@ -96,6 +108,12 @@ de perguntas e avaliação adversarial real continuam obrigatórias antes de ati
 Paráfrases de comandos sensíveis não reconhecidas são esclarecidas, nunca
 executadas pela confiança do modelo. Catálogo acima de 100 serviços requer
 estratégia de recuperação avaliada; não declarar cobertura ilimitada.
+
+O contexto enviado ao modelo contém somente a mensagem atual já sanitizada,
+serviço/localização confirmados, slot pendente, até três nomes de hipóteses e até
+100 itens do catálogo com descrições truncadas. Não contém telefone, IDs de
+cliente/profissional, tokens, preços, coordenadas nem histórico bruto. A Responses
+API usa `store:false`; memória confirmada e hipóteses continuam no PostgreSQL.
 
 Corpus sintético e protocolo em
 [evaluations/b2](../apps/api/evaluations/b2/README.md): 210 casos de desenvolvimento

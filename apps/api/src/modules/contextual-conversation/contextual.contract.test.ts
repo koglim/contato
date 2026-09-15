@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
-import { controlContextualProposal, contextualProposalSchema, emptyMemory, validateContextualQuestion, type ContextualProposal } from "./contextual.contract.js";
+import { controlContextualProposal, contextualInterpretationSchema, contextualProposalSchema, emptyMemory, validateContextualQuestion, validateNaturalReply, type ContextualProposal } from "./contextual.contract.js";
 import { readContextualConfig } from "../../config/contextual-conversation.js";
 
 const catalog = [{ key: "encanador", name: "Encanador", description: null }];
@@ -80,8 +80,53 @@ test("B2 structured hypothesis and refusal preserve context even without keyword
 });
 test("B2 disabled by default and requires explicit configuration", () => {
   assert.equal(readContextualConfig({}).enabled, false);
-  assert.throws(() => readContextualConfig({ CONTEXTUAL_CONVERSATION_ENABLED: "yes" }));
-  assert.throws(() => readContextualConfig({ CONTEXTUAL_CONVERSATION_ENABLED: "true" }));
+  assert.throws(() => readContextualConfig({ CONVERSATION_AI_ENABLED: "yes" }));
+  assert.throws(() => readContextualConfig({ CONVERSATION_AI_ENABLED: "true" }));
+  assert.deepEqual(readContextualConfig({ CONVERSATION_AI_ENABLED: "true", OPENAI_CONVERSATION_MODEL: "model", OPENAI_API_KEY: "secret" }), {
+    enabled: true, model: "model", apiKey: "secret",
+  });
+  assert.equal(readContextualConfig({ CONTEXTUAL_CONVERSATION_ENABLED: "true", CONTEXTUAL_CONVERSATION_MODEL: "legacy", OPENAI_API_KEY: "secret" }).model, "legacy");
+  assert.equal(readContextualConfig({ CONVERSATION_AI_ENABLED: "false", CONTEXTUAL_CONVERSATION_ENABLED: "true", CONTEXTUAL_CONVERSATION_MODEL: "legacy", OPENAI_API_KEY: "secret" }).enabled, false);
+});
+
+test("conversation AI schema is strict and controller only uses safe non-transactional replies", () => {
+  const greeting = {
+    intent: "greeting", speech_act: "information", services: [], location: null, uncertain: false,
+    natural_reply: "Bom dia! Como posso ajudar você hoje?", confidence: "high",
+  };
+  assert.ok(contextualInterpretationSchema.safeParse(greeting).success);
+  const result = run("oi", greeting);
+  assert.equal(result.kind, "greeting");
+  assert.equal(result.naturalReply, greeting.natural_reply);
+  assert.deepEqual(result.memory, emptyMemory());
+
+  for (const invalid of [
+    { ...greeting, confidence: "unknown" },
+    { ...greeting, natural_reply: "Oi", extra: "unsafe" },
+    { ...greeting, natural_reply: null, speech_act: undefined },
+  ]) assert.equal(contextualInterpretationSchema.safeParse(invalid).success, false);
+
+  for (const unsafe of [
+    "Encontrei o profissional João para você!",
+    "O preço é R$ 100.",
+    "Enviei seu contato para +5566999999999.",
+    "Acesse https://example.com.",
+  ]) {
+    assert.throws(() => validateNaturalReply(unsafe));
+    assert.equal(run("oi", { ...greeting, natural_reply: unsafe }).naturalReply, undefined);
+  }
+});
+
+test("low-confidence model proposals cannot change confirmed memory or trigger search", () => {
+  const memory = emptyMemory();
+  memory.location = { value: "Sinop", source: "user_explicit", inboundId: randomUUID() };
+  const result = controlContextualProposal("talvez encanador", randomUUID(), {
+    ...proposal({ services: [{ key: "encanador", evidence: "encanador" }] }),
+    speech_act: "unclear", natural_reply: "Pode me explicar melhor o que precisa?", confidence: "low",
+  }, memory, catalog, null);
+  assert.equal(result.kind, "clarify");
+  assert.deepEqual(result.memory, memory);
+  assert.equal(result.naturalReply, undefined);
 });
 test("B2 natural questions cannot contain financial, private or completed-action claims", () => {
   assert.equal(validateContextualQuestion({ question: "Em qual cidade você precisa resolver esse vazamento?" }), "Em qual cidade você precisa resolver esse vazamento?");

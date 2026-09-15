@@ -1,17 +1,26 @@
 import { z } from "zod";
 
-export const CONTEXTUAL_VERSION = "b2.2";
+export const CONTEXTUAL_VERSION = "b2.3";
 export const CONTEXTUAL_POLICY = Object.freeze({ timeoutMs: 6_000, maxOutputTokens: 900, maxCatalog: 100, maxCallsPerHour: 20, maxGlobalCallsPerHour: 1_000, leaseSeconds: 30 });
 const speechActSchema = z.enum(["request", "information", "hypothetical", "negated", "unclear"]);
+const confidenceSchema = z.enum(["high", "medium", "low"]);
+const naturalReplySchema = z.string().trim().min(2).max(320).nullable();
 export const contextualProposalSchema = z.object({
-  intent: z.enum(["search", "correct_location", "correct_service", "catalog_info", "selection", "faq_cost", "out_of_scope", "clarify"]),
+  intent: z.enum(["greeting", "small_talk", "search", "correct_location", "correct_service", "catalog_info", "selection", "faq_cost", "out_of_scope", "clarify"]),
   // Optional only for persisted b2.1 proposals. New model responses require this field.
   speech_act: speechActSchema.optional(),
   services: z.array(z.object({ key: z.string().max(80), evidence: z.string().min(1).max(160) }).strict()).max(3),
   location: z.object({ text: z.string().min(1).max(160), evidence: z.string().min(1).max(160) }).strict().nullable(),
+  // Optional only for proposals persisted before the conversation orchestrator.
+  natural_reply: naturalReplySchema.optional(),
+  confidence: confidenceSchema.optional(),
   uncertain: z.boolean(),
 }).strict();
-export const contextualInterpretationSchema = contextualProposalSchema.extend({ speech_act: speechActSchema });
+export const contextualInterpretationSchema = contextualProposalSchema.extend({
+  speech_act: speechActSchema,
+  natural_reply: naturalReplySchema,
+  confidence: confidenceSchema,
+});
 export type ContextualProposal = z.infer<typeof contextualProposalSchema>;
 const slotSchema = z.object({ value: z.string().min(1).max(200), source: z.enum(["user_explicit", "user_confirmation", "domain"]), inboundId: z.string().uuid() }).strict();
 export const contextualMemorySchema = z.object({
@@ -47,7 +56,21 @@ export function validateContextualQuestion(value: unknown, context?: ContextualR
 export interface ContextualProvider { readonly model: string; interpret(input: ContextualInput): Promise<unknown>; composeQuestion?(input: ContextualReplyContext): Promise<unknown> }
 export const normalizeContextualText = (value: string) => value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
-export type ContextualDecision = { kind: "delegate" | "search" | "clarify" | "faq_cost" | "catalog_info" | "out_of_scope"; memory: ContextualMemory; correction: boolean; catalogServices?: string[] };
+export type ContextualDecision = { kind: "delegate" | "search" | "clarify" | "greeting" | "small_talk" | "faq_cost" | "catalog_info" | "out_of_scope"; memory: ContextualMemory; correction: boolean; catalogServices?: string[]; naturalReply?: string };
+
+export function validateNaturalReply(value: unknown): string {
+  const text = z.string().trim().min(2).max(320).parse(value);
+  const normalized = normalizeContextualText(text);
+  // Model-written text is limited to non-transactional conversation. Anything
+  // resembling private data, a quote, a professional fact or a completed action
+  // is discarded in favor of deterministic copy.
+  if (/https?:\/\/|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\+?\d[\d\s().-]{7,}\d/iu.test(text)
+    || /\b(?:preco|valor|custa|custo|reais|gratis|gratuito|telefone|whatsapp|contato|profissional|profissionais|distancia|quilometros?|disponivel|agenda|prazo|pagamento|pix|senha|token|api|banco de dados)\b/u.test(normalized)
+    || /\b(?:encontrei|selecionei|escolhi|enviei|avisei|agendei|reservei|confirmei|cadastrei|liberei|compartilhei)\b/u.test(normalized)) {
+    throw new Error("contextual_natural_reply_invalid");
+  }
+  return text;
+}
 
 // Proposals cannot authorize selection, consent, ranking or disclosure. Those use the original message.
 export function controlContextualProposal(raw: string, inboundId: string, value: unknown, memory: ContextualMemory, catalog: ContextualCatalogItem[], explicitService: string | null): ContextualDecision {
@@ -56,8 +79,17 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   const text = normalizeContextualText(raw);
   const evidenceExists = (evidence: string) => (` ${text} `).includes(` ${normalizeContextualText(evidence)} `);
   if (proposal.intent === "selection") return { kind: "delegate", memory, correction: false };
-  if (proposal.intent === "faq_cost" || proposal.intent === "out_of_scope") return { kind: proposal.intent, memory, correction: false };
-  if (proposal.intent === "clarify" || proposal.uncertain) return { kind: "clarify", memory, correction: false };
+  const safeNaturalReply = () => {
+    if (!proposal.natural_reply) return undefined;
+    try { return validateNaturalReply(proposal.natural_reply); } catch { return undefined; }
+  };
+  if (proposal.confidence === "low") return { kind: "clarify", memory, correction: false };
+  if (proposal.intent === "greeting" || proposal.intent === "small_talk") {
+    return { kind: proposal.intent, memory, correction: false, naturalReply: safeNaturalReply() };
+  }
+  if (proposal.intent === "faq_cost") return { kind: proposal.intent, memory, correction: false };
+  if (proposal.intent === "out_of_scope") return { kind: proposal.intent, memory, correction: false, naturalReply: safeNaturalReply() };
+  if (proposal.intent === "clarify" || proposal.uncertain) return { kind: "clarify", memory, correction: false, naturalReply: safeNaturalReply() };
   if (proposal.speech_act && proposal.speech_act !== "request" && proposal.speech_act !== "information") return { kind: "clarify", memory, correction: false };
   // A negated defect ("a descarga não para") is not a refusal ("não quero").
   // These are defense-in-depth checks, not the primary intent classifier or a phrase allowlist.

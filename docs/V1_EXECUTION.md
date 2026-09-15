@@ -122,8 +122,9 @@ Release manual, configuração n8n, incidente/rollback e ensaio de backup estão
 [OPERATIONS.md](OPERATIONS.md) e [workflows/n8n/README.md](../workflows/n8n/README.md).
 Para B2/Inbox, conferir e aplicar todas as migrations pendentes, incluindo 017, 018, 019 e 020
 quando ausentes, antes da API; não supor que o ambiente já aplicou a 017.
-Variáveis já introduzidas pela B2: `CONTEXTUAL_CONVERSATION_ENABLED=false` e
-`CONTEXTUAL_CONVERSATION_MODEL` (sem default); `OPENAI_API_KEY` é reutilizada.
+Variáveis canônicas da B2: `CONVERSATION_AI_ENABLED=false` e
+`OPENAI_CONVERSATION_MODEL` (sem default); `OPENAI_API_KEY` é reutilizada.
+Os nomes `CONTEXTUAL_CONVERSATION_*` permanecem aliases temporários.
 Publicar primeiro com B2 desligada, avaliar/homologar e só ativar mediante decisão
 manual. Nenhuma dessas ações em produção foi executada.
 O checkpoint Inbox não acrescenta variáveis nem dependências. Pausar ingresso e

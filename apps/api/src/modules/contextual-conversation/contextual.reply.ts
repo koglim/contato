@@ -5,6 +5,8 @@ export const CONTEXTUAL_COST_POLICY = "Usar o ContatoCerto é gratuito para o cl
 export const CONTEXTUAL_FALLBACK = "Não consegui entender sua mensagem com segurança agora. Sua busca foi preservada. Pode me dizer o que precisa ou o que quer corrigir?";
 export const CONTEXTUAL_CLARIFY = "Pode esclarecer o que você quer mudar ou qual opção quer escolher?";
 export const CONTEXTUAL_SCOPE = "Posso ajudar você a encontrar e escolher profissionais de serviços na sua região. Sua busca continua salva. Qual atendimento você precisa?";
+export const CONTEXTUAL_GREETING = "Olá! Me conta como posso ajudar. Qual serviço você procura para sua casa ou empresa?";
+export const CONTEXTUAL_SMALL_TALK = "Estou por aqui para ajudar você a encontrar um profissional. Qual serviço está precisando?";
 
 // Shared by runtime and evaluation. Only the domain/controller decides what may be asked.
 export function contextualQuestionContext(decision: ContextualDecision, serviceResolved: boolean, locationResolved: boolean): ContextualReplyContext | null {

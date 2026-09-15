@@ -111,7 +111,9 @@ iniciais e significados estão em [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
    ausência de duplicação lógica. Ativar somente com autorização.
 
 Não há nova variável API/web neste checkpoint de Inbox. Manter
-`CONTEXTUAL_CONVERSATION_ENABLED=false`; modelo/chave B2 conservam seus contratos.
+`CONVERSATION_AI_ENABLED=false`; `OPENAI_CONVERSATION_MODEL` e a chave B2
+conservam seus contratos. Os nomes `CONTEXTUAL_CONVERSATION_*` são apenas aliases
+temporários de compatibilidade.
 Parâmetros não secretos e credenciais n8n estão
 listados no README dos workflows. A lease existente precisa comportar os timeouts.
 

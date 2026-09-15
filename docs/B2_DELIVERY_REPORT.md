@@ -147,8 +147,10 @@ em [evaluations/b2/README.md](../apps/api/evaluations/b2/README.md).
 
 ## Configuração, migration e publicação futura
 
-- Nova `CONTEXTUAL_CONVERSATION_ENABLED=false` por padrão.
-- Nova `CONTEXTUAL_CONVERSATION_MODEL`, sem default; obrigatória ao habilitar.
+- `CONVERSATION_AI_ENABLED=false` por padrão (alias legado
+  `CONTEXTUAL_CONVERSATION_ENABLED` temporariamente aceito).
+- `OPENAI_CONVERSATION_MODEL`, sem default, obrigatória ao habilitar (alias
+  legado `CONTEXTUAL_CONVERSATION_MODEL` temporariamente aceito).
 - `OPENAI_API_KEY` existente reutilizada, obrigatória ao habilitar. Nenhum segredo
   foi incluído; nenhuma variável do EasyPanel foi alterada.
 - Migration `018_add_contextual_conversation`: memória, turnos, orçamento e
@@ -160,7 +162,7 @@ em [evaluations/b2/README.md](../apps/api/evaluations/b2/README.md).
 - Fallback operacional: desligar flag conserva replay já persistido; não desfaz
   dados. Preferir correção progressiva se o down estiver protegido.
 
-Limites em código, política b2.2: 6 s por chamada, sem retry SDK; até duas chamadas
+Limites em código, política b2.3: 6 s por chamada, sem retry SDK; até duas chamadas
 por turno; 900 tokens de interpretação e 300 de composição; 20 chamadas por
 cliente/hora e 1.000 globais/hora; lease 30 s; pausa local após cinco falhas.
 Isso não substitui teto financeiro, retenção de quotas ou monitoramento real.
