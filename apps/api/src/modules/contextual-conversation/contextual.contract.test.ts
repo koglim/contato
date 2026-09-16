@@ -87,7 +87,7 @@ test("B2 accepts a domain-confirmed service alias and canonicalizes an explicit 
     proposal({
       intent: "search",
       speech_act: "request",
-      services: [{ key: "eletricista", evidence: "tomada" }],
+      services: [{ key: "tomada", evidence: "tomada" }],
       location: { text: "aqui em Cuiabá", evidence: "aqui em Cuiabá" },
     }),
     emptyMemory(),

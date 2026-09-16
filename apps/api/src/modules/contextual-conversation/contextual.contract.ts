@@ -96,12 +96,16 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   // A negated defect ("a descarga não para") is not a refusal ("não quero").
   // These are defense-in-depth checks, not the primary intent classifier or a phrase allowlist.
   if (/\b(?:se precisar|talvez|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(text)) return { kind: "clarify", memory, correction: false };
-  if (proposal.services.some(item => !catalog.some(c => c.key === item.key) || !evidenceExists(item.evidence))
+  const proposedCatalogServices = proposal.services.map(item => catalog.find(c => c.key === item.key)
+    ?? (explicitService ? catalog.find(c => c.name === explicitService) : undefined));
+  if (proposal.services.some(item => !evidenceExists(item.evidence))
+    || (!explicitService && proposedCatalogServices.some(item => !item))
     || (proposal.location && (!evidenceExists(proposal.location.evidence) || (!explicitLocation && !evidenceExists(proposal.location.text))))) {
     return { kind: "clarify", memory, correction: false };
   }
   if (proposal.intent === "catalog_info") {
-    return { kind: "catalog_info", memory, correction: false, catalogServices: [...new Set(proposal.services.map(item => catalog.find(c => c.key === item.key)!.name))] };
+    if (proposedCatalogServices.some(item => !item)) return { kind: "clarify", memory, correction: false };
+    return { kind: "catalog_info", memory, correction: false, catalogServices: [...new Set(proposedCatalogServices.map(item => item!.name))] };
   }
   // Informational questions never grant permission for a new search, even if service/city are mentioned.
   if (proposal.speech_act === "information") return { kind: "clarify", memory, correction: false };

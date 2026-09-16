@@ -7,6 +7,7 @@ import { PostgresCatalogRepository } from "../catalog/catalog.repository.js";
 import { PostgresServiceResolutionRepository } from "../service-resolution/service-resolution.repository.js";
 import type { ServiceResolutionRepository } from "../service-resolution/service-resolution.types.js";
 import type { LocationResolutionService } from "../location-resolution/location-resolution.types.js";
+import { extractExplicitLocation } from "../message-interpretation/message-interpretation.location.js";
 import type { ChannelInboundMessageRecord, ChannelInboxOutcome } from "../channel-inbox/channel-inbox.types.js";
 import { PostgresChannelInboundMessageRepository } from "../channel-inbox/channel-inbox.repository.js";
 import { PostgresSearchConversationRepository } from "../search-conversations/search-conversation.repository.js";
@@ -64,6 +65,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
         model: this.provider.model,
         stage,
         ...((stage !== "interpretation" && stage !== "composition") || failure.statusHttp === undefined ? {} : { statusHttp: failure.statusHttp }),
+        ...(failure.structuredOutput === undefined ? {} : { structuredOutput: failure.structuredOutput }),
       });
     } catch {
       // Observability must never replace the deterministic fallback.
@@ -98,9 +100,22 @@ export class ContextualConversationService implements ContextualInboxHandler {
         let providerAttempted = false;
         let fallbackStage: ConversationAIStage = "catalog";
         let fallbackStartedAt = Date.now();
+        let catalog: Array<{ key: string; name: string; description: string | null }> = [];
+        let explicitService: string | null = null;
+        let explicitServiceKey: string | null = null;
+        let explicitServiceEvidence: string | null = null;
         try {
-          const catalog = (await this.catalog.listServices({})).slice(0, CONTEXTUAL_POLICY.maxCatalog)
+          catalog = (await this.catalog.listServices({})).slice(0, CONTEXTUAL_POLICY.maxCatalog)
             .map(item => ({ key: item.slug, name: item.name.slice(0, 200), description: item.description?.slice(0, 200) ?? null }));
+          fallbackStage = "service_resolution";
+          fallbackStartedAt = Date.now();
+          const explicit = await this.services.resolve({ text: record.rawText });
+          const explicitMatch = explicit.status === "resolved" && explicit.match && explicit.match.method !== "fuzzy"
+            && (` ${normalizeContextualText(record.rawText)} `).includes(` ${normalizeContextualText(explicit.match.matched_term)} `)
+            ? explicit.match : null;
+          explicitService = explicitMatch?.service.name ?? null;
+          explicitServiceKey = explicitMatch?.service.slug ?? null;
+          explicitServiceEvidence = explicitMatch?.matched_term ?? null;
           let proposal = snapshot.proposal;
           if (!proposal) {
             fallbackStage = "interpretation";
@@ -122,22 +137,37 @@ export class ContextualConversationService implements ContextualInboxHandler {
             fallbackStartedAt = Date.now();
             await this.repository.saveProposal(record, snapshot, proposal);
           }
-          fallbackStage = "service_resolution";
-          fallbackStartedAt = Date.now();
-          const explicit = await this.services.resolve({ text: record.rawText });
-          // Exact catalogue names and aliases are domain-confirmed facts. Fuzzy
-          // guesses and model-only semantic mappings remain hypotheses.
-          const explicitService = explicit.status === "resolved" && explicit.match && explicit.match.method !== "fuzzy"
-            && (` ${normalizeContextualText(record.rawText)} `).includes(` ${normalizeContextualText(explicit.match.matched_term)} `)
-            ? explicit.match.service.name : null;
           fallbackStage = "controller";
           fallbackStartedAt = Date.now();
           decision = controlContextualProposal(record.rawText, record.id, proposal, snapshot.memory, catalog, explicitService);
           this.failures = 0;
         } catch (error) {
           if (error instanceof ContextualBusyError || error instanceof InboxFenceError || error instanceof InboxPermanentError) throw error;
-          fallback = true;
           this.reportFallback(error, fallbackStartedAt, fallbackStage);
+          const failure = classifyConversationAIError(error);
+          const explicitLocation = extractExplicitLocation(record.rawText)?.text ?? null;
+          const unsafeRecovery = /\?|\b(?:talvez|se precisar|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(normalizeContextualText(record.rawText));
+          const recoverable = fallbackStage === "interpretation" && failure.reason === "invalid_structured_output"
+            && explicitService && explicitServiceKey && explicitServiceEvidence && explicitLocation && !unsafeRecovery
+            && catalog.some(item => item.key === explicitServiceKey && item.name === explicitService);
+          if (recoverable) {
+            try {
+              const proposal = contextualProposalSchema.parse({
+                intent: "search", speech_act: "request",
+                services: [{ key: explicitServiceKey, evidence: explicitServiceEvidence }],
+                location: { text: explicitLocation, evidence: explicitLocation },
+                natural_reply: null, confidence: "high", uncertain: false,
+              });
+              await this.repository.saveProposal(record, snapshot, proposal);
+              decision = controlContextualProposal(record.rawText, record.id, proposal, snapshot.memory, catalog, explicitService);
+              fallback = decision.kind !== "search";
+            } catch (recoveryError) {
+              fallback = true;
+              this.reportFallback(recoveryError, Date.now(), "proposal_persistence");
+            }
+          } else {
+            fallback = true;
+          }
           if (providerAttempted && ++this.failures >= 5) this.circuitUntil = Date.now() + 60_000;
         }
       }

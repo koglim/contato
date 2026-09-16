@@ -252,6 +252,15 @@ export function buildApp({
           model: event.model,
           stage: event.stage,
           ...(event.statusHttp === undefined ? {} : { openai_status_code: event.statusHttp }),
+          ...(event.structuredOutput === undefined ? {} : {
+            parser_source: event.structuredOutput.parserSource,
+            response_status: event.structuredOutput.responseStatus,
+            incomplete: event.structuredOutput.incomplete,
+            refusal: event.structuredOutput.refusal,
+            output_types: event.structuredOutput.outputTypes,
+            content_types: event.structuredOutput.contentTypes,
+            schema_version: event.structuredOutput.schemaVersion,
+          }),
         }, "Conversation AI used deterministic fallback"),
       });
     })(),

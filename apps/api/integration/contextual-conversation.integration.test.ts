@@ -9,7 +9,7 @@ import { type ContextualProvider, type ContextualProposal } from "../src/modules
 import { PostgresChannelInboundMessageRepository } from "../src/modules/channel-inbox/channel-inbox.repository.js";
 import { rollbackThrough } from "./rollback-helper.js";
 import type { LocationResolutionService } from "../src/modules/location-resolution/location-resolution.types.js";
-import type { ConversationAIFallbackEvent } from "../src/modules/contextual-conversation/contextual.provider.js";
+import { ConversationAIProviderError, type ConversationAIFallbackEvent } from "../src/modules/contextual-conversation/contextual.provider.js";
 
 after(closeDatabaseConnection);
 const headers = { "x-internal-key": "b2-integration" };
@@ -442,6 +442,29 @@ test("conversation AI extracts a catalog alias and city, then delegates facts to
     assert.doesNotMatch(result.json().reply_text, /telefone|\+55/u);
     assert.equal(f.geoCalls(), 1);
     assert.equal(f.fallbackEvents().length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("invalid AI interpretation still uses explicit catalog alias and city through deterministic search", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => { throw new ConversationAIProviderError("invalid_structured_output", undefined, undefined, {
+      parserSource: "output_text", responseStatus: "incomplete", incomplete: true, refusal: false,
+      outputTypes: ["reasoning", "message"], contentTypes: ["output_text"], schemaVersion: "b2.4",
+    }); });
+    const result = await f.receive("Minha tomada está dando curto aqui em Cuiabá.");
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().result.status, "matched");
+    assert.equal((await f.state()).memory.service.value, f.name);
+    assert.equal((await f.state()).memory.location.value, "Cuiabá");
+    assert.match(result.json().reply_text, /Profissional 1/u);
+    assert.doesNotMatch(result.json().reply_text, /telefone|\+55/u);
+    assert.equal(f.geoCalls(), 1);
+    assert.equal(f.fallbackEvents().length, 1);
+    assert.deepEqual(f.fallbackEvents()[0]?.structuredOutput, {
+      parserSource: "output_text", responseStatus: "incomplete", incomplete: true, refusal: false,
+      outputTypes: ["reasoning", "message"], contentTypes: ["output_text"], schemaVersion: "b2.4",
+    });
   } finally { await f.cleanup(); }
 });
 
