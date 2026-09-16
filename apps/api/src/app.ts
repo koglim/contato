@@ -184,6 +184,7 @@ export function buildApp({
   });
   const resolvedMessageInterpretationFallbackConfig =
     messageInterpretationFallbackConfig ?? readMessageInterpretationFallbackConfig();
+  const resolvedContextualConfig = readContextualConfig();
   const resolvedServiceResolutionRepository = serviceResolutionRepository ?? new PostgresServiceResolutionRepository();
   const resolvedMatchingRepository = matchingRepository ?? new PostgresMatchingRepository();
   const resolvedLocationResolutionService = locationResolutionService ?? createLazyLocationResolutionService(geocodingProvider);
@@ -238,8 +239,21 @@ export function buildApp({
     resolvedChannelOutboundMessageRepository,
     professionalOpportunityService ?? (channelInboundMessageRepository ? undefined : new ProfessionalOpportunityService()),
     contextualConversation ?? (() => {
-      const config = readContextualConfig();
-      return config.enabled ? new ContextualConversationService(new OpenAIContextualProvider(config.model, config.apiKey), resolvedLocationResolutionService) : undefined;
+      if (!resolvedContextualConfig.enabled) return undefined;
+      const provider = new OpenAIContextualProvider(resolvedContextualConfig.model, resolvedContextualConfig.apiKey, {
+        timeoutMs: resolvedContextualConfig.timeoutMs,
+      });
+      return new ContextualConversationService(provider, resolvedLocationResolutionService, {
+        timeoutMs: resolvedContextualConfig.timeoutMs,
+        onFallback: event => app.log.warn({
+          code: "conversation_ai_fallback",
+          fallback_reason: event.reason,
+          duration_ms: event.durationMs,
+          model: event.model,
+          stage: event.stage,
+          ...(event.statusHttp === undefined ? {} : { openai_status_code: event.statusHttp }),
+        }, "Conversation AI used deterministic fallback"),
+      });
     })(),
   );
 
@@ -290,10 +304,10 @@ export function buildApp({
   app.register(channelInboxRoutes, { prefix: "/internal/channel/inbound", service: resolvedChannelInboxService, internalApiKey });
   app.register(inboxRecoveryRoutes, { prefix: "/internal/channel/inbound", internalApiKey,
     service: new InboxRecoveryService(resolvedChannelInboxService, (channelInboxConfig ?? readChannelInboxConfig()).processingLeaseSeconds,
-      Boolean(contextualConversation) || readContextualConfig().enabled) });
+      Boolean(contextualConversation) || resolvedContextualConfig.enabled) });
   app.register(channelOutboundRoutes, { prefix: "/internal/channel/outbound", service: resolvedChannelOutboundService, internalApiKey });
   app.register(channelTransportRoutes,{prefix:'/internal/channel',internalApiKey,
-    media:new ChannelMediaService(Boolean(contextualConversation)||readContextualConfig().enabled),admin:new OutboundDispositionService()});
+    media:new ChannelMediaService(Boolean(contextualConversation)||resolvedContextualConfig.enabled),admin:new OutboundDispositionService()});
 
   return app;
 }

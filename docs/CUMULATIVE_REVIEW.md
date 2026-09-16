@@ -117,6 +117,7 @@ Valores abaixo documentam o contrato atual, não alteram o ambiente instalado.
 | `CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` | 60; não reduzir abaixo do orçamento de entrega de 55s |
 | `CONVERSATION_AI_ENABLED` | **false**; aliases legados `CONTEXTUAL_CONVERSATION_*` continuam aceitos temporariamente |
 | `OPENAI_CONVERSATION_MODEL` | Vazio enquanto desligada; escolha depende de avaliação autorizada |
+| `OPENAI_CONVERSATION_TIMEOUT_MS` | 20000; aplicado ao SDK e ao watchdog do orquestrador |
 
 B2 false não desliga fallback legado ou transcrição do n8n caso estes sejam
 ativados separadamente. `NODE_ENV=production` já pertence às imagens de produção.

@@ -112,7 +112,12 @@ iniciais e significados estão em [INBOX_RECOVERY.md](INBOX_RECOVERY.md).
 
 Não há nova variável API/web neste checkpoint de Inbox. Manter
 `CONVERSATION_AI_ENABLED=false`; `OPENAI_CONVERSATION_MODEL` e a chave B2
-conservam seus contratos. Os nomes `CONTEXTUAL_CONVERSATION_*` são apenas aliases
+conservam seus contratos. `OPENAI_CONVERSATION_TIMEOUT_MS` controla tanto o
+timeout do SDK quanto o watchdog do orquestrador e usa `20000` ms por padrão.
+Timeout, erro HTTP/rede e saída estruturada inválida mantêm o fallback
+determinístico. O log `conversation_ai_fallback` registra somente categoria,
+duração, modelo, estágio e status HTTP quando disponível; nunca prompt, mensagem
+do cliente ou chave. Os nomes `CONTEXTUAL_CONVERSATION_*` são apenas aliases
 temporários de compatibilidade.
 Parâmetros não secretos e credenciais n8n estão
 listados no README dos workflows. A lease existente precisa comportar os timeouts.

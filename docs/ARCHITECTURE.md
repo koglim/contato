@@ -392,6 +392,10 @@ seleção retorna aos resolvers, geocoder, matching e transações existentes. A
 não recebe ferramentas nem autoridade para escolher profissional, expor contato
 ou alterar estado. A Outbox persiste o texto final, portanto retries e replay não
 voltam ao modelo. A flag canônica é `CONVERSATION_AI_ENABLED` e permanece false.
+`OPENAI_CONVERSATION_TIMEOUT_MS` tem padrão de 20 segundos e alimenta o limite do
+SDK e o watchdog externo. Fallbacks são classificados sem PII como timeout, erro
+do provider ou saída estruturada inválida; status HTTP é registrado quando o SDK
+o disponibiliza.
 # Checkpoint 019 — recuperação da Inbox
 
 Recuperação autenticada com claim atômico, ordem `(created_at,id)` por telefone,

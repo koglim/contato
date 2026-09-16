@@ -9,6 +9,7 @@ import { type ContextualProvider, type ContextualProposal } from "../src/modules
 import { PostgresChannelInboundMessageRepository } from "../src/modules/channel-inbox/channel-inbox.repository.js";
 import { rollbackThrough } from "./rollback-helper.js";
 import type { LocationResolutionService } from "../src/modules/location-resolution/location-resolution.types.js";
+import type { ConversationAIFallbackEvent } from "../src/modules/contextual-conversation/contextual.provider.js";
 
 after(closeDatabaseConnection);
 const headers = { "x-internal-key": "b2-integration" };
@@ -55,6 +56,10 @@ test("B2 budget exhaustion and model timeout preserve slots with a useful fallba
     f.set(() => new Promise(() => {}));
     const timeout = await f.receive("Ainda preciso desse atendimento"); assert.equal(timeout.statusCode, 200, timeout.body);
     assert.equal(timeout.json().result.status, "fallback"); assert.deepEqual((await f.state()).memory, before.memory);
+    assert.equal(f.fallbackEvents().length, 1);
+    assert.deepEqual({ reason: f.fallbackEvents()[0]?.reason, model: f.fallbackEvents()[0]?.model, stage: f.fallbackEvents()[0]?.stage },
+      { reason: "timeout", model: "unit-fake-no-model-call", stage: "interpretation" });
+    assert.ok((f.fallbackEvents()[0]?.durationMs ?? 0) >= 20);
   } finally { await f.cleanup(); }
 });
 
@@ -282,6 +287,7 @@ async function fixture() {
       VALUES ($1,'Sinop','MT','BR',ST_SetSRID(ST_MakePoint(-55.5,-11.86),4326)::geography,10000)`, [id]);
   }
   let calls = 0, geoCalls = 0;
+  const fallbackEvents: ConversationAIFallbackEvent[] = [];
   let next: (text: string) => Promise<unknown> = async () => basic();
   let compose: ContextualProvider["composeQuestion"];
   let compositions = 0;
@@ -291,7 +297,10 @@ async function fixture() {
     return { status: "resolved", query: input.query, country_code: "BR", provider: "fake", candidates: [],
       match: { label: input.query, latitude: -11.86, longitude: -55.5, city: input.query, state: "MT", country_code: "BR", neighborhood: null, confidence: 1, layer: "locality" } };
   };
-  const contextual = new ContextualConversationService(provider, { async resolve(input) { geoCalls++; return resolveLocation(input); } });
+  const contextual = new ContextualConversationService(provider, { async resolve(input) { geoCalls++; return resolveLocation(input); } }, {
+    timeoutMs: 25,
+    onFallback: event => fallbackEvents.push(event),
+  });
   const app = buildApp({ internalApiKey: "b2-integration", contextualConversation: contextual });
   const receive = (text: string, id = randomUUID()) => app.inject({ method: "POST", url: "/internal/channel/inbound/messages", headers,
     payload: { provider: "b2-test", provider_message_id: id, phone_e164: phone, raw_text: text } });
@@ -334,7 +343,8 @@ async function fixture() {
     return { id, name };
   };
   return { name, phone, serviceId, app, receive, sent, state, cleanup, addService, calls: () => calls, geoCalls: () => geoCalls, compositions: () => compositions,
-    set: (fn: typeof next) => { next = fn; }, setCompose: (fn: NonNullable<typeof compose>) => { compose = fn; }, setGeo: (fn: typeof resolveLocation) => { resolveLocation = fn; } };
+    fallbackEvents: () => fallbackEvents, set: (fn: typeof next) => { next = fn; }, setCompose: (fn: NonNullable<typeof compose>) => { compose = fn; },
+    setGeo: (fn: typeof resolveLocation) => { resolveLocation = fn; } };
 }
 
 test("B2 accepts city before service and no_matches keeps a valid active conversation", async () => {
@@ -393,6 +403,7 @@ test("conversation AI replies naturally to greetings, persists the reply and nev
     assert.equal((await f.state()).memory.service, null);
     assert.equal((await f.state()).memory.location, null);
     assert.equal(f.geoCalls(), 0);
+    assert.equal(f.fallbackEvents().length, 0);
     const calls = f.calls();
     const replay = await f.receive("oi", id);
     assert.equal(replay.json().duplicate, true);

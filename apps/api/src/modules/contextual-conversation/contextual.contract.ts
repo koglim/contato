@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const CONTEXTUAL_VERSION = "b2.3";
-export const CONTEXTUAL_POLICY = Object.freeze({ timeoutMs: 6_000, maxOutputTokens: 900, maxCatalog: 100, maxCallsPerHour: 20, maxGlobalCallsPerHour: 1_000, leaseSeconds: 30 });
+export const CONTEXTUAL_POLICY = Object.freeze({ maxOutputTokens: 900, maxCatalog: 100, maxCallsPerHour: 20, maxGlobalCallsPerHour: 1_000, leaseSeconds: 30 });
 const speechActSchema = z.enum(["request", "information", "hypothetical", "negated", "unclear"]);
 const confidenceSchema = z.enum(["high", "medium", "low"]);
 const naturalReplySchema = z.string().trim().min(2).max(320).nullable();

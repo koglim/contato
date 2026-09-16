@@ -79,12 +79,16 @@ test("B2 structured hypothesis and refusal preserve context even without keyword
   assert.equal(run("Pode mandar meu contato?", { ...proposal({ intent: "selection" }), speech_act: "request" }).kind, "delegate");
 });
 test("B2 disabled by default and requires explicit configuration", () => {
-  assert.equal(readContextualConfig({}).enabled, false);
+  assert.deepEqual(readContextualConfig({}), { enabled: false, model: "", apiKey: "", timeoutMs: 20_000 });
   assert.throws(() => readContextualConfig({ CONVERSATION_AI_ENABLED: "yes" }));
   assert.throws(() => readContextualConfig({ CONVERSATION_AI_ENABLED: "true" }));
   assert.deepEqual(readContextualConfig({ CONVERSATION_AI_ENABLED: "true", OPENAI_CONVERSATION_MODEL: "model", OPENAI_API_KEY: "secret" }), {
-    enabled: true, model: "model", apiKey: "secret",
+    enabled: true, model: "model", apiKey: "secret", timeoutMs: 20_000,
   });
+  assert.equal(readContextualConfig({ OPENAI_CONVERSATION_TIMEOUT_MS: "35000" }).timeoutMs, 35_000);
+  for (const timeout of ["0", "-1", "1.5", "invalid", " "]) {
+    assert.throws(() => readContextualConfig({ OPENAI_CONVERSATION_TIMEOUT_MS: timeout }), /OPENAI_CONVERSATION_TIMEOUT_MS/u);
+  }
   assert.equal(readContextualConfig({ CONTEXTUAL_CONVERSATION_ENABLED: "true", CONTEXTUAL_CONVERSATION_MODEL: "legacy", OPENAI_API_KEY: "secret" }).model, "legacy");
   assert.equal(readContextualConfig({ CONVERSATION_AI_ENABLED: "false", CONTEXTUAL_CONVERSATION_ENABLED: "true", CONTEXTUAL_CONVERSATION_MODEL: "legacy", OPENAI_API_KEY: "secret" }).enabled, false);
 });

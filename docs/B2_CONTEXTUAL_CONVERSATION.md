@@ -81,8 +81,9 @@ monetário: preço/modelo e orçamento financeiro precisam de decisão antes de 
 Quotas antigas ainda exigem política operacional de retenção.
 
 Variáveis canônicas: `CONVERSATION_AI_ENABLED` (default false),
-`OPENAI_CONVERSATION_MODEL` (sem modelo escolhido por conveniência) e
-`OPENAI_API_KEY`. Os aliases legados `CONTEXTUAL_CONVERSATION_ENABLED` e
+`OPENAI_CONVERSATION_MODEL` (sem modelo escolhido por conveniência),
+`OPENAI_CONVERSATION_TIMEOUT_MS` (default `20000` ms) e `OPENAI_API_KEY`.
+O mesmo timeout limita o cliente OpenAI e o watchdog do orquestrador. Os aliases legados `CONTEXTUAL_CONVERSATION_ENABLED` e
 `CONTEXTUAL_CONVERSATION_MODEL` continuam aceitos temporariamente para não
 quebrar uma configuração em migração; quando definidos, os nomes canônicos têm
 prioridade. Não adicionar chave ao Git. Ordem futura, sempre manual:

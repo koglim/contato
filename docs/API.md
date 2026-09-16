@@ -690,13 +690,16 @@ claim/sent/failed e entrega compartilhada permanecem iguais. Nenhuma memória ou
 evidência da IA é incluída. Replay usa a Outbox mesmo com a B2 desligada.
 Veja [B2_CONTEXTUAL_CONVERSATION.md](B2_CONTEXTUAL_CONVERSATION.md).
 
-A ativação usa `CONVERSATION_AI_ENABLED=true`, `OPENAI_CONVERSATION_MODEL` e
-`OPENAI_API_KEY`. A API usa Responses/Structured Outputs sem ferramentas e com
+A ativação usa `CONVERSATION_AI_ENABLED=true`, `OPENAI_CONVERSATION_MODEL`,
+`OPENAI_CONVERSATION_TIMEOUT_MS` (padrão `20000`) e `OPENAI_API_KEY`. A API usa Responses/Structured Outputs sem ferramentas e com
 `store:false`. Saudações, conversa breve, esclarecimentos e fora de escopo podem
 usar uma resposta natural curta depois de validação; serviço, cidade e seleção
 sempre retornam às regras determinísticas. Timeout, indisponibilidade, saída
 inválida ou confiança baixa preservam o estado e usam resposta determinística.
 O texto final é gravado na Outbox e o replay nunca chama o modelo novamente.
+Falhas do modelo geram log estruturado sem PII com `fallback_reason` igual a
+`timeout`, `provider_error` ou `invalid_structured_output`, duração, modelo,
+estágio e o status HTTP da OpenAI quando existente.
 # Recuperação operacional da Inbox (019)
 
 `POST /internal/channel/inbound/next/process`: autenticação `X-Internal-Key`,

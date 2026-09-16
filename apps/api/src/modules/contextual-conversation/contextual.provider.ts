@@ -1,5 +1,12 @@
-import OpenAI, { type ClientOptions } from "openai";
+import OpenAI, {
+  APIConnectionTimeoutError,
+  APIError,
+  type ClientOptions,
+} from "openai";
+import { ContentFilterFinishReasonError, LengthFinishReasonError } from "openai/error";
 import { zodTextFormat } from "openai/helpers/zod";
+import { ZodError } from "zod";
+import { DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS } from "../../config/contextual-conversation.js";
 import { CONTEXTUAL_POLICY, contextualInterpretationSchema, contextualCompositionSchema, type ContextualInput, type ContextualProvider, type ContextualReplyContext } from "./contextual.contract.js";
 
 export const CONTEXTUAL_INSTRUCTIONS = `Você interpreta mensagens do marketplace brasileiro ContatoCerto. Não executa ações e não conversa sobre outros assuntos.
@@ -26,42 +33,113 @@ Não cite profissionais, contatos, preços, disponibilidade, ações executadas,
 Não escolha um serviço nem uma cidade pelo cliente. Em service_confirmation cite os nomes de serviços fornecidos, sem acrescentar outros.
 Não use saudações longas nem múltiplas frases. Termine com interrogação.`;
 export type ContextualUsage = { stage: "interpretation" | "composition"; model: string; input_tokens: number; output_tokens: number; duration_ms: number };
+export type ConversationAIFallbackReason = "timeout" | "provider_error" | "invalid_structured_output";
+export type ConversationAIStage = "interpretation" | "composition";
+export type ConversationAIFallbackEvent = {
+  reason: ConversationAIFallbackReason;
+  durationMs: number;
+  model: string;
+  stage: ConversationAIStage;
+  statusHttp?: number;
+};
+
+export class ConversationAIProviderError extends Error {
+  constructor(readonly reason: ConversationAIFallbackReason, readonly statusHttp?: number, options?: ErrorOptions) {
+    super(`Conversation AI provider failed: ${reason}`, options);
+    this.name = "ConversationAIProviderError";
+  }
+}
+
 type OpenAIClientFactory = (options: ClientOptions) => OpenAI;
+type OpenAIContextualProviderOptions = {
+  timeoutMs?: number;
+  observeUsage?: (usage: ContextualUsage) => void;
+  clientFactory?: OpenAIClientFactory;
+};
+
+export function classifyConversationAIError(error: unknown): ConversationAIProviderError {
+  if (error instanceof ConversationAIProviderError) return error;
+  if (error instanceof APIConnectionTimeoutError) return new ConversationAIProviderError("timeout", undefined, { cause: error });
+  if (error instanceof APIError) return new ConversationAIProviderError("provider_error", error.status, { cause: error });
+  if (error instanceof ZodError || error instanceof SyntaxError
+    || error instanceof LengthFinishReasonError || error instanceof ContentFilterFinishReasonError
+    || (error instanceof Error && /^contextual_(?:question|output).*(?:invalid|unavailable)$/u.test(error.message))) {
+    return new ConversationAIProviderError("invalid_structured_output", undefined, { cause: error });
+  }
+  return new ConversationAIProviderError("provider_error", undefined, { cause: error });
+}
+
+export async function withConversationAITimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new ConversationAIProviderError("timeout")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class OpenAIContextualProvider implements ContextualProvider {
   private client: OpenAI | undefined;
+  private readonly timeoutMs: number;
+  private readonly observeUsage?: (usage: ContextualUsage) => void;
+  private readonly clientFactory: OpenAIClientFactory;
+
   constructor(
     readonly model: string,
     private readonly apiKey: string,
-    private readonly observeUsage?: (usage: ContextualUsage) => void,
-    private readonly clientFactory: OpenAIClientFactory = options => new OpenAI(options),
-  ) {}
+    options: OpenAIContextualProviderOptions = {},
+  ) {
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS;
+    this.observeUsage = options.observeUsage;
+    this.clientFactory = options.clientFactory ?? (clientOptions => new OpenAI(clientOptions));
+  }
+
   async interpret(input: ContextualInput) {
     const started = Date.now();
-    const response = await this.getClient().responses.parse({
-      model: this.model, store: false, max_output_tokens: CONTEXTUAL_POLICY.maxOutputTokens,
-      instructions: CONTEXTUAL_INSTRUCTIONS,
-      input: [{ role: "user", content: JSON.stringify(input) }],
-      text: { format: zodTextFormat(contextualInterpretationSchema, "contextual_interpretation") },
-    });
-    this.observeUsage?.({ stage: "interpretation", model: response.model, input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, duration_ms: Date.now() - started });
-    if (response.status !== "completed" || !response.output_parsed) throw new Error("contextual_output_invalid");
-    return contextualInterpretationSchema.parse(response.output_parsed);
+    try {
+      const response = await this.getClient().responses.parse({
+        model: this.model, store: false, max_output_tokens: CONTEXTUAL_POLICY.maxOutputTokens,
+        instructions: CONTEXTUAL_INSTRUCTIONS,
+        input: [{ role: "user", content: JSON.stringify(input) }],
+        text: { format: zodTextFormat(contextualInterpretationSchema, "contextual_interpretation") },
+      });
+      if (response.status !== "completed" || !response.output_parsed) {
+        throw new ConversationAIProviderError("invalid_structured_output");
+      }
+      const parsed = contextualInterpretationSchema.parse(response.output_parsed);
+      this.observeUsage?.({ stage: "interpretation", model: response.model, input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, duration_ms: Date.now() - started });
+      return parsed;
+    } catch (error) {
+      throw classifyConversationAIError(error);
+    }
   }
+
   async composeQuestion(input: ContextualReplyContext) {
     const started = Date.now();
-    const response = await this.getClient().responses.parse({
-      model: this.model, store: false, max_output_tokens: 300,
-      instructions: CONTEXTUAL_COMPOSITION_INSTRUCTIONS,
-      input: [{ role: "user", content: JSON.stringify(input) }], text: { format: zodTextFormat(contextualCompositionSchema, "contextual_question") },
-    });
-    this.observeUsage?.({ stage: "composition", model: response.model, input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, duration_ms: Date.now() - started });
-    if (response.status !== "completed" || !response.output_parsed) throw new Error("contextual_question_unavailable");
-    return contextualCompositionSchema.parse(response.output_parsed);
+    try {
+      const response = await this.getClient().responses.parse({
+        model: this.model, store: false, max_output_tokens: 300,
+        instructions: CONTEXTUAL_COMPOSITION_INSTRUCTIONS,
+        input: [{ role: "user", content: JSON.stringify(input) }], text: { format: zodTextFormat(contextualCompositionSchema, "contextual_question") },
+      });
+      if (response.status !== "completed" || !response.output_parsed) {
+        throw new ConversationAIProviderError("invalid_structured_output");
+      }
+      const parsed = contextualCompositionSchema.parse(response.output_parsed);
+      this.observeUsage?.({ stage: "composition", model: response.model, input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, duration_ms: Date.now() - started });
+      return parsed;
+    } catch (error) {
+      throw classifyConversationAIError(error);
+    }
   }
 
   private getClient() {
-    this.client ??= this.clientFactory({ apiKey: this.apiKey, timeout: CONTEXTUAL_POLICY.timeoutMs, maxRetries: 0 });
+    this.client ??= this.clientFactory({ apiKey: this.apiKey, timeout: this.timeoutMs, maxRetries: 0 });
     return this.client;
   }
 }
