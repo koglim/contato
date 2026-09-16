@@ -115,9 +115,11 @@ Não há nova variável API/web neste checkpoint de Inbox. Manter
 conservam seus contratos. `OPENAI_CONVERSATION_TIMEOUT_MS` controla tanto o
 timeout do SDK quanto o watchdog do orquestrador e usa `20000` ms por padrão.
 Timeout, erro HTTP/rede e saída estruturada inválida mantêm o fallback
-determinístico. O log `conversation_ai_fallback` registra somente categoria,
-duração, modelo, estágio e status HTTP quando disponível; nunca prompt, mensagem
-do cliente ou chave. Os nomes `CONTEXTUAL_CONVERSATION_*` são apenas aliases
+determinístico. Falhas posteriores à interpretação (catálogo, orçamento,
+persistência, resolução de serviço/localização e controlador) seguem a mesma
+telemetria. O log `conversation_ai_fallback` registra somente `reason`,
+`duration_ms`, modelo, estágio e o status HTTP da OpenAI quando disponível;
+nunca prompt, mensagem do cliente, telefone ou chave. Os nomes `CONTEXTUAL_CONVERSATION_*` são apenas aliases
 temporários de compatibilidade.
 Parâmetros não secretos e credenciais n8n estão
 listados no README dos workflows. A lease existente precisa comportar os timeouts.

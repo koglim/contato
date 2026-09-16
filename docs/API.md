@@ -697,9 +697,11 @@ usar uma resposta natural curta depois de validação; serviço, cidade e seleç
 sempre retornam às regras determinísticas. Timeout, indisponibilidade, saída
 inválida ou confiança baixa preservam o estado e usam resposta determinística.
 O texto final é gravado na Outbox e o replay nunca chama o modelo novamente.
-Falhas do modelo geram log estruturado sem PII com `fallback_reason` igual a
-`timeout`, `provider_error` ou `invalid_structured_output`, duração, modelo,
-estágio e o status HTTP da OpenAI quando existente.
+Todo fallback contextual gera log estruturado sem PII com `reason`, duração,
+modelo e estágio. Falhas da interpretação/composição usam `timeout`,
+`provider_error` ou `invalid_structured_output`; falhas posteriores identificam
+dependência, estado, política ou controlador. O status HTTP da OpenAI é incluído
+somente quando existente.
 # Recuperação operacional da Inbox (019)
 
 `POST /internal/channel/inbound/next/process`: autenticação `X-Internal-Key`,

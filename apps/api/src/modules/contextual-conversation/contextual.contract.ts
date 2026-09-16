@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { extractExplicitLocation } from "../message-interpretation/message-interpretation.location.js";
 
-export const CONTEXTUAL_VERSION = "b2.3";
+export const CONTEXTUAL_VERSION = "b2.4";
 export const CONTEXTUAL_POLICY = Object.freeze({ maxOutputTokens: 900, maxCatalog: 100, maxCallsPerHour: 20, maxGlobalCallsPerHour: 1_000, leaseSeconds: 30 });
 const speechActSchema = z.enum(["request", "information", "hypothetical", "negated", "unclear"]);
 const confidenceSchema = z.enum(["high", "medium", "low"]);
@@ -77,6 +78,7 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   const proposal = contextualProposalSchema.parse(value);
   const next = structuredClone(memory);
   const text = normalizeContextualText(raw);
+  const explicitLocation = extractExplicitLocation(raw)?.text ?? null;
   const evidenceExists = (evidence: string) => (` ${text} `).includes(` ${normalizeContextualText(evidence)} `);
   if (proposal.intent === "selection") return { kind: "delegate", memory, correction: false };
   const safeNaturalReply = () => {
@@ -95,7 +97,7 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   // These are defense-in-depth checks, not the primary intent classifier or a phrase allowlist.
   if (/\b(?:se precisar|talvez|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(text)) return { kind: "clarify", memory, correction: false };
   if (proposal.services.some(item => !catalog.some(c => c.key === item.key) || !evidenceExists(item.evidence))
-    || (proposal.location && (!evidenceExists(proposal.location.evidence) || !evidenceExists(proposal.location.text)))) {
+    || (proposal.location && (!evidenceExists(proposal.location.evidence) || (!explicitLocation && !evidenceExists(proposal.location.text))))) {
     return { kind: "clarify", memory, correction: false };
   }
   if (proposal.intent === "catalog_info") {
@@ -103,8 +105,11 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   }
   // Informational questions never grant permission for a new search, even if service/city are mentioned.
   if (proposal.speech_act === "information") return { kind: "clarify", memory, correction: false };
-  if (!proposal.services.length && !proposal.location && !explicitService) return { kind: "clarify", memory, correction: false };
-  if (explicitService && (!catalog.some(item => item.name === explicitService) || !evidenceExists(explicitService))) return { kind: "clarify", memory, correction: false };
+  if (!proposal.services.length && !proposal.location && !explicitService && !explicitLocation) return { kind: "clarify", memory, correction: false };
+  // explicitService is already backed by an exact/phrase catalogue term found
+  // in the original message. The canonical display name need not be literal:
+  // "tomada" is valid domain evidence for "Eletricista".
+  if (explicitService && !catalog.some(item => item.name === explicitService)) return { kind: "clarify", memory, correction: false };
   // A proposed semantic mapping remains a hypothesis until the customer confirms it.
   if (explicitService) {
     next.service = { value: explicitService, source: "user_explicit", inboundId };
@@ -112,7 +117,7 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   } else if (proposal.services.length) {
     next.hypotheses = proposal.services.map(item => ({ ...item, name: catalog.find(c => c.key === item.key)!.name, inboundId }));
   }
-  if (proposal.location) next.location = { value: proposal.location.text, source: "user_explicit", inboundId };
+  if (explicitLocation || proposal.location) next.location = { value: explicitLocation ?? proposal.location!.text, source: "user_explicit", inboundId };
   const correction = (proposal.intent === "correct_location" && proposal.location !== null) || proposal.intent === "correct_service";
   return { kind: next.hypotheses.length ? "clarify" : "search", memory: next, correction };
 }

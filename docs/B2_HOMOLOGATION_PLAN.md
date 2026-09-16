@@ -78,7 +78,7 @@ Arquivos existentes não são sobrescritos. Nenhum comando acima foi executado.
 Trilha JSON por turno: entrada/contexto permitido enviado, interpretação,
 decisão do controlador, contexto/saída da composição, texto final validado ou
 fallback, memória resultante e campos vazios para revisão humana. Usage inclui
-tokens/modelo efetivo/latência por estágio quando disponível. Versão b2.3 e hashes
+tokens/modelo efetivo/latência por estágio quando disponível. Versão b2.4 e hashes
 do prompt, catálogo e corpus identificam a rodada.
 
 **Fronteira explícita:** o runner não executa geocoder, matching, seleção ou

@@ -162,7 +162,7 @@ em [evaluations/b2/README.md](../apps/api/evaluations/b2/README.md).
 - Fallback operacional: desligar flag conserva replay já persistido; não desfaz
   dados. Preferir correção progressiva se o down estiver protegido.
 
-Limites em código, política b2.3: 6 s por chamada, sem retry SDK; até duas chamadas
+Limites em código, política b2.4: timeout configurável com padrão de 20 s por chamada, sem retry SDK; até duas chamadas
 por turno; 900 tokens de interpretação e 300 de composição; 20 chamadas por
 cliente/hora e 1.000 globais/hora; lease 30 s; pausa local após cinco falhas.
 Isso não substitui teto financeiro, retenção de quotas ou monitoramento real.

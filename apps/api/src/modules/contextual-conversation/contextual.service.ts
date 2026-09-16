@@ -25,7 +25,7 @@ import { resolveProfessionalSelection } from "../selection-command/professional-
 import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider } from "./contextual.contract.js";
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
 import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
-import { classifyConversationAIError, withConversationAITimeout, type ConversationAIFallbackEvent } from "./contextual.provider.js";
+import { classifyConversationAIError, withConversationAITimeout, type ConversationAIFallbackEvent, type ConversationAIFallbackReason, type ConversationAIStage } from "./contextual.provider.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
 export { CONTEXTUAL_COST_POLICY } from "./contextual.reply.js";
@@ -47,15 +47,23 @@ export class ContextualConversationService implements ContextualInboxHandler {
     private readonly services: ServiceResolutionRepository = new PostgresServiceResolutionRepository(),
   ) {}
 
+  private fallbackReason(error: unknown, stage: ConversationAIStage): ConversationAIFallbackReason {
+    if (stage === "interpretation" || stage === "composition") return classifyConversationAIError(error).reason;
+    if (stage === "budget") return "policy_limit";
+    if (stage === "proposal_persistence" || stage === "draft_persistence") return "state_error";
+    if (stage === "controller") return "controller_error";
+    return "dependency_error";
+  }
+
   private reportFallback(error: unknown, startedAt: number, stage: ConversationAIFallbackEvent["stage"]) {
     const failure = classifyConversationAIError(error);
     try {
       this.options.onFallback?.({
-        reason: failure.reason,
+        reason: this.fallbackReason(error, stage),
         durationMs: Math.max(0, Date.now() - startedAt),
         model: this.provider.model,
         stage,
-        ...(failure.statusHttp === undefined ? {} : { statusHttp: failure.statusHttp }),
+        ...((stage !== "interpretation" && stage !== "composition") || failure.statusHttp === undefined ? {} : { statusHttp: failure.statusHttp }),
       });
     } catch {
       // Observability must never replace the deterministic fallback.
@@ -88,38 +96,48 @@ export class ContextualConversationService implements ContextualInboxHandler {
         decision = { kind: "search", correction: false, memory: { ...snapshot.memory, service: { value: hypothesis.name, source: "user_confirmation", inboundId: record.id }, hypotheses: [] } };
       } else {
         let providerAttempted = false;
-        let providerCompleted = false;
-        let providerStartedAt = 0;
+        let fallbackStage: ConversationAIStage = "catalog";
+        let fallbackStartedAt = Date.now();
         try {
           const catalog = (await this.catalog.listServices({})).slice(0, CONTEXTUAL_POLICY.maxCatalog)
             .map(item => ({ key: item.slug, name: item.name.slice(0, 200), description: item.description?.slice(0, 200) ?? null }));
           let proposal = snapshot.proposal;
           if (!proposal) {
+            fallbackStage = "interpretation";
+            fallbackStartedAt = Date.now();
             if (this.circuitUntil > Date.now()) throw new Error("contextual_circuit_open");
+            fallbackStage = "budget";
+            fallbackStartedAt = Date.now();
             await this.repository.reserveBudget(snapshot.customerId);
             providerAttempted = true;
-            providerStartedAt = Date.now();
+            fallbackStage = "interpretation";
+            fallbackStartedAt = Date.now();
             proposal = await withConversationAITimeout(this.provider.interpret({
               message: stripPrivate(record.rawText), service: snapshot.memory.service ? stripPrivate(snapshot.memory.service.value) : null,
               location: snapshot.memory.location ? stripPrivate(snapshot.memory.location.value) : null, pending: snapshot.pendingSlot,
               hypotheses: snapshot.memory.hypotheses.map(item => item.name), catalog,
             }), this.options.timeoutMs ?? DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS);
             proposal = contextualProposalSchema.parse(proposal);
-            providerCompleted = true;
+            fallbackStage = "proposal_persistence";
+            fallbackStartedAt = Date.now();
             await this.repository.saveProposal(record, snapshot, proposal);
           }
+          fallbackStage = "service_resolution";
+          fallbackStartedAt = Date.now();
           const explicit = await this.services.resolve({ text: record.rawText });
           // Exact catalogue names and aliases are domain-confirmed facts. Fuzzy
           // guesses and model-only semantic mappings remain hypotheses.
           const explicitService = explicit.status === "resolved" && explicit.match && explicit.match.method !== "fuzzy"
             && (` ${normalizeContextualText(record.rawText)} `).includes(` ${normalizeContextualText(explicit.match.matched_term)} `)
             ? explicit.match.service.name : null;
+          fallbackStage = "controller";
+          fallbackStartedAt = Date.now();
           decision = controlContextualProposal(record.rawText, record.id, proposal, snapshot.memory, catalog, explicitService);
           this.failures = 0;
         } catch (error) {
           if (error instanceof ContextualBusyError || error instanceof InboxFenceError || error instanceof InboxPermanentError) throw error;
           fallback = true;
-          if (providerAttempted && !providerCompleted) this.reportFallback(error, providerStartedAt, "interpretation");
+          this.reportFallback(error, fallbackStartedAt, fallbackStage);
           if (providerAttempted && ++this.failures >= 5) this.circuitUntil = Date.now() + 60_000;
         }
       }
@@ -129,8 +147,13 @@ export class ContextualConversationService implements ContextualInboxHandler {
         ? await this.services.resolve({ text: decision.memory.service.value }) : null;
       let location: Awaited<ReturnType<LocationResolutionService["resolve"]>> | null = null;
       if (service?.status === "resolved" && decision.memory.location) {
+        const locationStartedAt = Date.now();
         try { location = await this.location.resolve({ query: decision.memory.location.value, country_code: record.countryCode, limit: 5 }); }
-        catch { fallback = true; decision = { kind: "clarify", memory: snapshot.memory, correction: false }; }
+        catch (error) {
+          this.reportFallback(error, locationStartedAt, "location_resolution");
+          fallback = true;
+          decision = { kind: "clarify", memory: snapshot.memory, correction: false };
+        }
       }
       const captured = snapshot;
       let question = snapshot.draft;
@@ -140,22 +163,22 @@ export class ContextualConversationService implements ContextualInboxHandler {
         catch { throw new InboxPermanentError("persisted_draft_invalid"); }
       }
       if (questionContext && !question && this.provider.composeQuestion) {
-        let providerAttempted = false;
-        let providerCompleted = false;
-        let providerStartedAt = 0;
+        let fallbackStage: ConversationAIStage = "budget";
+        let fallbackStartedAt = Date.now();
         try {
           await this.repository.reserveBudget(snapshot.customerId);
-          providerAttempted = true;
-          providerStartedAt = Date.now();
+          fallbackStage = "composition";
+          fallbackStartedAt = Date.now();
           question = validateContextualQuestion(await withConversationAITimeout(
             this.provider.composeQuestion(questionContext),
             this.options.timeoutMs ?? DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS,
           ), questionContext);
-          providerCompleted = true;
+          fallbackStage = "draft_persistence";
+          fallbackStartedAt = Date.now();
           await this.repository.saveDraft(record, snapshot, question);
         } catch (error) {
           if (error instanceof ContextualBusyError || error instanceof InboxFenceError || error instanceof InboxPermanentError) throw error;
-          if (providerAttempted && !providerCompleted) this.reportFallback(error, providerStartedAt, "composition");
+          this.reportFallback(error, fallbackStartedAt, fallbackStage);
           // A failed composer is also a completed wording decision. Reuse its fallback after a DB retry.
           question = contextualClarificationText(questionContext);
           await this.repository.saveDraft(record, snapshot, question);

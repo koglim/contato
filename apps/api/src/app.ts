@@ -247,7 +247,7 @@ export function buildApp({
         timeoutMs: resolvedContextualConfig.timeoutMs,
         onFallback: event => app.log.warn({
           code: "conversation_ai_fallback",
-          fallback_reason: event.reason,
+          reason: event.reason,
           duration_ms: event.durationMs,
           model: event.model,
           stage: event.stage,

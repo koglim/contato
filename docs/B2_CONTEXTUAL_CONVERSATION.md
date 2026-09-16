@@ -72,7 +72,7 @@ proposta anterior. Rollback não deixa busca ou contato sem Outbox.
 
 ## Limites e operação
 
-Política `b2.3`: 6 s por chamada, sem retry do SDK, 900 tokens máximos de
+Política `b2.4`: timeout configurável com padrão de 20 s por chamada, sem retry do SDK, 900 tokens máximos de
 interpretação e 300 de composição, até duas chamadas por turno,
 20 chamadas/cliente/hora, 1.000 globais/hora, lease 30 s. Quotas são
 reservadas no banco antes da chamada e compartilhadas entre réplicas; até erros

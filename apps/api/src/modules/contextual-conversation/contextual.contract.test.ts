@@ -78,6 +78,27 @@ test("B2 structured hypothesis and refusal preserve context even without keyword
   assert.equal(defect.memory.hypotheses[0].name, "Encanador");
   assert.equal(run("Pode mandar meu contato?", { ...proposal({ intent: "selection" }), speech_act: "request" }).kind, "delegate");
 });
+
+test("B2 accepts a domain-confirmed service alias and canonicalizes an explicit location", () => {
+  const services = [...catalog, { key: "eletricista", name: "Eletricista", description: null }];
+  const result = controlContextualProposal(
+    "Minha tomada está dando curto aqui em Cuiabá.",
+    randomUUID(),
+    proposal({
+      intent: "search",
+      speech_act: "request",
+      services: [{ key: "eletricista", evidence: "tomada" }],
+      location: { text: "aqui em Cuiabá", evidence: "aqui em Cuiabá" },
+    }),
+    emptyMemory(),
+    services,
+    "Eletricista",
+  );
+
+  assert.equal(result.kind, "search");
+  assert.equal(result.memory.service?.value, "Eletricista");
+  assert.equal(result.memory.location?.value, "Cuiabá");
+});
 test("B2 disabled by default and requires explicit configuration", () => {
   assert.deepEqual(readContextualConfig({}), { enabled: false, model: "", apiKey: "", timeoutMs: 20_000 });
   assert.throws(() => readContextualConfig({ CONVERSATION_AI_ENABLED: "yes" }));

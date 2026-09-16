@@ -56,10 +56,12 @@ test("B2 budget exhaustion and model timeout preserve slots with a useful fallba
     f.set(() => new Promise(() => {}));
     const timeout = await f.receive("Ainda preciso desse atendimento"); assert.equal(timeout.statusCode, 200, timeout.body);
     assert.equal(timeout.json().result.status, "fallback"); assert.deepEqual((await f.state()).memory, before.memory);
-    assert.equal(f.fallbackEvents().length, 1);
     assert.deepEqual({ reason: f.fallbackEvents()[0]?.reason, model: f.fallbackEvents()[0]?.model, stage: f.fallbackEvents()[0]?.stage },
+      { reason: "policy_limit", model: "unit-fake-no-model-call", stage: "budget" });
+    assert.equal(f.fallbackEvents().length, 2);
+    assert.deepEqual({ reason: f.fallbackEvents()[1]?.reason, model: f.fallbackEvents()[1]?.model, stage: f.fallbackEvents()[1]?.stage },
       { reason: "timeout", model: "unit-fake-no-model-call", stage: "interpretation" });
-    assert.ok((f.fallbackEvents()[0]?.durationMs ?? 0) >= 20);
+    assert.ok((f.fallbackEvents()[1]?.durationMs ?? 0) >= 20);
   } finally { await f.cleanup(); }
 });
 
@@ -258,6 +260,11 @@ for (const dependency of ["model","geocoder"] as const) {
       const replay=await f.receive(payload.raw_text,payload.provider_message_id);
       assert.equal(replay.json().duplicate,true);assert.equal(replay.json().result.status,"fallback");
       assert.doesNotMatch(replay.body,/private provider|private geocoder/);
+      assert.equal(f.fallbackEvents().length,1);
+      assert.deepEqual({reason:f.fallbackEvents()[0]?.reason,stage:f.fallbackEvents()[0]?.stage,model:f.fallbackEvents()[0]?.model},
+        dependency==="model"
+          ? {reason:"provider_error",stage:"interpretation",model:"unit-fake-no-model-call"}
+          : {reason:"dependency_error",stage:"location_resolution",model:"unit-fake-no-model-call"});
       assert.deepEqual((await f.state()).memory,snapshot.memory);
       assert.equal(f.calls(),calls);assert.equal(f.geoCalls(),geo);
       assert.equal((await query("SELECT id FROM search_requests WHERE service_id=$1",[f.serviceId])).rows.length,0);
@@ -425,8 +432,8 @@ test("conversation AI extracts a catalog alias and city, then delegates facts to
   const f = await fixture();
   try {
     f.set(async () => basic({ speech_act: "request", confidence: "high", natural_reply: null,
-      services: [{ key: f.name, evidence: "tomada" }], location: { text: "Cuiabá", evidence: "Cuiabá" } }));
-    const result = await f.receive("minha tomada queimou e estou em Cuiabá");
+      services: [{ key: f.name, evidence: "tomada" }], location: { text: "aqui em Cuiabá", evidence: "aqui em Cuiabá" } }));
+    const result = await f.receive("Minha tomada está dando curto aqui em Cuiabá.");
     assert.equal(result.statusCode, 200, result.body);
     assert.equal(result.json().result.status, "matched");
     assert.equal((await f.state()).memory.service.value, f.name);
@@ -434,6 +441,7 @@ test("conversation AI extracts a catalog alias and city, then delegates facts to
     assert.match(result.json().reply_text, /Profissional 1/u);
     assert.doesNotMatch(result.json().reply_text, /telefone|\+55/u);
     assert.equal(f.geoCalls(), 1);
+    assert.equal(f.fallbackEvents().length, 0);
   } finally { await f.cleanup(); }
 });
 
