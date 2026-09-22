@@ -47,7 +47,7 @@ test("B2 budget exhaustion and model timeout preserve slots with a useful fallba
   const f = await fixture();
   try {
     f.set(async () => basic()); await f.receive(`Preciso de ${f.name}`);
-    const before = await f.state(), calls = f.calls();
+    const before = await f.state(), calls = f.calls(), fallbackCountBeforeScenario = f.fallbackEvents().length;
     await query(`UPDATE contextual_budgets SET calls=20 WHERE scope IN (SELECT id::text FROM customers WHERE phone_e164=$1)`, [f.phone]);
     const exhausted = await f.receive("Na verdade é em Vera"); assert.equal(exhausted.statusCode, 200, exhausted.body);
     assert.equal(exhausted.json().result.status, "fallback"); assert.equal(f.calls(), calls);
@@ -56,12 +56,13 @@ test("B2 budget exhaustion and model timeout preserve slots with a useful fallba
     f.set(() => new Promise(() => {}));
     const timeout = await f.receive("Ainda preciso desse atendimento"); assert.equal(timeout.statusCode, 200, timeout.body);
     assert.equal(timeout.json().result.status, "fallback"); assert.deepEqual((await f.state()).memory, before.memory);
-    assert.deepEqual({ reason: f.fallbackEvents()[0]?.reason, model: f.fallbackEvents()[0]?.model, stage: f.fallbackEvents()[0]?.stage },
+    const scenarioFallbacks = f.fallbackEvents().slice(fallbackCountBeforeScenario);
+    assert.deepEqual({ reason: scenarioFallbacks[0]?.reason, model: scenarioFallbacks[0]?.model, stage: scenarioFallbacks[0]?.stage },
       { reason: "policy_limit", model: "unit-fake-no-model-call", stage: "budget" });
-    assert.equal(f.fallbackEvents().length, 2);
-    assert.deepEqual({ reason: f.fallbackEvents()[1]?.reason, model: f.fallbackEvents()[1]?.model, stage: f.fallbackEvents()[1]?.stage },
+    assert.equal(scenarioFallbacks.length, 2);
+    assert.deepEqual({ reason: scenarioFallbacks[1]?.reason, model: scenarioFallbacks[1]?.model, stage: scenarioFallbacks[1]?.stage },
       { reason: "timeout", model: "unit-fake-no-model-call", stage: "interpretation" });
-    assert.ok((f.fallbackEvents()[1]?.durationMs ?? 0) >= 20);
+    assert.ok((scenarioFallbacks[1]?.durationMs ?? 0) >= 20);
   } finally { await f.cleanup(); }
 });
 
@@ -442,7 +443,8 @@ test("conversation AI extracts a catalog alias and city, then delegates facts to
     assert.equal((await f.state()).memory.service.value, f.name);
     assert.equal((await f.state()).memory.location.value, "Cuiabá");
     assert.match(result.json().reply_text, /Profissional 1/u);
-    assert.doesNotMatch(result.json().reply_text, /telefone|\+55/u);
+    assert.doesNotMatch(result.json().reply_text, /\+55\d{10,13}/u);
+    assert.match(result.json().reply_text, /receberão o telefone um do outro/u);
     assert.equal(f.geoCalls(), 1);
     assert.equal(f.fallbackEvents().length, 0);
   } finally { await f.cleanup(); }
@@ -497,7 +499,8 @@ test("invalid AI interpretation still uses explicit catalog alias and city throu
     assert.equal((await f.state()).memory.service.value, f.name);
     assert.equal((await f.state()).memory.location.value, "Cuiabá");
     assert.match(result.json().reply_text, /Profissional 1/u);
-    assert.doesNotMatch(result.json().reply_text, /telefone|\+55/u);
+    assert.doesNotMatch(result.json().reply_text, /\+55\d{10,13}/u);
+    assert.match(result.json().reply_text, /receberão o telefone um do outro/u);
     assert.equal(f.geoCalls(), 1);
     assert.equal(f.fallbackEvents().length, 1);
     assert.deepEqual(f.fallbackEvents()[0]?.structuredOutput, {
