@@ -24,7 +24,7 @@ import { locationResolutionRoutes } from "./modules/location-resolution/location
 import { readLocationResolutionConfig } from "./config/location-resolution.js";
 import { OpenRouteServiceGeocodingProvider } from "./modules/location-resolution/providers/openrouteservice-geocoding.provider.js";
 import { DeterministicLocationResolutionService } from "./modules/location-resolution/location-resolution.service.js";
-import type { GeocodingProvider, LocationResolutionService } from "./modules/location-resolution/location-resolution.types.js";
+import type { GeocodingProvider, LocationResolutionDiagnostic, LocationResolutionService } from "./modules/location-resolution/location-resolution.types.js";
 import { searchOrchestrationRoutes } from "./modules/search-orchestration/search-orchestration.routes.js";
 import { DeterministicSearchOrchestrator } from "./modules/search-orchestration/search-orchestration.service.js";
 import type { SearchOrchestrationService } from "./modules/search-orchestration/search-orchestration.types.js";
@@ -111,13 +111,14 @@ type AppDependencies = {
   professionalOpportunityService?: Pick<ProfessionalOpportunityService, "handle">;
 };
 
-function createLazyLocationResolutionService(provider?: GeocodingProvider): LocationResolutionService {
+function createLazyLocationResolutionService(provider: GeocodingProvider | undefined, observe: (diagnostic: LocationResolutionDiagnostic) => void): LocationResolutionService {
   let service: LocationResolutionService | undefined;
   return {
     resolve(input) {
       service ??= new DeterministicLocationResolutionService(
         provider ?? new OpenRouteServiceGeocodingProvider(),
         readLocationResolutionConfig(),
+        observe,
       );
       return service.resolve(input);
     },
@@ -187,7 +188,12 @@ export function buildApp({
   const resolvedContextualConfig = readContextualConfig();
   const resolvedServiceResolutionRepository = serviceResolutionRepository ?? new PostgresServiceResolutionRepository();
   const resolvedMatchingRepository = matchingRepository ?? new PostgresMatchingRepository();
-  const resolvedLocationResolutionService = locationResolutionService ?? createLazyLocationResolutionService(geocodingProvider);
+  const resolvedLocationResolutionService = locationResolutionService ?? createLazyLocationResolutionService(geocodingProvider, diagnostic => {
+    app.log.info({
+      code: "location_resolution_diagnostic",
+      ...diagnostic,
+    }, "Location resolution diagnostic");
+  });
   const resolvedSearchOrchestrationService = searchOrchestrationService ?? new DeterministicSearchOrchestrator(
     resolvedServiceResolutionRepository,
     resolvedLocationResolutionService,
