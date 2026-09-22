@@ -31,6 +31,7 @@ test("geocoding provider uses Authorization and encodes the documented query par
   assert.equal(requestedUrl?.pathname, "/pelias/v1/search");
   assert.equal(requestedUrl?.searchParams.get("text"), "Sinop, MT");
   assert.equal(requestedUrl?.searchParams.get("boundary.country"), "BR");
+  assert.equal(requestedUrl?.searchParams.get("layers"), "locality,localadmin");
   assert.equal(requestedUrl?.searchParams.get("size"), "5");
   assert.equal(requestedUrl?.search.includes("secret-key"), false);
   assert.equal(authorization, "secret-key");
