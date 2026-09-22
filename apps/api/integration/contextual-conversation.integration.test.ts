@@ -466,6 +466,7 @@ test("B2 keeps an exact phrase alias when the model is uncertain and sends a cit
 test("B2 combines compatible semantic evidence with an existing hypothesis without confirming it", async () => {
   const f = await fixture();
   try {
+    f.setCompose(async input => ({ target: input.target, question: `Você precisa de ${f.name} para esse problema?` }));
     f.set(async () => basic({ speech_act: "request", confidence: "medium", services: [{ key: f.name, evidence: "eletricitta" }] }));
     const first = await f.receive("Preciso de um eletricitta");
     assert.equal(first.json().result.status, "clarification");
