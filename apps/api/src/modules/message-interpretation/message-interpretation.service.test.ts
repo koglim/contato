@@ -19,6 +19,8 @@ test("message interpretation extracts only explicit high-confidence location phr
     ["preciso de eletricista no município de são josé do rio claro", "são josé do rio claro"],
     ["preciso de eletricista em sinop, mt", "sinop, MT"],
     ["preciso de eletricista em Sinop, mt", "Sinop, MT"],
+    ["Preciso de eletricista em Cuiabá", "Cuiabá"],
+    ["Preciso de eletricista lá em Cuiabá", "Cuiabá"],
   ] as const;
   for (const [rawText, locationText] of cases) {
     const result = interpreter.interpret({ raw_text: rawText, country_code: "BR" });
@@ -34,13 +36,6 @@ test("message interpretation conservatively requires an explicit useful location
     "minha tomada queimou",
     "preciso de eletricista",
     "meu ar condicionado parou",
-    "Preciso de eletricista em Sinop",
-    "Preciso de eletricista em Sinop.",
-    "Preciso de eletricista em Sinop!",
-    "Preciso de eletricista em Sinop?",
-    "Preciso de eletricista em Sinop,",
-    "preciso de eletricista em sinop",
-    "preciso de eletricista em SINOP",
     "estou com problema em tomada",
     "preciso de reparo em ar condicionado",
     "quero ajuda em instalação elétrica",
@@ -55,6 +50,7 @@ test("message interpretation conservatively requires an explicit useful location
     "preciso de ajuda no meu apartamento",
     "Minha tomada queimou aqui em Sinop para amanhã",
     "minha tomada queimou aqui em sinop para amanhã",
+    "Aqui em Sinop preciso de encanador",
     "Estou em Cuiabá e preciso de um eletricista",
   ]) {
     const result = interpreter.interpret({ raw_text: rawText, country_code: "BR" });

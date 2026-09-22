@@ -31,8 +31,26 @@ Em b2.3, o mesmo Structured Output passou a exigir `confidence` (`high`,
 conversa breve, esclarecimento ou retorno de fora de escopo. A API limita o
 texto a 320 caracteres e rejeita telefone, e-mail, link, preço, disponibilidade,
 distância, prazo, credenciais e alegações de ações concluídas. Resposta rejeitada
-é substituída por texto determinístico; confiança baixa não altera memória nem
-inicia busca.
+é substituída por texto determinístico. Confiança baixa não altera memória nem
+inicia busca sem uma evidência de domínio suficiente.
+
+Na orquestração adaptativa v1, o controlador separa `speech_act`, evidência de
+serviço, localização e ação seguinte. Um match de catálogo `exact`/`phrase` é
+evidência forte somente quando corresponde literalmente à mensagem, o catálogo
+está ativo e o ato é um pedido sem negação, correção ou conflito. Nessa condição,
+`clarify`, `uncertain` ou `confidence=low` do modelo não descartam o fato de
+domínio. Evidência fuzzy e hipótese semântica permanecem hipóteses; uma nova
+evidência semântica compatível apenas preserva a hipótese anterior e resulta em
+pergunta de confirmação fundamentada. Isso não concede ações de seleção,
+consentimento ou contato.
+
+Para defeitos compatíveis com o catálogo, a instrução de interpretação pede uma
+hipótese semântica com evidência literal em vez de um `clarify` genérico. A
+confirmação continua obrigatória antes de o serviço entrar na memória confirmada.
+
+Construções como `em Cuiabá`, `em Sinop` e `lá em Cuiabá` geram um candidato de
+localização sem inventar UF. O geocoder continua sendo a autoridade para
+existência e ambiguidade; locais genéricos como `em casa` continuam descartados.
 
 Comandos globais exatos têm prioridade e não chamam IA. Seleção e consentimento
 reutilizam a mensagem original, os repositórios e a transação existentes. A IA
@@ -115,6 +133,10 @@ serviço/localização confirmados, slot pendente, até três nomes de hipótese
 100 itens do catálogo com descrições truncadas. Não contém telefone, IDs de
 cliente/profissional, tokens, preços, coordenadas nem histórico bruto. A Responses
 API usa `store:false`; memória confirmada e hipóteses continuam no PostgreSQL.
+
+Cada turno B2 registra, sem mensagem bruta ou telefone, a decisão do controlador,
+o método de evidência de serviço, a presença de hipótese anterior, a existência de
+candidato de localização, o resultado da resolução e o fallback quando houver.
 
 Corpus sintético e protocolo em
 [evaluations/b2](../apps/api/evaluations/b2/README.md): 210 casos de desenvolvimento

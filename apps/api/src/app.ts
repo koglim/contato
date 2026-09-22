@@ -262,6 +262,15 @@ export function buildApp({
             schema_version: event.structuredOutput.schemaVersion,
           }),
         }, "Conversation AI used deterministic fallback"),
+        onDecision: event => app.log.info({
+          code: "contextual_controller_decision",
+          decision: event.decision,
+          service_resolution: event.serviceResolution,
+          had_prior_hypothesis: event.hadPriorHypothesis,
+          location_candidate: event.locationCandidate,
+          location_resolution: event.locationResolution,
+          fallback: event.fallback,
+        }, "Contextual controller decision"),
       });
     })(),
   );

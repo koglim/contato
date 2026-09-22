@@ -153,6 +153,36 @@ test("low-confidence model proposals cannot change confirmed memory or trigger s
   assert.deepEqual(result.memory, memory);
   assert.equal(result.naturalReply, undefined);
 });
+test("strong literal catalog evidence survives an uncertain request interpretation", () => {
+  const services = [...catalog, { key: "eletricista", name: "Eletricista", description: null }];
+  const result = controlContextualProposal("Meu chuveiro elétrico queimou", randomUUID(), {
+    ...proposal({ intent: "clarify", uncertain: true, confidence: "low" }), speech_act: "request",
+  }, emptyMemory(), services, "Eletricista");
+  assert.equal(result.kind, "search");
+  assert.equal(result.memory.service?.value, "Eletricista");
+  assert.deepEqual(result.memory.hypotheses, []);
+});
+test("strong literal catalog evidence never overrides a negation or information request", () => {
+  const services = [...catalog, { key: "eletricista", name: "Eletricista", description: null }];
+  for (const [text, speech] of [["Não preciso de eletricista", "negated"], ["Vocês trabalham com eletricista?", "information"]] as const) {
+    const result = controlContextualProposal(text, randomUUID(), {
+      ...proposal({ intent: "clarify", uncertain: true, confidence: "low" }), speech_act: speech,
+    }, emptyMemory(), services, "Eletricista");
+    assert.equal(result.kind, "clarify", text);
+    assert.equal(result.memory.service, null, text);
+  }
+});
+test("compatible semantic evidence keeps a prior hypothesis and asks a grounded confirmation", () => {
+  const services = [...catalog, { key: "eletricista", name: "Eletricista", description: null }];
+  const memory = emptyMemory();
+  memory.hypotheses = [{ key: "eletricista", name: "Eletricista", evidence: "eletricitta", inboundId: randomUUID() }];
+  const result = controlContextualProposal("Meu chuveiro queimou", randomUUID(), {
+    ...proposal({ intent: "clarify", uncertain: true, confidence: "low", services: [{ key: "eletricista", evidence: "chuveiro queimou" }] }), speech_act: "request",
+  }, memory, services, null);
+  assert.equal(result.kind, "clarify");
+  assert.equal(result.memory.service, null);
+  assert.deepEqual(result.memory.hypotheses.map(item => item.name), ["Eletricista"]);
+});
 test("B2 natural questions cannot contain financial, private or completed-action claims", () => {
   assert.equal(validateContextualQuestion({ question: "Em qual cidade você precisa resolver esse vazamento?" }), "Em qual cidade você precisa resolver esse vazamento?");
   for (const question of ["Já selecionei Ana, tudo certo?", "Custa R$ 10, aceita?", "Ligue +5566999999999?", "Enviei seu contato?", "Acesse https://example.com?", "Me informe sua senha?", "O profissional está disponível?"]) {

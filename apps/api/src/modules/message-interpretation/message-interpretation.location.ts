@@ -3,13 +3,14 @@ import type { ExplicitLocation } from "./message-interpretation.types.js";
 const LOCATION_WORD = String.raw`\p{L}[\p{L}\p{M}'’.-]*`;
 const LOCATION_NAME = String.raw`${LOCATION_WORD}(?:\s+${LOCATION_WORD})*`;
 const LOCATION_VALUE = new RegExp(String.raw`^(${LOCATION_NAME})(?:\s*,\s*([A-Za-z]{2}))?$`, "u");
-const UNSAFE_TRAILING_CONTEXT = /(?:\s+para\s+(?:hoje|amanh[ãa])(?:\s|$)|\s+e\s+(?:preciso|quero|necessito|busco|procuro)\b)/iu;
+const UNSAFE_TRAILING_CONTEXT = /(?:\s+para\s+(?:hoje|amanh[ãa])(?:\s|$)|\s+(?:e\s+)?(?:preciso|quero|necessito|busco|procuro)\b)/iu;
 const EXPLICIT_MARKERS = [
   /\baqui\s+em\s+/giu,
   /\bna\s+cidade\s+de\s+/giu,
   /\bno\s+munic[ií]pio\s+de\s+/giu,
 ];
 const OBVIOUSLY_GENERIC = new Set(["casa", "casa mesmo", "minha casa", "trabalho", "empresa", "meu apartamento", "apartamento"]);
+const NON_LOCATION_PREFIX = /\b(?:problema|reparo|ajuda|manuten[cç][aã]o|instala[cç][aã]o|vazamento|defeito)\s*$/iu;
 
 function removeTerminalPunctuation(value: string) {
   return value.trim().replace(/[.!?]+$/u, "").replace(/,\s*$/u, "").trim();
@@ -44,7 +45,9 @@ export function extractExplicitLocation(rawText: string): ExplicitLocation | nul
     }
   }
 
+  // A city without its UF is still a useful candidate. The geocoder—not this
+  // lexical extractor—decides whether it exists or is geographically ambiguous.
   const generic = /\bem\s+(.+)$/iu.exec(rawText);
-  const text = generic ? validLocation(generic[1], true) : null;
+  const text = generic && !NON_LOCATION_PREFIX.test(rawText.slice(0, generic.index)) ? validLocation(generic[1]) : null;
   return text ? { text, strategy: "locative_phrase" } : null;
 }

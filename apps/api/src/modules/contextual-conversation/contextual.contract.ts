@@ -73,6 +73,12 @@ export function validateNaturalReply(value: unknown): string {
   return text;
 }
 
+function hasUnsafeRequestContext(text: string) {
+  // A negated defect ("a descarga não para") is not a refusal. These patterns
+  // identify a refusal/correction of the requested service, never a defect.
+  return /\b(?:se precisar|talvez|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(text);
+}
+
 // Proposals cannot authorize selection, consent, ranking or disclosure. Those use the original message.
 export function controlContextualProposal(raw: string, inboundId: string, value: unknown, memory: ContextualMemory, catalog: ContextualCatalogItem[], explicitService: string | null): ContextualDecision {
   const proposal = contextualProposalSchema.parse(value);
@@ -80,27 +86,46 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   const text = normalizeContextualText(raw);
   const explicitLocation = extractExplicitLocation(raw)?.text ?? null;
   const evidenceExists = (evidence: string) => (` ${text} `).includes(` ${normalizeContextualText(evidence)} `);
+  const requestSpeechAct = proposal.speech_act === undefined || proposal.speech_act === "request";
+  const strongExplicitService = explicitService !== null && requestSpeechAct && !hasUnsafeRequestContext(text)
+    && catalog.some(item => item.name === explicitService);
+  const compatibleHypothesis = requestSpeechAct && !hasUnsafeRequestContext(text) && memory.hypotheses.some(hypothesis =>
+    proposal.services.some(service => service.key === hypothesis.key && evidenceExists(service.evidence) && catalog.some(item => item.key === service.key)),
+  );
   if (proposal.intent === "selection") return { kind: "delegate", memory, correction: false };
   const safeNaturalReply = () => {
     if (!proposal.natural_reply) return undefined;
     try { return validateNaturalReply(proposal.natural_reply); } catch { return undefined; }
   };
-  if (proposal.confidence === "low") return { kind: "clarify", memory, correction: false };
+  // Exact/phrase catalog evidence is a strong domain fact, but only for a
+  // request with no negation/correction. It may supply the service even when
+  // the model is uncertain about how to phrase the turn.
+  if (proposal.confidence === "low" && !strongExplicitService && !compatibleHypothesis) return { kind: "clarify", memory, correction: false };
   if (proposal.intent === "greeting" || proposal.intent === "small_talk") {
     return { kind: proposal.intent, memory, correction: false, naturalReply: safeNaturalReply() };
   }
   if (proposal.intent === "faq_cost") return { kind: proposal.intent, memory, correction: false };
   if (proposal.intent === "out_of_scope") return { kind: proposal.intent, memory, correction: false, naturalReply: safeNaturalReply() };
-  if (proposal.intent === "clarify" || proposal.uncertain) return { kind: "clarify", memory, correction: false, naturalReply: safeNaturalReply() };
+  if ((proposal.intent === "clarify" || proposal.uncertain) && !strongExplicitService && !compatibleHypothesis) {
+    return { kind: "clarify", memory, correction: false, naturalReply: safeNaturalReply() };
+  }
+  // New semantic evidence can corroborate a remembered hypothesis, but is not
+  // enough to promote it to a confirmed service. Keep the hypothesis so the
+  // responder asks a grounded confirmation instead of a generic fallback.
+  if (compatibleHypothesis && !strongExplicitService && (proposal.intent === "clarify" || proposal.uncertain || proposal.confidence === "low")) {
+    return { kind: "clarify", memory: next, correction: false };
+  }
   if (proposal.speech_act && proposal.speech_act !== "request" && proposal.speech_act !== "information") return { kind: "clarify", memory, correction: false };
   // A negated defect ("a descarga não para") is not a refusal ("não quero").
   // These are defense-in-depth checks, not the primary intent classifier or a phrase allowlist.
-  if (/\b(?:se precisar|talvez|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(text)) return { kind: "clarify", memory, correction: false };
+  if (hasUnsafeRequestContext(text)) return { kind: "clarify", memory, correction: false };
   const proposedCatalogServices = proposal.services.map(item => catalog.find(c => c.key === item.key)
     ?? (explicitService ? catalog.find(c => c.name === explicitService) : undefined));
+  const locationIsLiteral = proposal.location !== null && (evidenceExists(proposal.location.text)
+    || normalizeContextualText(proposal.location.text) === normalizeContextualText(explicitLocation ?? ""));
   if (proposal.services.some(item => !evidenceExists(item.evidence))
     || (!explicitService && proposedCatalogServices.some(item => !item))
-    || (proposal.location && (!evidenceExists(proposal.location.evidence) || (!explicitLocation && !evidenceExists(proposal.location.text))))) {
+    || (proposal.location && (!evidenceExists(proposal.location.evidence) || !locationIsLiteral))) {
     return { kind: "clarify", memory, correction: false };
   }
   if (proposal.intent === "catalog_info") {
