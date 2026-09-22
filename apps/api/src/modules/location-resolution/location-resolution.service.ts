@@ -48,16 +48,24 @@ function sameCityIdentity(left: LocationResolutionCandidate, right: LocationReso
     && distanceKm(left, right) <= EQUIVALENT_CENTROID_DISTANCE_KM;
 }
 
-function preferredRepresentative(left: LocationResolutionCandidate, right: LocationResolutionCandidate) {
+function preferredRepresentative(left: LocationResolutionCandidate, right: LocationResolutionCandidate, confidenceThreshold: number) {
+  const locality = left.layer === "locality" ? left : right.layer === "locality" ? right : null;
+  const other = locality === left ? right : left;
+  if (locality?.confidence !== null && locality?.confidence !== undefined && locality.confidence >= confidenceThreshold) return locality;
+
+  const leftIsReliable = left.confidence !== null && left.confidence >= confidenceThreshold;
+  const rightIsReliable = right.confidence !== null && right.confidence >= confidenceThreshold;
+  if (leftIsReliable && rightIsReliable) return left.confidence! >= right.confidence! ? left : right;
+  if (leftIsReliable) return left;
+  if (rightIsReliable) return right;
+
   if (left.confidence === null) return right;
   if (right.confidence === null) return left;
   if (left.confidence !== right.confidence) return left.confidence > right.confidence ? left : right;
-  if (left.layer === "locality") return left;
-  if (right.layer === "locality") return right;
-  return left;
+  return locality ?? other;
 }
 
-function collapseEquivalentCandidates(candidates: LocationResolutionCandidate[]) {
+function collapseEquivalentCandidates(candidates: LocationResolutionCandidate[], confidenceThreshold: number) {
   const collapsed: LocationResolutionCandidate[] = [];
   let collapsedCount = 0;
   for (const candidate of candidates) {
@@ -67,7 +75,7 @@ function collapseEquivalentCandidates(candidates: LocationResolutionCandidate[])
       continue;
     }
     collapsedCount += 1;
-    collapsed[equivalentIndex] = preferredRepresentative(collapsed[equivalentIndex]!, candidate);
+    collapsed[equivalentIndex] = preferredRepresentative(collapsed[equivalentIndex]!, candidate, confidenceThreshold);
   }
   return { candidates: collapsed, collapsedCount };
 }
@@ -111,7 +119,7 @@ export class DeterministicLocationResolutionService implements LocationResolutio
     const stateFilteredCandidates = stateEvidence
       ? cityCandidates.filter((candidate) => normalizedState(candidate.state) === stateEvidence)
       : cityCandidates;
-    const { candidates, collapsedCount } = collapseEquivalentCandidates(stateFilteredCandidates.slice(0, input.limit));
+    const { candidates, collapsedCount } = collapseEquivalentCandidates(stateFilteredCandidates.slice(0, input.limit), this.config.confidenceThreshold);
     const top = candidates[0];
     const second = candidates[1];
     if (!top) {

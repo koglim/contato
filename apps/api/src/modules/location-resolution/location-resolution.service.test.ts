@@ -57,6 +57,24 @@ test("equivalent Cuiabá locality and localadmin candidates collapse to one reso
   ]);
 });
 
+test("an above-threshold locality remains the representative despite higher localadmin confidence", async () => {
+  const locality = candidate({ label: "Cuiabá locality", city: "Cuiabá", state: "MT", latitude: -15.601, longitude: -56.097, confidence: 0.89, layer: "locality" });
+  const localadmin = candidate({ label: "Cuiabá localadmin", city: "Cuiabá", state: "MT", latitude: -15.673, longitude: -56.097, confidence: 0.93, layer: "localadmin" });
+  const current = resolve([locality, localadmin], "Cuiabá");
+  const result = await current.service.resolve(current.input);
+  assert.equal(result.status, "resolved");
+  assert.deepEqual(result.match, locality);
+});
+
+test("a below-threshold locality does not displace a reliable equivalent localadmin", async () => {
+  const locality = candidate({ label: "Cuiabá locality", city: "Cuiabá", state: "MT", latitude: -15.601, longitude: -56.097, confidence: 0.8, layer: "locality" });
+  const localadmin = candidate({ label: "Cuiabá localadmin", city: "Cuiabá", state: "MT", latitude: -15.673, longitude: -56.097, confidence: 0.92, layer: "localadmin" });
+  const current = resolve([locality, localadmin], "Cuiabá");
+  const result = await current.service.resolve(current.input);
+  assert.equal(result.status, "resolved");
+  assert.deepEqual(result.match, localadmin);
+});
+
 test("an explicit Brazilian UF removes incompatible cities before confidence comparison", async () => {
   const current = resolve([
     candidate({ city: "Cuiabá", state: "GO", confidence: 0.99 }),
