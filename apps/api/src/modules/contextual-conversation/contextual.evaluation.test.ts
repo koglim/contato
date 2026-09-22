@@ -32,6 +32,11 @@ test("B2 evaluation traces interpretation, composition, fallback and human revie
     if (turn.response_boundary === "requires_real_domain_result_in_inbox") assert.equal(turn.final_response, null);
   }
 });
+test("B2 adaptive orchestration regressions run separately from frozen corpora", () => {
+  const report = run("--suite=regression");
+  assert.equal(report.cases, 5); assert.equal(report.failed, 0); assert.equal(report.model_calls, 0);
+  assert.equal(report.corpus[0].split, "regression");
+});
 test("B2 real evaluation refuses missing authorization before any provider call", () => {
   assert.throws(() => run("--real", "--suite=readiness", "--model=not-authorized", "--max-calls=1"), /Real evaluation requires authorization/);
 });

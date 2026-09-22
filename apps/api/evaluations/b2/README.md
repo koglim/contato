@@ -15,12 +15,17 @@ cobertos separadamente pelas integrações PostgreSQL reais.
 O corpus v1 continua congelado, inclusive os 90 reservados. `readiness.json`
 adiciona 18 casos de desenvolvimento com o catálogo de oito serviços do seed;
 não é holdout nem substitui o conjunto original. Versão do runtime/prompt: b2.4.
+`regression-v1.json` é uma suíte complementar de cinco regressões da
+orquestração adaptativa (evidência de catálogo, hipótese entre turnos, cidade sem
+UF e negação). Ela não altera os conjuntos congelados.
 
 ## Execução sem gasto
 
 `pnpm --filter @contatocerto/api eval:b2 --split=all --summary`
 
 `pnpm --filter @contatocerto/api eval:b2 --suite=readiness --summary`
+
+`pnpm --filter @contatocerto/api eval:b2 --suite=regression --summary`
 
 Por padrão usa development; `--split=all` inclui os dois conjuntos com relatório
 separado por categoria/split e digest SHA256. O CI roda propostas e composições

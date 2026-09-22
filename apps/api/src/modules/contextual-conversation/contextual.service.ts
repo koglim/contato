@@ -34,6 +34,14 @@ const stripPrivate = (text: string) => text.replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}
 type ContextualConversationOptions = {
   timeoutMs?: number;
   onFallback?: (event: ConversationAIFallbackEvent) => void;
+  onDecision?: (event: {
+    decision: ContextualDecision["kind"];
+    serviceResolution: "exact" | "phrase" | "fuzzy" | "semantic" | "confirmed_memory" | "none";
+    hadPriorHypothesis: boolean;
+    locationCandidate: boolean;
+    locationResolution: "resolved" | "ambiguous" | "unresolved" | "not_attempted";
+    fallback: boolean;
+  }) => void;
 };
 
 export class ContextualConversationService implements ContextualInboxHandler {
@@ -72,6 +80,10 @@ export class ContextualConversationService implements ContextualInboxHandler {
     }
   }
 
+  private reportDecision(event: Parameters<NonNullable<ContextualConversationOptions["onDecision"]>>[0]) {
+    try { this.options.onDecision?.(event); } catch { /* Observability is non-authoritative. */ }
+  }
+
   async handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
     let snapshot: ContextualSnapshot | undefined;
     try {
@@ -91,6 +103,9 @@ export class ContextualConversationService implements ContextualInboxHandler {
       }
       let decision: ContextualDecision = { kind: "clarify", memory: snapshot.memory, correction: false };
       let fallback = false;
+      const hadPriorHypothesis = snapshot.memory.hypotheses.length > 0;
+      let serviceResolution: "exact" | "phrase" | "fuzzy" | "semantic" | "confirmed_memory" | "none" = snapshot.memory.service ? "confirmed_memory" : "none";
+      let locationCandidate = false;
       if (global || recoveredSelection || (snapshot.pendingSlot === "selection" && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null))) {
         decision = { kind: "delegate", memory: snapshot.memory, correction: false };
       } else if (snapshot.memory.hypotheses.length === 1 && /^(sim|isso|isso mesmo|confirmo)$/.test(confirmation)) {
@@ -116,6 +131,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
           explicitService = explicitMatch?.service.name ?? null;
           explicitServiceKey = explicitMatch?.service.slug ?? null;
           explicitServiceEvidence = explicitMatch?.matched_term ?? null;
+          if (explicit.status === "resolved" && explicit.match) serviceResolution = explicit.match.method;
           let proposal = snapshot.proposal;
           if (!proposal) {
             fallbackStage = "interpretation";
@@ -132,7 +148,8 @@ export class ContextualConversationService implements ContextualInboxHandler {
               location: snapshot.memory.location ? stripPrivate(snapshot.memory.location.value) : null, pending: snapshot.pendingSlot,
               hypotheses: snapshot.memory.hypotheses.map(item => item.name), catalog,
             }), this.options.timeoutMs ?? DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS);
-            proposal = contextualProposalSchema.parse(proposal);
+            const parsedProposal = contextualProposalSchema.parse(proposal);
+            proposal = parsedProposal;
             fallbackStage = "proposal_persistence";
             fallbackStartedAt = Date.now();
             await this.repository.saveProposal(record, snapshot, proposal);
@@ -140,12 +157,14 @@ export class ContextualConversationService implements ContextualInboxHandler {
           fallbackStage = "controller";
           fallbackStartedAt = Date.now();
           decision = controlContextualProposal(record.rawText, record.id, proposal, snapshot.memory, catalog, explicitService);
+          if ((explicit.status !== "resolved" || !explicit.match) && contextualProposalSchema.parse(proposal).services.length) serviceResolution = "semantic";
           this.failures = 0;
         } catch (error) {
           if (error instanceof ContextualBusyError || error instanceof InboxFenceError || error instanceof InboxPermanentError) throw error;
           this.reportFallback(error, fallbackStartedAt, fallbackStage);
           const failure = classifyConversationAIError(error);
           const explicitLocation = extractExplicitLocation(record.rawText)?.text ?? null;
+          locationCandidate = explicitLocation !== null;
           const unsafeRecovery = /\?|\b(?:talvez|se precisar|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(normalizeContextualText(record.rawText));
           const recoverable = fallbackStage === "interpretation" && failure.reason === "invalid_structured_output"
             && explicitService && explicitServiceKey && explicitServiceEvidence && explicitLocation && !unsafeRecovery
@@ -176,6 +195,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
       const service = !fallback && decision.kind === "search" && decision.memory.service
         ? await this.services.resolve({ text: decision.memory.service.value }) : null;
       let location: Awaited<ReturnType<LocationResolutionService["resolve"]>> | null = null;
+      locationCandidate ||= decision.memory.location !== null;
       if (service?.status === "resolved" && decision.memory.location) {
         const locationStartedAt = Date.now();
         try { location = await this.location.resolve({ query: decision.memory.location.value, country_code: record.countryCode, limit: 5 }); }
@@ -185,6 +205,14 @@ export class ContextualConversationService implements ContextualInboxHandler {
           decision = { kind: "clarify", memory: snapshot.memory, correction: false };
         }
       }
+      this.reportDecision({
+        decision: decision.kind,
+        serviceResolution,
+        hadPriorHypothesis,
+        locationCandidate,
+        locationResolution: location?.status ?? "not_attempted",
+        fallback,
+      });
       const captured = snapshot;
       let question = snapshot.draft;
       const questionContext = fallback ? null : contextualQuestionContext(decision, service?.status === "resolved", location?.status === "resolved");

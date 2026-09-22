@@ -20,7 +20,7 @@ const output = args.find(arg => arg.startsWith("--report="))?.slice(9);
 if (output && (isAbsolute(output) || relative(process.cwd(), resolve(output)).startsWith(".."))) throw new Error("Report must be inside the current workspace");
 if (output && existsSync(resolve(output))) throw new Error("Evaluation report already exists; choose a new path before making any call");
 const suite = args.find(arg => arg.startsWith("--suite="))?.slice(8) ?? "frozen";
-if (!["frozen", "readiness"].includes(suite)) throw new Error("Unknown evaluation suite");
+if (!["frozen", "readiness", "regression"].includes(suite)) throw new Error("Unknown evaluation suite");
 const real = args.includes("--real");
 const selected = args.find(arg => arg.startsWith("--split="))?.slice(8) ?? "development";
 if (!["development", "heldout", "all"].includes(selected)) throw new Error("Unknown evaluation split");
@@ -48,9 +48,13 @@ const frozenCatalog = [{ key: "encanador", name: "Encanador", description: "Serv
   { key: "pedreiro", name: "Pedreiro", description: "Alvenaria" }];
 const readinessBytes = readFileSync(new URL("../evaluations/b2/readiness.json", import.meta.url), "utf8");
 const readiness = z.object({ version: z.literal("b2-readiness-1"), catalog: z.array(z.object({ key: z.string(), name: z.string(), description: z.string().nullable() })), cases: z.array(caseSchema) }).parse(JSON.parse(readinessBytes));
-const catalog = suite === "frozen" ? frozenCatalog : readiness.catalog;
+const regressionBytes = readFileSync(new URL("../evaluations/b2/regression-v1.json", import.meta.url), "utf8");
+const regression = z.object({ version: z.literal("b2-regression-1"), catalog: z.array(z.object({ key: z.string(), name: z.string(), description: z.string().nullable() })), cases: z.array(caseSchema) }).parse(JSON.parse(regressionBytes));
+const catalog = suite === "frozen" ? frozenCatalog : suite === "readiness" ? readiness.catalog : regression.catalog;
 const selectedSources = suite === "frozen" ? sources.filter(s => selected === "all" || s.split === selected)
-  : [{ split: "development-readiness", version: readiness.version, digest: createHash("sha256").update(readinessBytes).digest("hex"), cases: readiness.cases }];
+  : suite === "readiness"
+    ? [{ split: "development-readiness", version: readiness.version, digest: createHash("sha256").update(readinessBytes).digest("hex"), cases: readiness.cases }]
+    : [{ split: "regression", version: regression.version, digest: createHash("sha256").update(regressionBytes).digest("hex"), cases: regression.cases }];
 const rows = [];
 let totalCalls = 0;
 const deadline = Date.now() + 15 * 60_000;
@@ -66,7 +70,7 @@ for (const source of selectedSources) {
       totalCalls++;
       calls++;
     };
-    const executeTurn = async (message: string, oracle: unknown, failure: string | null, composition: string | undefined) => {
+    const executeTurn = async (message: string, oracle: unknown, failure: string | null, composition: string | undefined, explicitService: string | null) => {
       const input: ContextualInput = { message, service: memory.service?.value ?? null, location: memory.location?.value ?? null,
         pending: memory.service ? memory.location ? "selection" : "location" : "service", hypotheses: memory.hypotheses.map(h => h.name), catalog };
       const trace: Record<string, unknown> = { input, interpretation: null, controller: null, composition_context: null, composition_output: null,
@@ -78,7 +82,7 @@ for (const source of selectedSources) {
         const proposal = provider && failure !== "invalid_output" ? await provider.interpret(input) : oracle;
         trace.interpretation = proposal;
         const names = catalog.filter(item => (` ${normalizeContextualText(message)} `).includes(` ${normalizeContextualText(item.name)} `));
-        const decision = controlContextualProposal(message, randomUUID(), proposal, memory, catalog, names.length === 1 ? names[0].name : null);
+        const decision = controlContextualProposal(message, randomUUID(), proposal, memory, catalog, explicitService ?? (names.length === 1 ? names[0].name : null));
         trace.controller = decision;
         // Domain resolution is an explicit fixture in this harness, not geocoding or matching.
         const context = contextualQuestionContext(decision, !!decision.memory.service, !!decision.memory.location);
@@ -114,9 +118,9 @@ for (const source of selectedSources) {
     let actual = "fallback", error: string | null = null;
     try {
       for (const setup of sample.setup) {
-        await executeTurn(setup.message, setup.oracle, null, undefined);
+        await executeTurn(setup.message, setup.oracle, null, undefined, setup.explicit_service);
       }
-      actual = await executeTurn(sample.message, sample.oracle, sample.failure, sample.composition);
+      actual = await executeTurn(sample.message, sample.oracle, sample.failure, sample.composition, sample.explicit_service);
     } catch (caught) {
       error = caught instanceof Error && caught.message === "evaluation_budget_exhausted" ? "evaluation_budget_exhausted" : "provider_or_contract_failure";
       if (error === "evaluation_budget_exhausted") actual = "not_evaluated";

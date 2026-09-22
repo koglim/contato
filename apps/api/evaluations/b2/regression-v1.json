@@ -1,0 +1,45 @@
+{
+  "version": "b2-regression-1",
+  "catalog": [
+    { "key": "eletricista", "name": "Eletricista", "description": "Instalações elétricas" },
+    { "key": "encanador", "name": "Encanador", "description": "Serviços hidráulicos" }
+  ],
+  "cases": [
+    {
+      "id": "adaptive-01", "category": "strong_catalog_evidence", "source": "synthetic-authored",
+      "transcript": ["Meu chuveiro elétrico queimou"], "initial": "empty", "message": "Meu chuveiro elétrico queimou",
+      "oracle": { "intent": "clarify", "speech_act": "request", "services": [], "location": null, "natural_reply": null, "confidence": "low", "uncertain": true },
+      "explicit_service": "Eletricista", "expected": "search", "failure": null, "setup": [],
+      "expected_slots": { "service": "Eletricista", "location": null, "hypotheses": [] }, "composition": "valid", "expected_target": "location"
+    },
+    {
+      "id": "adaptive-02", "category": "semantic_hypothesis", "source": "synthetic-authored",
+      "transcript": ["Meu chuveiro queimou"], "initial": "empty", "message": "Meu chuveiro queimou",
+      "oracle": { "intent": "search", "speech_act": "request", "services": [{ "key": "eletricista", "evidence": "chuveiro queimou" }], "location": null, "natural_reply": null, "confidence": "medium", "uncertain": false },
+      "explicit_service": null, "expected": "clarify", "failure": null, "setup": [],
+      "expected_slots": { "service": null, "location": null, "hypotheses": ["Eletricista"] }, "composition": "valid", "expected_target": "service_confirmation"
+    },
+    {
+      "id": "adaptive-03", "category": "hypothesis_context", "source": "synthetic-authored",
+      "transcript": ["Preciso de um eletricitta", "Meu chuveiro queimou"], "initial": "empty", "message": "Meu chuveiro queimou",
+      "oracle": { "intent": "clarify", "speech_act": "request", "services": [{ "key": "eletricista", "evidence": "chuveiro queimou" }], "location": null, "natural_reply": null, "confidence": "low", "uncertain": true },
+      "explicit_service": null, "expected": "clarify", "failure": null,
+      "setup": [{ "message": "Preciso de um eletricitta", "oracle": { "intent": "search", "speech_act": "request", "services": [{ "key": "eletricista", "evidence": "eletricitta" }], "location": null, "natural_reply": null, "confidence": "medium", "uncertain": false }, "explicit_service": null }],
+      "expected_slots": { "service": null, "location": null, "hypotheses": ["Eletricista"] }, "composition": "valid", "expected_target": "service_confirmation"
+    },
+    {
+      "id": "adaptive-04", "category": "natural_location", "source": "synthetic-authored",
+      "transcript": ["Preciso de um eletricista em Cuiabá"], "initial": "empty", "message": "Preciso de um eletricista em Cuiabá",
+      "oracle": { "intent": "search", "speech_act": "request", "services": [], "location": { "text": "Cuiabá", "evidence": "Cuiabá" }, "natural_reply": null, "confidence": "high", "uncertain": false },
+      "explicit_service": "Eletricista", "expected": "search", "failure": null, "setup": [],
+      "expected_slots": { "service": "Eletricista", "location": "Cuiabá", "hypotheses": [] }, "expected_target": null
+    },
+    {
+      "id": "adaptive-05", "category": "negated_service", "source": "synthetic-authored",
+      "transcript": ["Não preciso de eletricista"], "initial": "empty", "message": "Não preciso de eletricista",
+      "oracle": { "intent": "clarify", "speech_act": "negated", "services": [], "location": null, "natural_reply": null, "confidence": "low", "uncertain": true },
+      "explicit_service": "Eletricista", "expected": "clarify", "failure": null, "setup": [],
+      "expected_slots": { "service": null, "location": null, "hypotheses": [] }, "expected_target": null
+    }
+  ]
+}
