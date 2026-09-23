@@ -99,7 +99,7 @@ test("invalid structured output retains safe response-shape metadata", async () 
     assert.ok(error instanceof ConversationAIProviderError);
     assert.equal(error.reason, "invalid_structured_output");
     assert.deepEqual(error.structuredOutput, {
-      parserSource: "output_text", responseStatus: "completed", incomplete: false, refusal: false,
+      parserSource: "output_text", responseStatus: "completed", incompleteReason: null, incomplete: false, refusal: false,
       outputTypes: ["message"], contentTypes: ["output_text"], schemaVersion: "b2.4",
     });
     return true;
@@ -117,9 +117,45 @@ test("incomplete and refusal responses are not parsed as successful output", asy
       assert.ok(error instanceof ConversationAIProviderError);
       assert.equal(error.reason, "invalid_structured_output");
       assert.equal(error.structuredOutput?.incomplete || error.structuredOutput?.refusal, true);
+      if (error.structuredOutput?.incomplete) assert.equal(error.structuredOutput.incompleteReason, "max_output_tokens");
       return true;
     });
   }
+});
+
+test("unknown incomplete reasons are reduced to a safe other category", async () => {
+  const context = fakeProvider(undefined, "incomplete", undefined, { incomplete_details: { reason: "future_provider_reason" } });
+  await assert.rejects(() => context.provider.interpret(input), (error: unknown) => {
+    assert.ok(error instanceof ConversationAIProviderError);
+    assert.equal(error.structuredOutput?.incompleteReason, "other");
+    return true;
+  });
+});
+
+test("usage is emitted for incomplete output and cannot change the provider decision", async () => {
+  const events: unknown[] = [];
+  const context = fakeProvider(undefined, "incomplete", undefined, {
+    usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 40 }, output_tokens: 300,
+      output_tokens_details: { reasoning_tokens: 300 }, total_tokens: 400 },
+    output: [{ type: "reasoning", content: [] }], incomplete_details: { reason: "content_filter" },
+  });
+  const observed = new OpenAIContextualProvider("configured-model", "super-secret", {
+    clientFactory: () => ({ responses: { create: async () => ({ status: "incomplete", model: "configured-model",
+      usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 40 }, output_tokens: 300,
+        output_tokens_details: { reasoning_tokens: 300 }, total_tokens: 400 },
+      output: [{ type: "reasoning", content: [] }], incomplete_details: { reason: "content_filter" } }) } }) as unknown as OpenAI,
+    observeUsage: event => { events.push(event); throw new Error("logger unavailable"); },
+  });
+  await assert.rejects(() => observed.interpret(input), (error: unknown) => {
+    assert.ok(error instanceof ConversationAIProviderError);
+    assert.equal(error.structuredOutput?.incompleteReason, "content_filter");
+    return true;
+  });
+  assert.deepEqual(events, [{ stage: "interpretation", model: "configured-model", input_tokens: 100,
+    cached_input_tokens: 40, output_tokens: 300, reasoning_tokens: 300, total_tokens: 400,
+    response_status: "incomplete", duration_ms: (events[0] as { duration_ms: number }).duration_ms }]);
+  assert.ok((events[0] as { duration_ms: number }).duration_ms >= 0);
+  await assert.rejects(() => context.provider.interpret(input));
 });
 
 test("OpenAI conversation provider classifies timeout, provider and structured output failures", async () => {

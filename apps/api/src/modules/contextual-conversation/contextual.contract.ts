@@ -73,7 +73,7 @@ export function validateNaturalReply(value: unknown): string {
   return text;
 }
 
-function hasUnsafeRequestContext(text: string) {
+export function hasUnsafeRequestContext(text: string) {
   // A negated defect ("a descarga não para") is not a refusal. These patterns
   // identify a refusal/correction of the requested service, never a defect.
   return /\b(?:se precisar|talvez|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(text);

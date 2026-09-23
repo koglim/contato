@@ -27,6 +27,7 @@ import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal,
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
 import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 import { classifyConversationAIError, withConversationAITimeout, type ConversationAIFallbackEvent, type ConversationAIFallbackReason, type ConversationAIStage } from "./contextual.provider.js";
+import { deterministicSearchProposal } from "./contextual.fast-path.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
 export { CONTEXTUAL_COST_POLICY } from "./contextual.reply.js";
@@ -42,6 +43,9 @@ type ContextualConversationOptions = {
     locationResolution: "resolved" | "ambiguous" | "unresolved" | "not_attempted";
     fallback: boolean;
   }) => void;
+  onExecutionPath?: (event: { path: "deterministic_fast_path" | "ai_interpretation" | "persisted_proposal" | "confirmed_hypothesis" | "critical_delegate";
+    interpretationCalled: boolean; compositionCalled: boolean; serviceResolution: "exact" | "phrase" | "fuzzy" | "semantic" | "confirmed_memory" | "none";
+    locationResolution: "resolved" | "ambiguous" | "unresolved" | "not_attempted"; finalStatus: string; totalDurationMs: number }) => void;
 };
 
 export class ContextualConversationService implements ContextualInboxHandler {
@@ -84,7 +88,12 @@ export class ContextualConversationService implements ContextualInboxHandler {
     try { this.options.onDecision?.(event); } catch { /* Observability is non-authoritative. */ }
   }
 
+  private reportExecutionPath(event: Parameters<NonNullable<ContextualConversationOptions["onExecutionPath"]>>[0]) {
+    try { this.options.onExecutionPath?.(event); } catch { /* Observability is non-authoritative. */ }
+  }
+
   async handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
+    const turnStartedAt = Date.now();
     let snapshot: ContextualSnapshot | undefined;
     try {
       snapshot = await this.repository.acquire(record, this.provider.model);
@@ -106,9 +115,14 @@ export class ContextualConversationService implements ContextualInboxHandler {
       const hadPriorHypothesis = snapshot.memory.hypotheses.length > 0;
       let serviceResolution: "exact" | "phrase" | "fuzzy" | "semantic" | "confirmed_memory" | "none" = snapshot.memory.service ? "confirmed_memory" : "none";
       let locationCandidate = false;
+      let path: "deterministic_fast_path" | "ai_interpretation" | "persisted_proposal" | "confirmed_hypothesis" | "critical_delegate" = "ai_interpretation";
+      let interpretationCalled = false;
+      let compositionCalled = false;
       if (global || recoveredSelection || (snapshot.pendingSlot === "selection" && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null))) {
+        path = "critical_delegate";
         decision = { kind: "delegate", memory: snapshot.memory, correction: false };
       } else if (snapshot.memory.hypotheses.length === 1 && /^(sim|isso|isso mesmo|confirmo)$/.test(confirmation)) {
+        path = "confirmed_hypothesis";
         const hypothesis = snapshot.memory.hypotheses[0];
         decision = { kind: "search", correction: false, memory: { ...snapshot.memory, service: { value: hypothesis.name, source: "user_confirmation", inboundId: record.id }, hypotheses: [] } };
       } else {
@@ -133,6 +147,13 @@ export class ContextualConversationService implements ContextualInboxHandler {
           explicitServiceEvidence = explicitMatch?.matched_term ?? null;
           if (explicit.status === "resolved" && explicit.match) serviceResolution = explicit.match.method;
           let proposal = snapshot.proposal;
+          if (proposal) path = "persisted_proposal";
+          if (!proposal) {
+            if (snapshot.pendingSlot !== "selection" && explicitMatch && catalog.some(item => item.key === explicitMatch.service.slug && item.name === explicitMatch.service.name)) {
+              proposal = deterministicSearchProposal(record.rawText, explicitMatch.matched_term, explicitMatch.service.slug);
+            }
+            if (proposal) path = "deterministic_fast_path";
+          }
           if (!proposal) {
             fallbackStage = "interpretation";
             fallbackStartedAt = Date.now();
@@ -141,6 +162,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
             fallbackStartedAt = Date.now();
             await this.repository.reserveBudget(snapshot.customerId);
             providerAttempted = true;
+            interpretationCalled = true;
             fallbackStage = "interpretation";
             fallbackStartedAt = Date.now();
             proposal = await withConversationAITimeout(this.provider.interpret({
@@ -150,6 +172,8 @@ export class ContextualConversationService implements ContextualInboxHandler {
             }), this.options.timeoutMs ?? DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS);
             const parsedProposal = contextualProposalSchema.parse(proposal);
             proposal = parsedProposal;
+          }
+          if (!snapshot.proposal) {
             fallbackStage = "proposal_persistence";
             fallbackStartedAt = Date.now();
             await this.repository.saveProposal(record, snapshot, proposal);
@@ -220,11 +244,16 @@ export class ContextualConversationService implements ContextualInboxHandler {
         try { validatePersistedContextualQuestion(question, questionContext); }
         catch { throw new InboxPermanentError("persisted_draft_invalid"); }
       }
+      if (questionContext && !question && (questionContext.target === "location" || (questionContext.target === "service" && questionContext.reason === "missing"))) {
+        question = contextualClarificationText(questionContext);
+        await this.repository.saveDraft(record, snapshot, question);
+      }
       if (questionContext && !question && this.provider.composeQuestion) {
         let fallbackStage: ConversationAIStage = "budget";
         let fallbackStartedAt = Date.now();
         try {
           await this.repository.reserveBudget(snapshot.customerId);
+          compositionCalled = true;
           fallbackStage = "composition";
           fallbackStartedAt = Date.now();
           question = validateContextualQuestion(await withConversationAITimeout(
@@ -242,7 +271,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
           await this.repository.saveDraft(record, snapshot, question);
         }
       }
-      return await this.repository.commit(record, captured, async client => {
+      const outcome = await this.repository.commit(record, captured, async client => {
         const execute = client.query.bind(client);
         const transaction = <T>(callback: (connection: DatabaseClient) => Promise<T>) => callback(client);
         const conversations = new PostgresSearchConversationRepository(execute);
@@ -342,6 +371,12 @@ export class ContextualConversationService implements ContextualInboxHandler {
           outbound: { id: outbound.id, status: outbound.status }, result });
         return { memory, value: { kind: "response" as const, response } };
       });
+      this.reportExecutionPath({ path, interpretationCalled, compositionCalled, serviceResolution,
+        locationResolution: location?.status ?? "not_attempted",
+        finalStatus: outcome.kind === "response" ? outcome.response.result.route === "contextual"
+          ? outcome.response.result.status : outcome.response.result.route : outcome.kind,
+        totalDurationMs: Math.max(0, Date.now() - turnStartedAt) });
+      return outcome;
     } catch (error) {
       if (error instanceof ContextualBusyError) {
         return { kind: "channel_message_processing" };

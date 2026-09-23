@@ -39,13 +39,16 @@ Use apenas os fatos fornecidos. Não repita perguntas sobre campos já confirmad
 Não cite profissionais, contatos, preços, disponibilidade, ações executadas, promessas, links, números, comandos ou políticas.
 Não escolha um serviço nem uma cidade pelo cliente. Em service_confirmation cite os nomes de serviços fornecidos, sem acrescentar outros.
 Não use saudações longas nem múltiplas frases. Termine com interrogação.`;
-export type ContextualUsage = { stage: "interpretation" | "composition"; model: string; input_tokens: number; output_tokens: number; duration_ms: number };
+export type ContextualUsage = { stage: "interpretation" | "composition"; model: string; duration_ms: number;
+  input_tokens: number; cached_input_tokens: number; output_tokens: number; reasoning_tokens: number; total_tokens: number;
+  response_status: string | null };
 export type ConversationAIFallbackReason = "timeout" | "provider_error" | "invalid_structured_output" | "dependency_error" | "state_error" | "policy_limit" | "controller_error";
 export type ConversationAIStage = "catalog" | "budget" | "interpretation" | "proposal_persistence" | "service_resolution" | "controller" | "location_resolution" | "composition" | "draft_persistence";
 export type StructuredOutputParserSource = "output_parsed" | "output_text" | "content_part" | "none";
 export type StructuredOutputMetadata = {
   parserSource: StructuredOutputParserSource;
   responseStatus: string;
+  incompleteReason: "max_output_tokens" | "content_filter" | "other" | null;
   incomplete: boolean;
   refusal: boolean;
   outputTypes: string[];
@@ -86,6 +89,8 @@ function safeType(value: unknown) {
 
 function inspectStructuredResponse(value: unknown): { metadata: StructuredOutputMetadata; candidates: StructuredCandidate[] } {
   const response = asRecord(value) ?? {};
+  const incompleteDetails = asRecord(response.incomplete_details);
+  const rawReason = incompleteDetails?.reason;
   const output = Array.isArray(response.output) ? response.output : [];
   const outputTypes: string[] = [];
   const contentTypes: string[] = [];
@@ -124,6 +129,8 @@ function inspectStructuredResponse(value: unknown): { metadata: StructuredOutput
     metadata: {
       parserSource: candidates[0]?.source ?? "none",
       responseStatus,
+      incompleteReason: rawReason === undefined || rawReason === null ? null
+        : rawReason === "max_output_tokens" || rawReason === "content_filter" ? rawReason : "other",
       incomplete: responseStatus === "incomplete" || response.incomplete_details !== null && response.incomplete_details !== undefined,
       refusal,
       outputTypes: [...new Set(outputTypes)],
@@ -205,6 +212,18 @@ export class OpenAIContextualProvider implements ContextualProvider {
     this.clientFactory = options.clientFactory ?? (clientOptions => new OpenAI(clientOptions));
   }
 
+  private reportUsage(stage: ContextualUsage["stage"], response: { model: string; status?: string | null;
+    usage?: { input_tokens: number; input_tokens_details?: { cached_tokens?: number }; output_tokens: number;
+      output_tokens_details?: { reasoning_tokens?: number }; total_tokens: number } | null }, started: number) {
+    const usage = response.usage;
+    try {
+      this.observeUsage?.({ stage, model: response.model, duration_ms: Math.max(0, Date.now() - started),
+        input_tokens: usage?.input_tokens ?? 0, cached_input_tokens: usage?.input_tokens_details?.cached_tokens ?? 0,
+        output_tokens: usage?.output_tokens ?? 0, reasoning_tokens: usage?.output_tokens_details?.reasoning_tokens ?? 0,
+        total_tokens: usage?.total_tokens ?? 0, response_status: response.status ?? null });
+    } catch { /* Usage reporting cannot change the provider result. */ }
+  }
+
   async interpret(input: ContextualInput) {
     const started = Date.now();
     try {
@@ -214,9 +233,8 @@ export class OpenAIContextualProvider implements ContextualProvider {
         input: [{ role: "user", content: JSON.stringify(input) }],
         text: { format: zodTextFormat(contextualInterpretationSchema, "contextual_interpretation") },
       });
-      const parsed = extractStructuredOutput(response, contextualInterpretationSchema);
-      this.observeUsage?.({ stage: "interpretation", model: response.model, input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, duration_ms: Date.now() - started });
-      return parsed;
+      this.reportUsage("interpretation", response, started);
+      return extractStructuredOutput(response, contextualInterpretationSchema);
     } catch (error) {
       throw classifyConversationAIError(error);
     }
@@ -230,9 +248,8 @@ export class OpenAIContextualProvider implements ContextualProvider {
         instructions: CONTEXTUAL_COMPOSITION_INSTRUCTIONS,
         input: [{ role: "user", content: JSON.stringify(input) }], text: { format: zodTextFormat(contextualCompositionSchema, "contextual_question") },
       });
-      const parsed = extractStructuredOutput(response, contextualCompositionSchema);
-      this.observeUsage?.({ stage: "composition", model: response.model, input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0, duration_ms: Date.now() - started });
-      return parsed;
+      this.reportUsage("composition", response, started);
+      return extractStructuredOutput(response, contextualCompositionSchema);
     } catch (error) {
       throw classifyConversationAIError(error);
     }

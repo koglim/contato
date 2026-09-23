@@ -11,6 +11,8 @@
     "test": "node scripts/run-tests.mjs unit",
     "test:integration": "node scripts/run-tests.mjs integration",
     "eval:b2": "tsx scripts/evaluate-contextual.ts",
+    "eval:latency": "tsx scripts/evaluate-latency.ts",
+    "eval:composition-budget": "tsx scripts/evaluate-composition-budget.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

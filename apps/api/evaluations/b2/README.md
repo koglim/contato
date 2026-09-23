@@ -18,6 +18,9 @@ não é holdout nem substitui o conjunto original. Versão do runtime/prompt: b2
 `regression-v1.json` é uma suíte complementar de cinco regressões da
 orquestração adaptativa (evidência de catálogo, hipótese entre turnos, cidade sem
 UF e negação). Ela não altera os conjuntos congelados.
+`latency-v1.json` é um corpus sintético separado de elegibilidade do caminho
+determinístico. Rode `pnpm --filter @contatocerto/api eval:latency --summary`;
+o benchmark mede apenas a função local, sem OpenAI, banco ou latência de rede.
 
 ## Execução sem gasto
 

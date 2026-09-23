@@ -35,7 +35,7 @@ if (real && (!args.includes("--authorize-paid-evaluation") || !model || !process
 }
 // No DB, search, selection, WhatsApp, or environment-default model invocation in this evaluator.
 const usage: ContextualUsage[] = [];
-const provider: ContextualProvider | null = real ? new OpenAIContextualProvider(model!, process.env.OPENAI_API_KEY!, row => usage.push(row)) : null;
+const provider: ContextualProvider | null = real ? new OpenAIContextualProvider(model!, process.env.OPENAI_API_KEY!, { observeUsage: row => { usage.push(row); } }) : null;
 const sources = ["development", "heldout"].map(split => {
   const bytes = readFileSync(new URL(`../evaluations/b2/${split}.json`, import.meta.url), "utf8");
   return { digest: createHash("sha256").update(bytes).digest("hex"), ...schema.parse(JSON.parse(bytes)) };
