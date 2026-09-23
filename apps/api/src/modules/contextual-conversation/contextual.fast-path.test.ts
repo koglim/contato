@@ -13,7 +13,7 @@ const catalog = [{ key: "eletricista", name: "Eletricista", description: null },
   { key: "encanador", name: "Encanador", description: null }];
 
 test("latency v1 corpus only allows direct catalog requests with a literal location", () => {
-  assert.equal(corpus.cases.length, 13);
+  assert.equal(corpus.cases.length, 23);
   for (const sample of corpus.cases) {
     const proposal = deterministicSearchProposal(sample.message, sample.evidence, sample.key);
     assert.equal(proposal !== null, sample.fast_path, sample.id);

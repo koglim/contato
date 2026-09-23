@@ -8,11 +8,11 @@ test("latency v1 synthetic evaluation reports safe eligibility without model cal
   const script = fileURLToPath(new URL("../../../scripts/evaluate-latency.ts", import.meta.url));
   const report = JSON.parse(execFileSync(process.execPath, ["--import", "tsx", script, "--summary"],
     { cwd: apiRoot, encoding: "utf8" }));
-  assert.equal(report.cases, 13);
-  assert.equal(report.passed, 13);
+  assert.equal(report.cases, 23);
+  assert.equal(report.passed, 23);
   assert.equal(report.failed, 0);
-  assert.equal(report.fast_path_cases, 5);
-  assert.equal(report.interpretation_calls_avoided_in_fixture, 5);
+  assert.equal(report.fast_path_cases, 8);
+  assert.equal(report.interpretation_calls_avoided_in_fixture, 8);
   assert.equal(report.benchmark_scope, "pure_eligibility_only");
 });
 

@@ -16,6 +16,20 @@ test("B2 confirms explicit catalog service and literal city independently", () =
   assert.equal(result.memory.location?.value, "Sinop");
   assert.equal(result.memory.location?.source, "user_explicit");
 });
+test("adaptive controller accepts only the clean literal city when extraction includes trailing discourse", () => {
+  for (const modifier of ["por favor", "urgente", "agora", "hoje", "amanhã", "mesmo"]) {
+    const raw = `Preciso de encanador em Sinop ${modifier}`;
+    const clean = run(raw, proposal({ location: { text: "Sinop", evidence: "Sinop" } }), "Encanador");
+    assert.equal(clean.kind, "search", modifier);
+    assert.equal(clean.memory.location?.value, "Sinop", modifier);
+    const dirty = run(raw, proposal({ location: { text: `Sinop ${modifier}`, evidence: `Sinop ${modifier}` } }), "Encanador");
+    assert.equal(dirty.kind, "clarify", modifier);
+    assert.equal(dirty.memory.location, null, modifier);
+    const missing = run(raw, proposal(), "Encanador");
+    assert.equal(missing.kind, "clarify", modifier);
+    assert.equal(missing.memory.location, null, modifier);
+  }
+});
 test("B2 semantic catalog mapping is a hypothesis, not confirmed memory", () => {
   const result = run("Minha pia tá vazando", proposal({ services: [{ key: "encanador", evidence: "pia tá vazando" }] }));
   assert.equal(result.kind, "clarify"); assert.equal(result.memory.service, null);

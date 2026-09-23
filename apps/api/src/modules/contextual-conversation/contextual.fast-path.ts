@@ -1,5 +1,5 @@
 import { extractExplicitLocation } from "../message-interpretation/message-interpretation.location.js";
-import { contextualProposalSchema, hasUnsafeRequestContext, normalizeContextualText, type ContextualProposal } from "./contextual.contract.js";
+import { contextualProposalSchema, hasTrailingNonGeographicModifier, hasUnsafeRequestContext, normalizeContextualText, type ContextualProposal } from "./contextual.contract.js";
 
 // A deliberately narrow request grammar. The catalog supplies the service and
 // the existing location extractor supplies the place; this function only checks
@@ -14,7 +14,7 @@ export function deterministicSearchProposal(rawText: string, serviceEvidence: st
   serviceKey: string | null): ContextualProposal | null {
   if (!serviceEvidence || !serviceKey || /[?;:!.\n\r]/u.test(rawText)) return null;
   const location = extractExplicitLocation(rawText)?.text;
-  if (!location) return null;
+  if (!location || hasTrailingNonGeographicModifier(location)) return null;
   const text = normalizeContextualText(rawText);
   if (hasUnsafeRequestContext(text)) return null;
   const evidence = normalizeContextualText(serviceEvidence);
