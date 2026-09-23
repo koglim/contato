@@ -248,6 +248,7 @@ export function buildApp({
       if (!resolvedContextualConfig.enabled) return undefined;
       const provider = new OpenAIContextualProvider(resolvedContextualConfig.model, resolvedContextualConfig.apiKey, {
         timeoutMs: resolvedContextualConfig.timeoutMs,
+        observeUsage: usage => app.log.info({ code: "conversation_ai_usage", ...usage }, "Conversation AI usage"),
       });
       return new ContextualConversationService(provider, resolvedLocationResolutionService, {
         timeoutMs: resolvedContextualConfig.timeoutMs,
@@ -261,6 +262,7 @@ export function buildApp({
           ...(event.structuredOutput === undefined ? {} : {
             parser_source: event.structuredOutput.parserSource,
             response_status: event.structuredOutput.responseStatus,
+            incomplete_reason: event.structuredOutput.incompleteReason,
             incomplete: event.structuredOutput.incomplete,
             refusal: event.structuredOutput.refusal,
             output_types: event.structuredOutput.outputTypes,
@@ -277,6 +279,12 @@ export function buildApp({
           location_resolution: event.locationResolution,
           fallback: event.fallback,
         }, "Contextual controller decision"),
+        onExecutionPath: event => app.log.info({
+          code: "contextual_execution_path", path: event.path,
+          interpretation_called: event.interpretationCalled, composition_called: event.compositionCalled,
+          service_resolution: event.serviceResolution, location_resolution: event.locationResolution,
+          final_status: event.finalStatus, total_duration_ms: event.totalDurationMs,
+        }, "Contextual execution path"),
       });
     })(),
   );

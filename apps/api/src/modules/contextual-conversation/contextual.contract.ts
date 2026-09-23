@@ -57,6 +57,13 @@ export function validateContextualQuestion(value: unknown, context?: ContextualR
 export interface ContextualProvider { readonly model: string; interpret(input: ContextualInput): Promise<unknown>; composeQuestion?(input: ContextualReplyContext): Promise<unknown> }
 export const normalizeContextualText = (value: string) => value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
+// The shared extractor intentionally accepts free-form localities. These
+// terminal discourse/urgency words are not part of a literal place in a
+// direct request and must not be persisted as its location.
+export function hasTrailingNonGeographicModifier(location: string): boolean {
+  return /(?:^| )(?:por favor|urgente|agora|hoje|amanha|mesmo)$/u.test(normalizeContextualText(location));
+}
+
 export type ContextualDecision = { kind: "delegate" | "search" | "clarify" | "greeting" | "small_talk" | "faq_cost" | "catalog_info" | "out_of_scope"; memory: ContextualMemory; correction: boolean; catalogServices?: string[]; naturalReply?: string };
 
 export function validateNaturalReply(value: unknown): string {
@@ -73,7 +80,7 @@ export function validateNaturalReply(value: unknown): string {
   return text;
 }
 
-function hasUnsafeRequestContext(text: string) {
+export function hasUnsafeRequestContext(text: string) {
   // A negated defect ("a descarga não para") is not a refusal. These patterns
   // identify a refusal/correction of the requested service, never a defect.
   return /\b(?:se precisar|talvez|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(text);
@@ -84,7 +91,9 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   const proposal = contextualProposalSchema.parse(value);
   const next = structuredClone(memory);
   const text = normalizeContextualText(raw);
-  const explicitLocation = extractExplicitLocation(raw)?.text ?? null;
+  const extractedLocation = extractExplicitLocation(raw)?.text ?? null;
+  const discardedExplicitLocation = extractedLocation !== null && hasTrailingNonGeographicModifier(extractedLocation);
+  const explicitLocation = discardedExplicitLocation ? null : extractedLocation;
   const evidenceExists = (evidence: string) => (` ${text} `).includes(` ${normalizeContextualText(evidence)} `);
   const requestSpeechAct = proposal.speech_act === undefined || proposal.speech_act === "request";
   const strongExplicitService = explicitService !== null && requestSpeechAct && !hasUnsafeRequestContext(text)
@@ -121,7 +130,7 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   if (hasUnsafeRequestContext(text)) return { kind: "clarify", memory, correction: false };
   const proposedCatalogServices = proposal.services.map(item => catalog.find(c => c.key === item.key)
     ?? (explicitService ? catalog.find(c => c.name === explicitService) : undefined));
-  const locationIsLiteral = proposal.location !== null && (evidenceExists(proposal.location.text)
+  const locationIsLiteral = proposal.location !== null && !hasTrailingNonGeographicModifier(proposal.location.text) && (evidenceExists(proposal.location.text)
     || normalizeContextualText(proposal.location.text) === normalizeContextualText(explicitLocation ?? ""));
   if (proposal.services.some(item => !evidenceExists(item.evidence))
     || (!explicitService && proposedCatalogServices.some(item => !item))
@@ -134,6 +143,7 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   }
   // Informational questions never grant permission for a new search, even if service/city are mentioned.
   if (proposal.speech_act === "information") return { kind: "clarify", memory, correction: false };
+  if (discardedExplicitLocation && !proposal.location) return { kind: "clarify", memory, correction: false };
   if (!proposal.services.length && !proposal.location && !explicitService && !explicitLocation) return { kind: "clarify", memory, correction: false };
   // explicitService is already backed by an exact/phrase catalogue term found
   // in the original message. The canonical display name need not be literal:

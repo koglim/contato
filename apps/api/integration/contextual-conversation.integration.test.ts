@@ -15,11 +15,10 @@ after(closeDatabaseConnection);
 const headers = { "x-internal-key": "b2-integration" };
 const basic = (overrides: Partial<ContextualProposal> = {}): ContextualProposal => ({ intent: "search", services: [], location: null, uncertain: false, ...overrides });
 
-test("B2 natural clarification is persisted before effects; retry does not regenerate", async () => {
-  for (const unavailable of [false, true]) {
+test("B2 deterministic location clarification is persisted before effects; retry does not regenerate", async () => {
   const f = await fixture();
   try {
-    f.setCompose(async input => { assert.equal(input.target, "location"); if (unavailable) throw new Error("composer unavailable"); return { target: input.target, question: "Em qual cidade você precisa desse atendimento?" }; });
+    f.setCompose(async () => { throw new Error("composer must not run for missing location"); });
     await query(`CREATE FUNCTION b2_fail_outbound() RETURNS trigger AS $$ BEGIN
       IF NEW.recipient_phone_e164 = '${f.phone}' THEN RAISE EXCEPTION 'injected B2 outbox failure'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
     await query("CREATE TRIGGER b2_fail_outbound BEFORE INSERT ON channel_outbound_messages FOR EACH ROW EXECUTE FUNCTION b2_fail_outbound()");
@@ -31,7 +30,8 @@ test("B2 natural clarification is persisted before effects; retry does not regen
     assert.equal((await f.receive(text,id)).statusCode,409,"backoff must prevent immediate retries");
     await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE provider_message_id=$1 AND phone_e164=$2",[id,f.phone]);
     const retry = await f.receive(text, id); assert.equal(retry.statusCode, 200, retry.body);
-    assert.equal(retry.json().reply_text, unavailable ? `Em qual cidade você precisa de ${f.name}?` : "Em qual cidade você precisa desse atendimento?");
+    assert.equal(retry.json().reply_text, `Em qual cidade você precisa de ${f.name}?`);
+    assert.equal(f.compositions(), 0);
     assert.equal(f.calls(), calls); assert.equal(f.compositions(), compositions);
     await f.sent(retry.json().outbound.id);
     const replay = await f.receive(text, id); assert.equal(replay.json().outbound.status, "sent");
@@ -39,7 +39,6 @@ test("B2 natural clarification is persisted before effects; retry does not regen
   } finally {
     await query("DROP TRIGGER IF EXISTS b2_fail_outbound ON channel_outbound_messages"); await query("DROP FUNCTION IF EXISTS b2_fail_outbound()");
     await f.cleanup();
-  }
   }
 });
 
@@ -132,7 +131,7 @@ for (const stage of ["before_proposal","after_proposal","after_draft"] as const)
       await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE id=$1",[record.id]);
       const recovered=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
       assert.equal(recovered.statusCode,200,recovered.body);assert.equal(recovered.json().status,"processed",recovered.body);
-      assert.equal(f.calls(),stage==="before_proposal"?1:0);assert.equal(f.compositions(),stage==="after_draft"?0:1);
+      assert.equal(f.calls(),stage==="before_proposal"?1:0);assert.equal(f.compositions(),0);
       let effects=0;
       await assert.rejects(context.acquire(record,"fake"));
       await assert.rejects(context.saveProposal(record,snapshot,basic()));
@@ -140,7 +139,7 @@ for (const stage of ["before_proposal","after_proposal","after_draft"] as const)
       await assert.rejects(context.commit(record,snapshot,async()=>{effects++;return{value:true,memory:snapshot.memory};}));
       assert.equal(effects,0);assert.equal((await f.state()).revision,1);
       const replay=await f.receive(payload.raw_text,payload.provider_message_id);assert.equal(replay.json().duplicate,true);
-      assert.equal(f.calls(),stage==="before_proposal"?1:0);assert.equal(f.compositions(),stage==="after_draft"?0:1);
+      assert.equal(f.calls(),stage==="before_proposal"?1:0);assert.equal(f.compositions(),0);
       assert.equal((await query("SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164=$1",[f.phone])).rows.length,1);
       assert.equal((await query("SELECT id FROM search_conversations WHERE customer_id=$1",[snapshot.customerId])).rows.length,1);
     }finally{await f.cleanup();}
@@ -248,7 +247,8 @@ for (const dependency of ["model","geocoder"] as const) {
     try {
       f.set(async()=> {if(dependency==="model") throw new Error("private provider failure");return basic({speech_act:"request",location:{text:"Sinop",evidence:"Sinop"}});});
       if(dependency==="geocoder") f.setGeo(async()=>{throw new Error("private geocoder failure");});
-      const payload={provider:"b2-test",provider_message_id:randomUUID(),phone_e164:f.phone,raw_text:`Preciso de ${f.name} em Sinop`,country_code:"BR",limit:3};
+      const payload={provider:"b2-test",provider_message_id:randomUUID(),phone_e164:f.phone,
+        raw_text:dependency==="model"?`Pode procurar ${f.name} em Sinop?`:`Preciso de ${f.name} em Sinop`,country_code:"BR",limit:3};
       const registered=await inbox.createOrFind(payload,{contextual:true}), record=await inbox.claim(registered.record.id,randomUUID(),60);assert.ok(record);
       const snapshot=await context.acquire(record,"fake");
       await query("UPDATE channel_inbound_messages SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1",[record.id]);
@@ -296,6 +296,7 @@ async function fixture() {
   }
   let calls = 0, geoCalls = 0;
   const fallbackEvents: ConversationAIFallbackEvent[] = [];
+  const executionEvents: Array<{ path: string; interpretationCalled: boolean; compositionCalled: boolean; finalStatus: string }> = [];
   let next: (text: string) => Promise<unknown> = async () => basic();
   let compose: ContextualProvider["composeQuestion"];
   let compositions = 0;
@@ -308,6 +309,7 @@ async function fixture() {
   const contextual = new ContextualConversationService(provider, { async resolve(input) { geoCalls++; return resolveLocation(input); } }, {
     timeoutMs: 25,
     onFallback: event => fallbackEvents.push(event),
+    onExecutionPath: event => executionEvents.push(event),
   });
   const app = buildApp({ internalApiKey: "b2-integration", contextualConversation: contextual });
   const receive = (text: string, id = randomUUID()) => app.inject({ method: "POST", url: "/internal/channel/inbound/messages", headers,
@@ -354,9 +356,57 @@ async function fixture() {
     await query("INSERT INTO service_aliases(service_id,alias,normalized_alias) VALUES ($1,$2,$3)", [serviceId, alias, alias.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()]);
   };
   return { name, phone, serviceId, app, receive, sent, state, cleanup, addService, calls: () => calls, geoCalls: () => geoCalls, compositions: () => compositions,
-    fallbackEvents: () => fallbackEvents, set: (fn: typeof next) => { next = fn; }, setCompose: (fn: NonNullable<typeof compose>) => { compose = fn; }, addAlias,
+    fallbackEvents: () => fallbackEvents, executionEvents: () => executionEvents, set: (fn: typeof next) => { next = fn; }, setCompose: (fn: NonNullable<typeof compose>) => { compose = fn; }, addAlias,
     setGeo: (fn: typeof resolveLocation) => { resolveLocation = fn; } };
 }
+
+for (const city of ["Cuiabá", "Sinop"] as const) {
+  test(`B2 direct request in ${city} searches without interpretation or composition`, async () => {
+    const f = await fixture();
+    try {
+      f.set(async () => { throw new Error("interpretation must not run for direct request"); });
+      f.setCompose(async () => { throw new Error("composition must not run for direct request"); });
+      const response = await f.receive(`preciso de um ${f.name} em ${city}`);
+      assert.equal(response.statusCode, 200, response.body);
+      assert.ok(["matched", "no_matches"].includes(response.json().result.status));
+      assert.equal(f.calls(), 0); assert.equal(f.compositions(), 0); assert.equal(f.geoCalls(), 1);
+      const execution = f.executionEvents().at(-1);
+      assert.equal(execution?.path, "deterministic_fast_path");
+      assert.equal(execution?.interpretationCalled, false);
+      assert.equal(execution?.compositionCalled, false);
+      assert.equal(execution?.finalStatus, response.json().result.status);
+    } finally { await f.cleanup(); }
+  });
+}
+
+test("B2 trailing discourse uses interpretation and persists the clean city", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const response = await f.receive(`preciso de um ${f.name} em Sinop por favor`);
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().result.status, "matched");
+    assert.equal(f.calls(), 1);
+    assert.equal(f.geoCalls(), 1);
+    assert.equal((await f.state()).memory.location.value, "Sinop");
+    assert.equal(f.executionEvents().at(-1)?.path, "ai_interpretation");
+  } finally { await f.cleanup(); }
+});
+
+test("B2 negated, informational and hypothetical mentions never use the direct search path", async () => {
+  for (const [message, speechAct] of [["não preciso de", "negated"], ["vocês trabalham com", "information"],
+    ["talvez eu precise de", "hypothetical"]] as const) {
+    const f = await fixture();
+    try {
+      f.set(async () => basic({ intent: "clarify", speech_act: speechAct, uncertain: true }));
+      const response = await f.receive(`${message} ${f.name} em Cuiabá${speechAct === "information" ? "?" : ""}`);
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(f.calls(), 1); assert.equal(f.geoCalls(), 0);
+      assert.equal(f.executionEvents().at(-1)?.path, "ai_interpretation");
+      assert.equal((await query("SELECT id FROM search_requests WHERE service_id=$1", [f.serviceId])).rows.length, 0);
+    } finally { await f.cleanup(); }
+  }
+});
 
 test("B2 accepts city before service and no_matches keeps a valid active conversation", async () => {
   const f = await fixture();
@@ -538,7 +588,7 @@ test("B2 full Inbox journey asks missing fields, resumes after FAQ and corrects 
     f.setCompose(async input => { assert.equal(input.target, "location"); assert.equal(input.location, null); return { target: input.target, question: "Em qual cidade precisa desse atendimento?" }; });
     f.set(async () => basic({ speech_act: "request" }));
     const first = await f.receive(`Preciso de ${f.name}, consegue me ajudar?`);
-    assert.equal(first.json().result.status, "needs_location"); assert.equal(first.json().reply_text, "Em qual cidade precisa desse atendimento?");
+    assert.equal(first.json().result.status, "needs_location"); assert.equal(first.json().reply_text, `Em qual cidade você precisa de ${f.name}?`);
     const before = await f.state(), compositions = f.compositions();
     f.set(async () => basic({ intent: "faq_cost", speech_act: "information" }));
     const faq = await f.receive("Quanto custa usar?"); assert.match(faq.json().reply_text, /gratuito/);
@@ -561,7 +611,7 @@ test("B2 full Inbox journey asks missing fields, resumes after FAQ and corrects 
   } finally { await f.cleanup(); }
 });
 
-test("B2 invalid or unavailable composition falls back without losing interpretation and persists once", async () => {
+test("B2 simple missing location never calls composition and persists once", async () => {
   const f = await fixture();
   try {
     f.set(async () => basic({ speech_act: "request" }));
@@ -578,6 +628,7 @@ test("B2 invalid or unavailable composition falls back without losing interpreta
       const replay = await f.receive(text, key); assert.equal(replay.json().outbound.id, result.json().outbound.id);
       assert.equal(replay.json().reply_text, result.json().reply_text); assert.equal(f.calls(), calls); assert.equal(f.compositions(), compositions);
     }
+    assert.equal(f.compositions(), 0);
     assert.equal(f.geoCalls(), 0);
     assert.equal((await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows.length, 0);
   } finally { await f.cleanup(); }
@@ -590,7 +641,9 @@ test("B2 ambiguous location asks clarification instead of claiming matches", asy
     f.setGeo(async input => ({ status: "unresolved", query: input.query, country_code: "BR", provider: "fake", candidates: [], match: null }));
     f.setCompose(async input => { assert.equal(input.target, "location"); assert.equal(input.reason, "ambiguous"); assert.equal(input.location, "Centro"); return { target: input.target, question: "Esse centro fica em qual cidade e estado?" }; });
     const response = await f.receive(`Preciso de ${f.name} no Centro?`); assert.equal(response.statusCode, 200, response.body);
-    assert.equal(response.json().result.status, "needs_location"); assert.equal(response.json().reply_text, "Esse centro fica em qual cidade e estado?");
+    assert.equal(response.json().result.status, "needs_location");
+    assert.equal(response.json().reply_text, "Essa localização ainda não ficou clara. Pode informar a cidade e o estado ou um bairro de referência?");
+    assert.equal(f.compositions(), 0);
     assert.equal((await query("SELECT id FROM search_requests WHERE service_id=$1", [f.serviceId])).rows.length, 0);
   } finally { await f.cleanup(); }
 });
