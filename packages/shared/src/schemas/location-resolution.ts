@@ -12,6 +12,7 @@ export const locationResolutionCandidateSchema = z.object({
   neighborhood: z.string().nullable(),
   confidence: z.number().min(0).max(1).nullable(),
   layer: z.string().nullable(),
+  municipality_code: z.string().regex(/^\d{7}$/).optional(),
 });
 
 export const locationResolutionRequestSchema = z.object({
@@ -27,4 +28,6 @@ export const locationResolutionResponseSchema = z.object({
   match: locationResolutionCandidateSchema.nullable(),
   candidates: z.array(locationResolutionCandidateSchema).max(10),
   provider: z.string().min(1),
+  resolution_source: z.enum(["ibge_municipality", "pelias"]).optional(),
+  ambiguity_count: z.number().int().positive().optional(),
 });

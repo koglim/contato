@@ -1,16 +1,8 @@
 import type { LocationResolutionCandidate, LocationResolutionInput, LocationResolutionResponse } from "@contatocerto/shared";
 import type { LocationResolutionConfig } from "../../config/location-resolution.js";
 import type { GeocodingProvider, LocationResolutionObserver, LocationResolutionService } from "./location-resolution.types.js";
+import { normalizeBrazilianState, parseBrazilianPlaceQuery, resolveBrazilianMunicipality } from "./brazil-municipality-index.js";
 
-const BR_STATES: Record<string, string> = {
-  AC: "AC", ACRE: "AC", AL: "AL", "ALAGOAS": "AL", AP: "AP", AMAPA: "AP", AMAZONAS: "AM", AM: "AM",
-  BA: "BA", BAHIA: "BA", CE: "CE", CEARA: "CE", DF: "DF", "DISTRITO FEDERAL": "DF", ES: "ES", "ESPIRITO SANTO": "ES",
-  GO: "GO", GOIAS: "GO", MA: "MA", MARANHAO: "MA", MT: "MT", "MATO GROSSO": "MT", MS: "MS", "MATO GROSSO DO SUL": "MS",
-  MG: "MG", "MINAS GERAIS": "MG", PA: "PA", PARA: "PA", PB: "PB", "PARAIBA": "PB", PR: "PR", PARANA: "PR",
-  PE: "PE", PERNAMBUCO: "PE", PI: "PI", PIAUI: "PI", RJ: "RJ", "RIO DE JANEIRO": "RJ", RN: "RN", "RIO GRANDE DO NORTE": "RN",
-  RS: "RS", "RIO GRANDE DO SUL": "RS", RO: "RO", RONDONIA: "RO", RR: "RR", RORAIMA: "RR", SC: "SC", "SANTA CATARINA": "SC",
-  SP: "SP", "SAO PAULO": "SP", SE: "SE", SERGIPE: "SE", TO: "TO", TOCANTINS: "TO",
-};
 const CITY_LAYERS = new Set(["locality", "localadmin"]);
 const EQUIVALENT_CENTROID_DISTANCE_KM = 10;
 
@@ -18,14 +10,8 @@ function normalize(value: string | null | undefined) {
   return value?.normalize("NFD").replace(/[\u0300-\u036f]/gu, "").trim().replace(/\s+/gu, " ").toLocaleUpperCase("pt-BR") ?? "";
 }
 
-function explicitBrazilianState(query: string, countryCode: string) {
-  if (countryCode.toUpperCase() !== "BR") return null;
-  const suffix = query.trim().match(/(?:,|\s)\s*([\p{L} ]+)$/u)?.[1];
-  return suffix ? BR_STATES[normalize(suffix)] ?? null : null;
-}
-
 function normalizedState(value: string | null) {
-  return BR_STATES[normalize(value)] ?? normalize(value);
+  return normalizeBrazilianState(value);
 }
 
 function distanceKm(left: LocationResolutionCandidate, right: LocationResolutionCandidate) {
@@ -80,27 +66,45 @@ function collapseEquivalentCandidates(candidates: LocationResolutionCandidate[],
   return { candidates: collapsed, collapsedCount };
 }
 
-function response(input: LocationResolutionInput, provider: string, status: LocationResolutionResponse["status"], match: LocationResolutionCandidate | null, candidates: LocationResolutionCandidate[]): LocationResolutionResponse {
-  return { status, query: input.query, country_code: input.country_code, match, candidates, provider };
+function response(input: LocationResolutionInput, provider: string, status: LocationResolutionResponse["status"], match: LocationResolutionCandidate | null, candidates: LocationResolutionCandidate[], resolutionSource: "ibge_municipality" | "pelias", ambiguityCount?: number): LocationResolutionResponse {
+  return { status, query: input.query, country_code: input.country_code, match, candidates, provider, resolution_source: resolutionSource, ...(ambiguityCount === undefined ? {} : { ambiguity_count: ambiguityCount }) };
 }
 
 export class DeterministicLocationResolutionService implements LocationResolutionService {
+  private provider: GeocodingProvider | undefined;
+  private readonly providerFactory: () => GeocodingProvider;
+
   constructor(
-    private readonly provider: GeocodingProvider,
+    provider: GeocodingProvider | (() => GeocodingProvider),
     private readonly config: LocationResolutionConfig,
     private readonly observe?: LocationResolutionObserver,
-  ) {}
+  ) {
+    if (typeof provider === "function") {
+      this.providerFactory = provider;
+    } else {
+      this.provider = provider;
+      this.providerFactory = () => provider;
+    }
+  }
 
-  private report(candidates: LocationResolutionCandidate[], collapsedCount: number, status: LocationResolutionResponse["status"], reason: "no_candidates" | "below_threshold" | "competing_places" | "equivalent_candidates_collapsed" | "resolved") {
+  private getGeocodingProvider() {
+    this.provider ??= this.providerFactory();
+    return this.provider;
+  }
+
+  private report(candidates: LocationResolutionCandidate[], collapsedCount: number, status: LocationResolutionResponse["status"], reason: "no_candidates" | "below_threshold" | "competing_places" | "equivalent_candidates_collapsed" | "resolved", resolutionSource: "ibge_municipality" | "pelias", ambiguityCount?: number) {
     const top = candidates[0];
     const second = candidates[1];
     const confidenceGap = top?.confidence !== null && top?.confidence !== undefined && second?.confidence !== null && second?.confidence !== undefined
       ? Number((top.confidence - second.confidence).toFixed(4)) : null;
-    if (status === "resolved" && collapsedCount === 0) return;
     try {
       this.observe?.({
         status,
         reason,
+        resolution_source: resolutionSource,
+        ...(status === "resolved" && top?.municipality_code ? { municipality_code: top.municipality_code } : {}),
+        ...(status === "resolved" && top?.state ? { state: top.state } : {}),
+        ...(ambiguityCount === undefined ? {} : { ambiguity_count: ambiguityCount }),
         relevantCandidateCount: candidates.length,
         collapsedCandidateCount: collapsedCount,
         confidenceGap,
@@ -113,8 +117,19 @@ export class DeterministicLocationResolutionService implements LocationResolutio
   }
 
   async resolve(input: LocationResolutionInput): Promise<LocationResolutionResponse> {
-    const stateEvidence = explicitBrazilianState(input.query, input.country_code);
-    const providerCandidates = await this.provider.geocode(input);
+    const municipality = resolveBrazilianMunicipality(input.query, input.country_code, input.limit);
+    if (municipality) {
+      if (municipality.status === "ambiguous") {
+        this.report(municipality.candidates, 0, "ambiguous", "competing_places", "ibge_municipality", municipality.ambiguityCount);
+        return response(input, "ibge", "ambiguous", null, municipality.candidates, "ibge_municipality", municipality.ambiguityCount);
+      }
+      this.report([municipality.match!], 0, "resolved", "resolved", "ibge_municipality");
+      return response(input, "ibge", "resolved", municipality.match, [], "ibge_municipality");
+    }
+
+    const stateEvidence = parseBrazilianPlaceQuery(input.query, input.country_code).state;
+    const provider = this.getGeocodingProvider();
+    const providerCandidates = await provider.geocode(input);
     const cityCandidates = providerCandidates.filter((candidate) => CITY_LAYERS.has(candidate.layer ?? ""));
     const stateFilteredCandidates = stateEvidence
       ? cityCandidates.filter((candidate) => normalizedState(candidate.state) === stateEvidence)
@@ -124,20 +139,20 @@ export class DeterministicLocationResolutionService implements LocationResolutio
     const second = candidates[1];
     if (!top) {
       const status = "unresolved";
-      this.report(candidates, collapsedCount, status, "no_candidates");
-      return response(input, this.provider.name, status, null, candidates);
+      this.report(candidates, collapsedCount, status, "no_candidates", "pelias");
+      return response(input, provider.name, status, null, candidates, "pelias");
     }
     if (top.confidence === null || top.confidence < this.config.confidenceThreshold) {
       const status = "unresolved";
-      this.report(candidates, collapsedCount, status, "below_threshold");
-      return response(input, this.provider.name, status, null, candidates);
+      this.report(candidates, collapsedCount, status, "below_threshold", "pelias");
+      return response(input, provider.name, status, null, candidates, "pelias");
     }
     if (second && second.confidence !== null && top.confidence - second.confidence <= this.config.ambiguityGap) {
       const status = "ambiguous";
-      this.report(candidates, collapsedCount, status, "competing_places");
-      return response(input, this.provider.name, status, null, candidates);
+      this.report(candidates, collapsedCount, status, "competing_places", "pelias");
+      return response(input, provider.name, status, null, candidates, "pelias");
     }
-    this.report(candidates, collapsedCount, "resolved", collapsedCount ? "equivalent_candidates_collapsed" : "resolved");
-    return response(input, this.provider.name, "resolved", top, []);
+    this.report(candidates, collapsedCount, "resolved", collapsedCount ? "equivalent_candidates_collapsed" : "resolved", "pelias");
+    return response(input, provider.name, "resolved", top, [], "pelias");
   }
 }

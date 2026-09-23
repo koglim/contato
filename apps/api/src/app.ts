@@ -116,7 +116,7 @@ function createLazyLocationResolutionService(provider: GeocodingProvider | undef
   return {
     resolve(input) {
       service ??= new DeterministicLocationResolutionService(
-        provider ?? new OpenRouteServiceGeocodingProvider(),
+        () => provider ?? new OpenRouteServiceGeocodingProvider(),
         readLocationResolutionConfig(),
         observe,
       );
