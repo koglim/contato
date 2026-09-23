@@ -48,7 +48,7 @@ test("location resolution resolves Sinop and preserves provider identity and req
 });
 
 test("IBGE resolves the unique official municipality without calling Pelias and keeps one record's coordinates", async () => {
-  for (const query of ["Cuiabá", "CUIABA", "cuiaba", "Cuiabá, MT"]) {
+  for (const query of ["Cuiabá", "CUIABA", "cuiaba", "Cuiabá, MT", "Cuiabá MT"]) {
     const current = resolve([], query);
     const result = await current.service.resolve(current.input);
     assert.equal(result.status, "resolved");
@@ -66,6 +66,51 @@ test("IBGE resolves the unique official municipality without calling Pelias and 
       collapsedCandidateCount: 0, confidenceGap: null,
       top: { city: "Cuiabá", state: "MT", confidence: 1, layer: "locality" }, second: null,
     });
+  }
+});
+
+test("IBGE full-name matches take precedence over trailing state aliases", async () => {
+  const municipalities = [
+    ["Alto Paraíso de Goiás", "GO", "5200605"],
+    ["Conceição do Pará", "MG", "3117603"],
+    ["Além Paraíba", "MG", "3101508"],
+    ["Boca do Acre", "AM", "1300706"],
+    ["Cruz do Espírito Santo", "PB", "2504900"],
+  ] as const;
+
+  for (const [query, state, code] of municipalities) {
+    const current = resolve([], query);
+    const result = await current.service.resolve(current.input);
+    assert.equal(result.status, "resolved", query);
+    assert.equal(result.resolution_source, "ibge_municipality", query);
+    assert.equal(result.match?.state, state, query);
+    assert.equal(result.match?.municipality_code, code, query);
+    assert.equal(current.provider.received, undefined, query);
+  }
+});
+
+test("Bom Jesus do Tocantins remains ambiguous as a complete name without UF", async () => {
+  const current = resolve([], "Bom Jesus do Tocantins");
+  const result = await current.service.resolve(current.input);
+  assert.equal(result.status, "ambiguous");
+  assert.equal(result.resolution_source, "ibge_municipality");
+  assert.equal(result.ambiguity_count, 2);
+  assert.deepEqual(new Set(result.candidates.map(({ state }) => state)), new Set(["PA", "TO"]));
+  assert.equal(current.provider.received, undefined);
+});
+
+test("Bom Jesus do Tocantins resolves the municipality selected by an explicit UF", async () => {
+  for (const [query, state, code] of [
+    ["Bom Jesus do Tocantins, PA", "PA", "1501576"],
+    ["Bom Jesus do Tocantins, TO", "TO", "1703305"],
+  ] as const) {
+    const current = resolve([], query);
+    const result = await current.service.resolve(current.input);
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolution_source, "ibge_municipality");
+    assert.equal(result.match?.state, state);
+    assert.equal(result.match?.municipality_code, code);
+    assert.equal(current.provider.received, undefined);
   }
 });
 
@@ -92,12 +137,14 @@ test("duplicate official municipality names stay ambiguous without UF and resolv
   assert.deepEqual(new Set(result.candidates.map((item) => item.state)), new Set(["BA", "MS", "PA", "PE"]));
   assert.equal(ambiguous.provider.received, undefined);
 
-  const explicit = resolve([], "Bonito, MS");
-  const stateResult = await explicit.service.resolve(explicit.input);
-  assert.equal(stateResult.status, "resolved");
-  assert.equal(stateResult.match?.state, "MS");
-  assert.equal(stateResult.match?.municipality_code, "5002209");
-  assert.equal(explicit.provider.received, undefined);
+  for (const query of ["Bonito, MS", "Bonito MS"]) {
+    const explicit = resolve([], query);
+    const stateResult = await explicit.service.resolve(explicit.input);
+    assert.equal(stateResult.status, "resolved");
+    assert.equal(stateResult.match?.state, "MS");
+    assert.equal(stateResult.match?.municipality_code, "5002209");
+    assert.equal(explicit.provider.received, undefined);
+  }
 });
 
 test("an explicit UF mismatch and a name absent from the index preserve the Pelias fallback", async () => {

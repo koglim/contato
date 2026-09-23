@@ -42,6 +42,10 @@ export function parseBrazilianPlaceQuery(query: string, countryCode: string): Br
   const normalizedQuery = normalizeMunicipalityName(query);
   if (countryCode.toUpperCase() !== "BR") return { state: null, normalizedName: normalizedQuery };
 
+  // A trailing state name may be part of an official municipality name. Preserve
+  // a complete index match before considering any suffix to be explicit UF.
+  if (municipalitiesByName.has(normalizedQuery)) return { state: null, normalizedName: normalizedQuery };
+
   for (const alias of sortedStateAliases) {
     const suffix = ` ${alias}`;
     if (!normalizedQuery.endsWith(suffix)) continue;
