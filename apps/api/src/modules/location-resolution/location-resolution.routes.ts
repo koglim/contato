@@ -16,7 +16,7 @@ export const locationResolutionRoutes: FastifyPluginAsync<LocationResolutionRout
     const body = locationResolutionRequestSchema.safeParse(request.body);
     if (!body.success) return validationError(reply, body.error.issues);
     try {
-      service ??= new DeterministicLocationResolutionService(options.provider ?? new OpenRouteServiceGeocodingProvider(), readLocationResolutionConfig(), diagnostic => {
+      service ??= new DeterministicLocationResolutionService(() => options.provider ?? new OpenRouteServiceGeocodingProvider(), readLocationResolutionConfig(), diagnostic => {
         app.log.info({ code: "location_resolution_diagnostic", ...diagnostic }, "Location resolution diagnostic");
       });
       return reply.send(locationResolutionResponseSchema.parse(await service.resolve(body.data)));

@@ -11,6 +11,10 @@ export type LocationResolutionService = {
 };
 export type LocationResolutionDiagnostic = {
   status: LocationResolutionResponse["status"];
+  resolution_source: "ibge_municipality" | "pelias";
+  municipality_code?: string;
+  state?: string;
+  ambiguity_count?: number;
   reason: "no_candidates" | "below_threshold" | "competing_places" | "equivalent_candidates_collapsed" | "resolved";
   relevantCandidateCount: number;
   collapsedCandidateCount: number;

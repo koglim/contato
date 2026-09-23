@@ -20,7 +20,7 @@ class FakeProvider implements GeocodingProvider {
 
 function resolve(
   results: LocationResolutionCandidate[],
-  query = "Sinop",
+  query = "Cidade de teste",
   config = { confidenceThreshold: 0.85, ambiguityGap: 0.1 },
 ) {
   const provider = new FakeProvider(results);
@@ -40,14 +40,137 @@ test("location resolution resolves Sinop and preserves provider identity and req
   assert.equal(result.provider, "fake-geocoder");
   assert.equal(result.match?.city, "Sinop");
   assert.deepEqual(current.provider.received, current.input);
-  assert.deepEqual(current.diagnostics, []);
+  assert.deepEqual(current.diagnostics, [{
+    status: "resolved", reason: "resolved", resolution_source: "pelias", state: "MT",
+    relevantCandidateCount: 1, collapsedCandidateCount: 0, confidenceGap: null,
+    top: { city: "Sinop", state: "MT", confidence: 0.9, layer: "locality" }, second: null,
+  }]);
+});
+
+test("IBGE resolves the unique official municipality without calling Pelias and keeps one record's coordinates", async () => {
+  for (const query of ["Cuiabá", "CUIABA", "cuiaba", "Cuiabá, MT", "Cuiabá MT"]) {
+    const current = resolve([], query);
+    const result = await current.service.resolve(current.input);
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolution_source, "ibge_municipality");
+    assert.equal(result.provider, "ibge");
+    assert.deepEqual(result.match, {
+      label: "Cuiabá, MT, Brasil", latitude: -15.56760025024414, longitude: -56.07500076293945,
+      city: "Cuiabá", state: "MT", country_code: "BR", neighborhood: null, confidence: 1,
+      layer: "locality", municipality_code: "5103403",
+    });
+    assert.equal(current.provider.received, undefined);
+    assert.deepEqual(current.diagnostics[0], {
+      status: "resolved", reason: "resolved", resolution_source: "ibge_municipality",
+      municipality_code: "5103403", state: "MT", relevantCandidateCount: 1,
+      collapsedCandidateCount: 0, confidenceGap: null,
+      top: { city: "Cuiabá", state: "MT", confidence: 1, layer: "locality" }, second: null,
+    });
+  }
+});
+
+test("IBGE full-name matches take precedence over trailing state aliases", async () => {
+  const municipalities = [
+    ["Alto Paraíso de Goiás", "GO", "5200605"],
+    ["Conceição do Pará", "MG", "3117603"],
+    ["Além Paraíba", "MG", "3101508"],
+    ["Boca do Acre", "AM", "1300706"],
+    ["Cruz do Espírito Santo", "PB", "2504900"],
+  ] as const;
+
+  for (const [query, state, code] of municipalities) {
+    const current = resolve([], query);
+    const result = await current.service.resolve(current.input);
+    assert.equal(result.status, "resolved", query);
+    assert.equal(result.resolution_source, "ibge_municipality", query);
+    assert.equal(result.match?.state, state, query);
+    assert.equal(result.match?.municipality_code, code, query);
+    assert.equal(current.provider.received, undefined, query);
+  }
+});
+
+test("Bom Jesus do Tocantins remains ambiguous as a complete name without UF", async () => {
+  const current = resolve([], "Bom Jesus do Tocantins");
+  const result = await current.service.resolve(current.input);
+  assert.equal(result.status, "ambiguous");
+  assert.equal(result.resolution_source, "ibge_municipality");
+  assert.equal(result.ambiguity_count, 2);
+  assert.deepEqual(new Set(result.candidates.map(({ state }) => state)), new Set(["PA", "TO"]));
+  assert.equal(current.provider.received, undefined);
+});
+
+test("Bom Jesus do Tocantins resolves the municipality selected by an explicit UF", async () => {
+  for (const [query, state, code] of [
+    ["Bom Jesus do Tocantins, PA", "PA", "1501576"],
+    ["Bom Jesus do Tocantins, TO", "TO", "1703305"],
+  ] as const) {
+    const current = resolve([], query);
+    const result = await current.service.resolve(current.input);
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolution_source, "ibge_municipality");
+    assert.equal(result.match?.state, state);
+    assert.equal(result.match?.municipality_code, code);
+    assert.equal(current.provider.received, undefined);
+  }
+});
+
+test("IBGE resolves explicit UF and unique Sinop queries to their official municipality record", async () => {
+  for (const query of ["Sinop", "Sinop, MT"]) {
+    const current = resolve([], query);
+    const result = await current.service.resolve(current.input);
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolution_source, "ibge_municipality");
+    assert.equal(result.match?.municipality_code, "5107909");
+    assert.equal(result.match?.state, "MT");
+    assert.equal(result.match?.latitude, -11.8572998046875);
+    assert.equal(result.match?.longitude, -55.50830078125);
+    assert.equal(current.provider.received, undefined);
+  }
+});
+
+test("duplicate official municipality names stay ambiguous without UF and resolve with matching UF", async () => {
+  const ambiguous = resolve([], "Bonito");
+  const result = await ambiguous.service.resolve(ambiguous.input);
+  assert.equal(result.status, "ambiguous");
+  assert.equal(result.resolution_source, "ibge_municipality");
+  assert.equal(result.ambiguity_count, 4);
+  assert.deepEqual(new Set(result.candidates.map((item) => item.state)), new Set(["BA", "MS", "PA", "PE"]));
+  assert.equal(ambiguous.provider.received, undefined);
+
+  for (const query of ["Bonito, MS", "Bonito MS"]) {
+    const explicit = resolve([], query);
+    const stateResult = await explicit.service.resolve(explicit.input);
+    assert.equal(stateResult.status, "resolved");
+    assert.equal(stateResult.match?.state, "MS");
+    assert.equal(stateResult.match?.municipality_code, "5002209");
+    assert.equal(explicit.provider.received, undefined);
+  }
+});
+
+test("an explicit UF mismatch and a name absent from the index preserve the Pelias fallback", async () => {
+  const mismatchedUf = resolve([
+    candidate({ city: "Cuiabá", state: "AM", latitude: -3.1, longitude: -60.0, confidence: 0.9 }),
+    candidate({ city: "Cuiabá", state: "MT", confidence: 0.99 }),
+  ], "Cuiabá, AM");
+  const mismatchResult = await mismatchedUf.service.resolve(mismatchedUf.input);
+  assert.equal(mismatchResult.status, "resolved");
+  assert.equal(mismatchResult.resolution_source, "pelias");
+  assert.equal(mismatchResult.match?.state, "AM");
+  assert.equal(mismatchedUf.provider.received?.query, "Cuiabá, AM");
+
+  const missing = resolve([candidate({ city: "Vila Teste", state: "MT", confidence: 0.9 })], "Vila Teste");
+  const missingResult = await missing.service.resolve(missing.input);
+  assert.equal(missingResult.status, "resolved");
+  assert.equal(missingResult.resolution_source, "pelias");
+  assert.equal(missingResult.match?.city, "Vila Teste");
+  assert.equal(missing.provider.received?.query, "Vila Teste");
 });
 
 test("equivalent Cuiabá locality and localadmin candidates collapse to one resolved city", async () => {
   const current = resolve([
     candidate({ label: "Cuiabá, Mato Grosso, Brasil", city: "Cuiabá", state: "MT", latitude: -15.601, longitude: -56.097, confidence: 0.91 }),
     candidate({ label: "Cuiabá, Mato Grosso, Brasil", city: "CUIABA", state: "Mato Grosso", latitude: -15.62, longitude: -56.11, confidence: 0.89, layer: "localadmin" }),
-  ], "Cuiabá");
+  ], "Localidade de teste");
   const result = await current.service.resolve(current.input);
   assert.equal(result.status, "resolved");
   assert.equal(result.match?.city, "Cuiabá");
@@ -60,7 +183,7 @@ test("equivalent Cuiabá locality and localadmin candidates collapse to one reso
 test("an above-threshold locality remains the representative despite higher localadmin confidence", async () => {
   const locality = candidate({ label: "Cuiabá locality", city: "Cuiabá", state: "MT", latitude: -15.601, longitude: -56.097, confidence: 0.89, layer: "locality" });
   const localadmin = candidate({ label: "Cuiabá localadmin", city: "Cuiabá", state: "MT", latitude: -15.673, longitude: -56.097, confidence: 0.93, layer: "localadmin" });
-  const current = resolve([locality, localadmin], "Cuiabá");
+  const current = resolve([locality, localadmin], "Localidade de teste");
   const result = await current.service.resolve(current.input);
   assert.equal(result.status, "resolved");
   assert.deepEqual(result.match, locality);
@@ -69,7 +192,7 @@ test("an above-threshold locality remains the representative despite higher loca
 test("a below-threshold locality does not displace a reliable equivalent localadmin", async () => {
   const locality = candidate({ label: "Cuiabá locality", city: "Cuiabá", state: "MT", latitude: -15.601, longitude: -56.097, confidence: 0.8, layer: "locality" });
   const localadmin = candidate({ label: "Cuiabá localadmin", city: "Cuiabá", state: "MT", latitude: -15.673, longitude: -56.097, confidence: 0.92, layer: "localadmin" });
-  const current = resolve([locality, localadmin], "Cuiabá");
+  const current = resolve([locality, localadmin], "Localidade de teste");
   const result = await current.service.resolve(current.input);
   assert.equal(result.status, "resolved");
   assert.deepEqual(result.match, localadmin);
@@ -79,7 +202,7 @@ test("an explicit Brazilian UF removes incompatible cities before confidence com
   const current = resolve([
     candidate({ city: "Cuiabá", state: "GO", confidence: 0.99 }),
     candidate({ city: "Cuiabá", state: "MT", latitude: -15.601, longitude: -56.097, confidence: 0.87 }),
-  ], "Cuiabá, MT");
+  ], "Localidade de teste, MT");
   const result = await current.service.resolve(current.input);
   assert.equal(result.status, "resolved");
   assert.equal(result.match?.state, "MT");
@@ -89,7 +212,7 @@ test("same city names in different states remain ambiguous without an explicit U
   const current = resolve([
     candidate({ city: "Santa Rita", state: "MT", confidence: 0.91 }),
     candidate({ label: "Santa Rita, PB, Brasil", city: "Santa Rita", state: "PB", latitude: -7.1, longitude: -34.98, confidence: 0.88 }),
-  ], "Santa Rita");
+  ], "Localidade de teste");
   assert.equal((await current.service.resolve(current.input)).status, "ambiguous");
   assert.equal(current.diagnostics[0]?.reason, "competing_places");
 });
@@ -98,7 +221,7 @@ test("same city names with city-level centroids farther than the equivalence rad
   const current = resolve([
     candidate({ city: "Santa Rita", state: "MT", confidence: 0.91 }),
     candidate({ label: "Santa Rita administrative area", city: "Santa Rita", state: "MT", latitude: -11.65, longitude: -55.5091, confidence: 0.88, layer: "localadmin" }),
-  ], "Santa Rita");
+  ], "Localidade de teste");
   assert.equal((await current.service.resolve(current.input)).status, "ambiguous");
   assert.equal(current.diagnostics[0]?.collapsedCandidateCount, 0);
 });
@@ -141,7 +264,7 @@ test("location diagnostics omit coordinates and report top candidates and confid
   ]);
   await current.service.resolve(current.input);
   assert.deepEqual(current.diagnostics[0], {
-    status: "ambiguous", reason: "competing_places", relevantCandidateCount: 2, collapsedCandidateCount: 0,
+    status: "ambiguous", reason: "competing_places", resolution_source: "pelias", relevantCandidateCount: 2, collapsedCandidateCount: 0,
     confidenceGap: 0.06,
     top: { city: "Sinop", state: "MT", confidence: 0.9, layer: "locality" },
     second: { city: "Sinop", state: "SP", confidence: 0.84, layer: "locality" },
