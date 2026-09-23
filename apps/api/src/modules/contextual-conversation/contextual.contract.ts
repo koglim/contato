@@ -61,7 +61,7 @@ export const normalizeContextualText = (value: string) => value.normalize("NFD")
 // terminal discourse/urgency words are not part of a literal place in a
 // direct request and must not be persisted as its location.
 export function hasTrailingNonGeographicModifier(location: string): boolean {
-  return /(?:^| )(?:por favor|urgente|agora|hoje|amanha|mesmo)$/u.test(normalizeContextualText(location));
+  return /(?:^| )(?:por favor|por gentileza|urgente|agora|hoje|amanha|mesmo)$/u.test(normalizeContextualText(location));
 }
 
 export type ContextualDecision = { kind: "delegate" | "search" | "clarify" | "greeting" | "small_talk" | "faq_cost" | "catalog_info" | "out_of_scope"; memory: ContextualMemory; correction: boolean; catalogServices?: string[]; naturalReply?: string };

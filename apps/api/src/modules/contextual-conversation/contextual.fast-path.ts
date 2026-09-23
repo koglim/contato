@@ -5,17 +5,21 @@ import { contextualProposalSchema, hasTrailingNonGeographicModifier, hasUnsafeRe
 // the existing location extractor supplies the place; this function only checks
 // whether the complete utterance is a direct request for those exact facts.
 const REQUEST_PREFIXES = new Set([
-  "preciso de", "preciso de um", "preciso de uma", "quero", "quero um", "quero uma",
+  "", "preciso de", "preciso de um", "preciso de uma", "quero", "quero um", "quero uma",
   "estou procurando", "estou procurando um", "estou procurando uma",
   "procuro", "procuro um", "procuro uma", "busco", "busco um", "busco uma",
 ]);
+const TERMINAL_POLITENESS = /\s+por (?:favor|gentileza)\s*$/iu;
 
 export function deterministicSearchProposal(rawText: string, serviceEvidence: string | null,
   serviceKey: string | null): ContextualProposal | null {
   if (!serviceEvidence || !serviceKey || /[?;:!.\n\r]/u.test(rawText)) return null;
-  const location = extractExplicitLocation(rawText)?.text;
+  // Only these terminal courtesy phrases can be omitted for direct-request
+  // eligibility. Temporal and urgency language remains with interpretation.
+  const directText = rawText.replace(TERMINAL_POLITENESS, "");
+  const location = extractExplicitLocation(directText)?.text;
   if (!location || hasTrailingNonGeographicModifier(location)) return null;
-  const text = normalizeContextualText(rawText);
+  const text = normalizeContextualText(directText);
   if (hasUnsafeRequestContext(text)) return null;
   const evidence = normalizeContextualText(serviceEvidence);
   const place = normalizeContextualText(location);

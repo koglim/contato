@@ -379,19 +379,37 @@ for (const city of ["Cuiabá", "Sinop"] as const) {
   });
 }
 
-test("B2 trailing discourse uses interpretation and persists the clean city", async () => {
-  const f = await fixture();
-  try {
-    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
-    const response = await f.receive(`preciso de um ${f.name} em Sinop por favor`);
-    assert.equal(response.statusCode, 200, response.body);
-    assert.equal(response.json().result.status, "matched");
-    assert.equal(f.calls(), 1);
-    assert.equal(f.geoCalls(), 1);
-    assert.equal((await f.state()).memory.location.value, "Sinop");
-    assert.equal(f.executionEvents().at(-1)?.path, "ai_interpretation");
-  } finally { await f.cleanup(); }
-});
+for (const courtesy of ["por favor", "por gentileza"]) {
+  test(`B2 terminal ${courtesy} searches with the clean city and no interpretation`, async () => {
+    const f = await fixture();
+    try {
+      f.set(async () => { throw new Error("interpretation must not run for terminal courtesy"); });
+      const response = await f.receive(`preciso de um ${f.name} em Sinop ${courtesy}`);
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().result.status, "matched");
+      assert.equal(f.calls(), 0);
+      assert.equal(f.geoCalls(), 1);
+      assert.equal((await f.state()).memory.location.value, "Sinop");
+      assert.equal(f.executionEvents().at(-1)?.path, "deterministic_fast_path");
+    } finally { await f.cleanup(); }
+  });
+}
+
+for (const modifier of ["hoje", "amanhã", "agora", "urgente"]) {
+  test(`B2 terminal ${modifier} keeps interpretation and persists only the interpreted city`, async () => {
+    const f = await fixture();
+    try {
+      f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+      const response = await f.receive(`preciso de um ${f.name} em Sinop ${modifier}`);
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().result.status, "matched");
+      assert.equal(f.calls(), 1);
+      assert.equal(f.geoCalls(), 1);
+      assert.equal((await f.state()).memory.location.value, "Sinop");
+      assert.equal(f.executionEvents().at(-1)?.path, "ai_interpretation");
+    } finally { await f.cleanup(); }
+  });
+}
 
 test("B2 negated, informational and hypothetical mentions never use the direct search path", async () => {
   for (const [message, speechAct] of [["não preciso de", "negated"], ["vocês trabalham com", "information"],
