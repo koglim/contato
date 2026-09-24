@@ -12,13 +12,35 @@ Somente os sufixos terminais `por favor` e `por gentileza` são removidos para t
 
 `pnpm --filter @contatocerto/api eval:interpretation-budget --self-check` valida cinco fixtures sintéticas sem nenhuma chamada ao modelo: typo, necessidade semântica, pergunta informativa, negação e correção de localização com contexto, baseada em `readiness-12` da B2.
 
-Uma avaliação real exige autorização específica, a chave já existente disponível de forma segura, e o teto exato de 15 chamadas:
+O script exige autorização específica, a chave já existente disponível de forma segura e o teto exato de 15 chamadas. A execução real desta rodada já foi concluída; o comando fica registrado apenas para auditoria, **não para repetição sem nova autorização**:
 
 `pnpm --filter @contatocerto/api eval:interpretation-budget --authorize-paid-evaluation --model=gpt-5-mini-2025-08-07 --max-calls=15`
 
 O comparador faz as mesmas cinco entradas para cada variante: configuração atual (sem `reasoning.effort` explícito), `minimal` e `low`. A ordem é intercalada e fixa: caso 1 `current → minimal → low`; caso 2 `minimal → low → current`; caso 3 `low → current → minimal`; caso 4 `current → low → minimal`; caso 5 `low → minimal → current`. A autoverificação imprime somente IDs, variantes e posições dessa sequência, sem chamadas pagas. Mantém o snapshot, as instruções, o schema estruturado, `max_output_tokens=900`, `store=false`, timeout de 20 s e zero retries. Não toca na Inbox, no banco, no WhatsApp ou no runtime. Cada linha registra `execution_order`, validade estrutural, concordância semântica com o controlador e os rótulos sintéticos, duração, tokens de entrada/cache/saída/raciocínio/total, status e motivo de incompletude. O resumo por variante usa contagem, mediana e mínimo/máximo da duração, não p95. Não imprime mensagens, prompts, respostas, segredos ou corpos de erro. Um HTTP 400 em `low` deve ser diagnosticado como possível incompatibilidade, não tratado como resultado de qualidade.
 
 Os cinco casos são apenas uma triagem; 5/5 não substitui avaliação representativa, repetição estatística nem revisão humana. A intercalação reduz viés de ordem/aquecimento, mas não isola completamente efeitos de cache ou variação temporal. A comparação entre variantes não autoriza alterar reasoning effort em produção.
+
+## Resultado real da rodada — 15 chamadas
+
+Resultados informados da execução real, sem repetição nesta revisão. Durações em milissegundos; tokens somados nas cinco chamadas de cada variante:
+
+| Variante | Chamadas | Válidas | Concordância semântica | Mediana | Mín. | Máx. | Reasoning tokens | Total tokens |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `current` | 5 | 4/5 | 3/5 | 8782 | 3220 | 10389 | 3072 | 7948 |
+| `minimal` | 5 | 5/5 | 3/5 | 1722 | 1623 | 2245 | 0 | 4902 |
+| `low` | 5 | 5/5 | 2/5 | 3429 | 2592 | 4746 | 1024 | 5998 |
+
+| Caso | `current` | `minimal` | `low` |
+| --- | --- | --- | --- |
+| Typo | passou | falhou | falhou |
+| Necessidade semântica | passou | falhou | passou |
+| Informativo | passou | passou | passou |
+| Negação | falhou | passou | falhou |
+| Correção com contexto | falhou: `incomplete` | passou | falhou |
+
+Na correção com contexto, `current` retornou `status=incomplete` e `incomplete_reason=max_output_tokens`: `output_tokens=896`, todos os 896 de reasoning, sob `max_output_tokens=900`. A [OpenAI Docs sobre reasoning](https://developers.openai.com/api/docs/guides/reasoning) confirma que o limite inclui tokens de raciocínio e pode ser alcançado antes de haver saída visível. Este achado não autoriza aumentar o limite neste PR.
+
+`cached_input_tokens=0` nas 15 chamadas. Isso registra ausência de cache reportado nesta rodada, **não** demonstra que o cache falhou ou é indisponível. A amostra de cinco chamadas por variante é pequena; rapidez observada não equivale a qualidade suficiente. `minimal` perdeu typo e necessidade semântica; `low` teve apenas 2/5 de concordância. Nenhuma variante de reasoning effort foi aprovada para substituição global. Modelo, reasoning effort, `max_output_tokens` e cache do runtime permanecem como estão.
 
 ## Cache observado e investigação
 
