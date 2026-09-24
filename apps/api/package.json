@@ -13,6 +13,7 @@
     "eval:b2": "tsx scripts/evaluate-contextual.ts",
     "eval:latency": "tsx scripts/evaluate-latency.ts",
     "eval:interpretation-budget": "tsx scripts/evaluate-interpretation-budget.ts",
+    "eval:model-migration": "tsx scripts/evaluate-model-migration.ts",
     "eval:composition-budget": "tsx scripts/evaluate-composition-budget.ts",
     "typecheck": "tsc --noEmit"
   },
