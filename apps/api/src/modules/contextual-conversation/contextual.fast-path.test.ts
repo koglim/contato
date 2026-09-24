@@ -13,7 +13,7 @@ const catalog = [{ key: "eletricista", name: "Eletricista", description: null },
   { key: "encanador", name: "Encanador", description: null }];
 
 test("latency v1 corpus only allows direct catalog requests with a literal location", () => {
-  assert.equal(corpus.cases.length, 30);
+  assert.equal(corpus.cases.length, 32);
   for (const sample of corpus.cases) {
     const proposal = deterministicSearchProposal(sample.message, sample.evidence, sample.key);
     assert.equal(proposal !== null, sample.fast_path, sample.id);
@@ -26,5 +26,12 @@ test("latency v1 corpus only allows direct catalog requests with a literal locat
       assert.equal(decision.memory.service?.value, service.name, sample.id);
       assert.equal(decision.memory.location?.value, proposal.location?.text, sample.id);
     }
+  }
+});
+
+test("bare service and city require removed terminal courtesy for the fast path", () => {
+  assert.equal(deterministicSearchProposal("eletricista em Cuiabá", "eletricista", "eletricista"), null);
+  for (const courtesy of ["por favor", "por gentileza"]) {
+    assert.equal(deterministicSearchProposal(`eletricista em Cuiabá ${courtesy}`, "eletricista", "eletricista")?.location?.text, "Cuiabá");
   }
 });

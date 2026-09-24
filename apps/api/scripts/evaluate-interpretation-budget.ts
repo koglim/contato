@@ -27,7 +27,7 @@ type Expected = { intent: ContextualProposal["intent"]; speechAct: NonNullable<C
   decidedLocation: string | null; hypotheses: string[] };
 type BenchmarkCase = { id: string; sourceCase?: string; input: ContextualInput; memory: ContextualMemory;
   explicitService: string | null; oracle: ContextualProposal; expected: Expected };
-type BenchmarkRow = { case_id: string; variant: string; valid: boolean; semantic_agreement: boolean;
+type BenchmarkRow = { case_id: string; variant: string; execution_order: number; valid: boolean; semantic_agreement: boolean;
   duration_ms: number; input_tokens: number; cached_input_tokens: number; output_tokens: number;
   reasoning_tokens: number; total_tokens: number; response_status: string | null;
   incomplete_reason: string | null; http_status: number | null };
@@ -78,7 +78,20 @@ const variants = [
   { name: "current", reasoning: undefined },
   { name: "minimal", reasoning: { effort: "minimal" as const } },
   { name: "low", reasoning: { effort: "low" as const } },
+] as const;
+type VariantName = (typeof variants)[number]["name"];
+// Rotate the deterministic order by case to limit time/cache warm-up bias.
+// This is still a five-observation screening, not a statistical benchmark.
+const VARIANT_ORDER: readonly (readonly VariantName[])[] = [
+  ["current", "minimal", "low"],
+  ["minimal", "low", "current"],
+  ["low", "current", "minimal"],
+  ["current", "low", "minimal"],
+  ["low", "minimal", "current"],
 ];
+const executionPlan = cases.flatMap((sample, caseIndex) => VARIANT_ORDER[caseIndex]!.map((name, index) => ({
+  sample, variant: variants.find(item => item.name === name)!, execution_order: caseIndex * variants.length + index + 1,
+})));
 
 function semanticAgreement(sample: BenchmarkCase, proposal: ContextualProposal): boolean {
   try {
@@ -98,6 +111,10 @@ function semanticAgreement(sample: BenchmarkCase, proposal: ContextualProposal):
 function validateFixtures(): void {
   assert.equal(cases.length, 5);
   assert.equal(new Set(cases.map(item => item.id)).size, cases.length);
+  assert.equal(VARIANT_ORDER.length, cases.length);
+  assert.equal(executionPlan.length, MAX_CALLS);
+  for (const order of VARIANT_ORDER) assert.deepEqual([...order].sort(), variants.map(item => item.name).sort());
+  for (const [index, step] of executionPlan.entries()) assert.equal(step.execution_order, index + 1);
   const readiness = JSON.parse(readFileSync(new URL("../evaluations/b2/readiness.json", import.meta.url), "utf8")) as
     { cases: Array<{ id: string; message: string }> };
   const correction = cases.find(item => item.id === "correction-context")!;
@@ -111,7 +128,8 @@ function validateFixtures(): void {
 const args = process.argv.slice(2);
 validateFixtures();
 if (args.includes("--self-check")) {
-  console.log(JSON.stringify({ mode: "fixture_validation_only", cases: cases.length, passed: cases.length, model_calls: 0 }));
+  console.log(JSON.stringify({ mode: "fixture_validation_only", cases: cases.length, passed: cases.length, model_calls: 0,
+    schedule: executionPlan.map(step => ({ case_id: step.sample.id, variant: step.variant.name, execution_order: step.execution_order })) }));
 } else {
   const model = args.find(arg => arg.startsWith("--model="))?.slice(8);
   const maxCalls = Number(args.find(arg => arg.startsWith("--max-calls="))?.slice(12));
@@ -121,7 +139,7 @@ if (args.includes("--self-check")) {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY,
     timeout: DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS, maxRetries: 0 });
   const rows: BenchmarkRow[] = [];
-  for (const variant of variants) for (const sample of cases) {
+  for (const { sample, variant, execution_order } of executionPlan) {
     const started = Date.now();
     try {
       const response = await client.responses.create({ model, store: false,
@@ -138,7 +156,7 @@ if (args.includes("--self-check")) {
         valid = true;
         semantic = semanticAgreement(sample, proposal);
       } catch { /* No model output or error body is retained. */ }
-      rows.push({ case_id: sample.id, variant: variant.name, valid, semantic_agreement: semantic,
+      rows.push({ case_id: sample.id, variant: variant.name, execution_order, valid, semantic_agreement: semantic,
         duration_ms: Date.now() - started, input_tokens: response.usage?.input_tokens ?? 0,
         cached_input_tokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
         output_tokens: response.usage?.output_tokens ?? 0,
@@ -148,7 +166,7 @@ if (args.includes("--self-check")) {
         incomplete_reason: response.incomplete_details?.reason ?? null,
         http_status: null as number | null });
     } catch (error) {
-      rows.push({ case_id: sample.id, variant: variant.name, valid: false, semantic_agreement: false,
+      rows.push({ case_id: sample.id, variant: variant.name, execution_order, valid: false, semantic_agreement: false,
         duration_ms: Date.now() - started, input_tokens: 0, cached_input_tokens: 0,
         output_tokens: 0, reasoning_tokens: 0, total_tokens: 0,
         response_status: "request_error", incomplete_reason: null,
@@ -158,10 +176,10 @@ if (args.includes("--self-check")) {
   const byVariant = variants.map(variant => {
     const subset = rows.filter(row => row.variant === variant.name);
     const durations = subset.map(row => row.duration_ms).sort((a, b) => a - b);
-    return { variant: variant.name, cases: subset.length, valid: subset.filter(row => row.valid).length,
+    return { variant: variant.name, calls: subset.length, valid: subset.filter(row => row.valid).length,
       semantic_agreement: subset.filter(row => row.semantic_agreement).length,
-      duration_ms_p50: durations[Math.floor(durations.length / 2)],
-      duration_ms_p95: durations[Math.ceil(durations.length * .95) - 1],
+      duration_ms_median: durations[Math.floor(durations.length / 2)],
+      duration_ms_min: durations[0], duration_ms_max: durations.at(-1),
       input_tokens: subset.reduce((sum, row) => sum + row.input_tokens, 0),
       cached_input_tokens: subset.reduce((sum, row) => sum + row.cached_input_tokens, 0),
       output_tokens: subset.reduce((sum, row) => sum + row.output_tokens, 0),

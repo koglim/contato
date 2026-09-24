@@ -4,9 +4,9 @@ Esta branch não altera modelo, prompt, schema, limite de saída, reasoning effo
 
 ## Cortesia no caminho determinístico
 
-Somente os sufixos terminais `por favor` e `por gentileza` são removidos para testar a gramática de pedido direto. A proposta leva a cidade limpa ao controlador; o extrator compartilhado não foi alterado. Uma mensagem com `hoje`, `amanhã`, `agora`, `urgente` ou `mesmo`, inclusive antes de uma cortesia terminal, continua na interpretação adaptativa. Isso não descarta informação temporal nem tenta identificar cidades por uma lista lexical.
+Somente os sufixos terminais `por favor` e `por gentileza` são removidos para testar a gramática de pedido direto. O prefixo vazio (`serviço em cidade`) só é aceito quando uma dessas cortesias realmente foi removida: `eletricista em Cuiabá por favor` pode entrar no fast path; `eletricista em Cuiabá` sozinho mantém o comportamento anterior e segue para interpretação. A proposta leva a cidade limpa ao controlador; o extrator compartilhado não foi alterado. Uma mensagem com `hoje`, `amanhã`, `agora`, `urgente` ou `mesmo`, inclusive antes de uma cortesia terminal, continua na interpretação adaptativa. Isso não descarta informação temporal nem tenta identificar cidades por uma lista lexical.
 
-`pnpm --filter @contatocerto/api eval:latency --summary` mede a elegibilidade sintética, não a latência fim a fim. O corpus atual tem 30 casos, dos quais 11 são elegíveis ao fast path.
+`pnpm --filter @contatocerto/api eval:latency --summary` mede a elegibilidade sintética, não a latência fim a fim. O corpus atual tem 32 casos, dos quais 12 são elegíveis ao fast path.
 
 ## Comparador isolado de interpretação
 
@@ -16,9 +16,9 @@ Uma avaliação real exige autorização específica, a chave já existente disp
 
 `pnpm --filter @contatocerto/api eval:interpretation-budget --authorize-paid-evaluation --model=gpt-5-mini-2025-08-07 --max-calls=15`
 
-O comparador faz as mesmas cinco entradas para cada variante: configuração atual (sem `reasoning.effort` explícito), `minimal` e `low`. Mantém o snapshot, as instruções, o schema estruturado, `max_output_tokens=900`, `store=false`, timeout de 20 s e zero retries. Não toca na Inbox, no banco, no WhatsApp ou no runtime. Registra por chamada validade estrutural, concordância semântica com o controlador e os rótulos sintéticos, duração, tokens de entrada/cache/saída/raciocínio/total, status e motivo de incompletude. Não imprime mensagens, prompts, respostas, segredos ou corpos de erro. Um HTTP 400 em `low` deve ser diagnosticado como possível incompatibilidade, não tratado como resultado de qualidade.
+O comparador faz as mesmas cinco entradas para cada variante: configuração atual (sem `reasoning.effort` explícito), `minimal` e `low`. A ordem é intercalada e fixa: caso 1 `current → minimal → low`; caso 2 `minimal → low → current`; caso 3 `low → current → minimal`; caso 4 `current → low → minimal`; caso 5 `low → minimal → current`. A autoverificação imprime somente IDs, variantes e posições dessa sequência, sem chamadas pagas. Mantém o snapshot, as instruções, o schema estruturado, `max_output_tokens=900`, `store=false`, timeout de 20 s e zero retries. Não toca na Inbox, no banco, no WhatsApp ou no runtime. Cada linha registra `execution_order`, validade estrutural, concordância semântica com o controlador e os rótulos sintéticos, duração, tokens de entrada/cache/saída/raciocínio/total, status e motivo de incompletude. O resumo por variante usa contagem, mediana e mínimo/máximo da duração, não p95. Não imprime mensagens, prompts, respostas, segredos ou corpos de erro. Um HTTP 400 em `low` deve ser diagnosticado como possível incompatibilidade, não tratado como resultado de qualidade.
 
-Os cinco casos são apenas uma triagem; 5/5 não substitui avaliação representativa, repetição estatística nem revisão humana. A comparação entre variantes não autoriza alterar reasoning effort em produção.
+Os cinco casos são apenas uma triagem; 5/5 não substitui avaliação representativa, repetição estatística nem revisão humana. A intercalação reduz viés de ordem/aquecimento, mas não isola completamente efeitos de cache ou variação temporal. A comparação entre variantes não autoriza alterar reasoning effort em produção.
 
 ## Cache observado e investigação
 

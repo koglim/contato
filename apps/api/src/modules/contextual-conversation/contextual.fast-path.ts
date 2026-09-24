@@ -5,7 +5,7 @@ import { contextualProposalSchema, hasTrailingNonGeographicModifier, hasUnsafeRe
 // the existing location extractor supplies the place; this function only checks
 // whether the complete utterance is a direct request for those exact facts.
 const REQUEST_PREFIXES = new Set([
-  "", "preciso de", "preciso de um", "preciso de uma", "quero", "quero um", "quero uma",
+  "preciso de", "preciso de um", "preciso de uma", "quero", "quero um", "quero uma",
   "estou procurando", "estou procurando um", "estou procurando uma",
   "procuro", "procuro um", "procuro uma", "busco", "busco um", "busco uma",
 ]);
@@ -17,6 +17,7 @@ export function deterministicSearchProposal(rawText: string, serviceEvidence: st
   // Only these terminal courtesy phrases can be omitted for direct-request
   // eligibility. Temporal and urgency language remains with interpretation.
   const directText = rawText.replace(TERMINAL_POLITENESS, "");
+  const removedPoliteness = directText !== rawText;
   const location = extractExplicitLocation(directText)?.text;
   if (!location || hasTrailingNonGeographicModifier(location)) return null;
   const text = normalizeContextualText(directText);
@@ -29,7 +30,7 @@ export function deterministicSearchProposal(rawText: string, serviceEvidence: st
   if (index < 0 || padded.indexOf(marker, index + marker.length) >= 0) return null;
   const prefix = padded.slice(1, index).trim();
   const suffix = padded.slice(index + marker.length - 1).trim();
-  if (!REQUEST_PREFIXES.has(prefix) || /\be\b/u.test(suffix)
+  if (!(REQUEST_PREFIXES.has(prefix) || (prefix === "" && removedPoliteness)) || /\be\b/u.test(suffix)
     || ![`em ${place}`, `aqui em ${place}`, `na cidade de ${place}`, `no municipio de ${place}`].includes(suffix)) return null;
   const proposal = contextualProposalSchema.safeParse({ intent: "search", speech_act: "request",
     services: [{ key: serviceKey, evidence: serviceEvidence }],

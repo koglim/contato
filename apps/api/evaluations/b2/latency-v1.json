@@ -11,6 +11,8 @@
     { "id": "direct-cidade-de", "category": "fast_path", "message": "preciso de um eletricista na cidade de Cuiabá", "evidence": "eletricista", "key": "eletricista", "fast_path": true },
     { "id": "polite-por-favor", "category": "fast_path_politeness", "message": "preciso de um eletricista em Cuiabá por favor", "evidence": "eletricista", "key": "eletricista", "fast_path": true },
     { "id": "polite-bare-request", "category": "fast_path_politeness", "message": "eletricista em Cuiabá por favor", "evidence": "eletricista", "key": "eletricista", "fast_path": true },
+    { "id": "polite-bare-gentileza", "category": "fast_path_politeness", "message": "eletricista em Cuiabá por gentileza", "evidence": "eletricista", "key": "eletricista", "fast_path": true },
+    { "id": "bare-without-courtesy", "category": "bare_request", "message": "eletricista em Cuiabá", "evidence": "eletricista", "key": "eletricista", "fast_path": false },
     { "id": "polite-por-gentileza", "category": "fast_path_politeness", "message": "preciso de um eletricista em Cuiabá por gentileza", "evidence": "eletricista", "key": "eletricista", "fast_path": true },
     { "id": "trailing-hoje-por-favor", "category": "trailing_modifier", "message": "preciso de um eletricista em Cuiabá hoje por favor", "evidence": "eletricista", "key": "eletricista", "fast_path": false },
     { "id": "trailing-cuiaba-hoje", "category": "trailing_modifier", "message": "eletricista em Cuiabá hoje", "evidence": "eletricista", "key": "eletricista", "fast_path": false },

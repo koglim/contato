@@ -395,6 +395,21 @@ for (const courtesy of ["por favor", "por gentileza"]) {
   });
 }
 
+for (const [suffix, expectedCalls] of [["", 1], [" por favor", 0], [" por gentileza", 0]] as const) {
+  test(`B2 bare service and city${suffix || " without courtesy"} preserves narrow fast-path eligibility`, async () => {
+    const f = await fixture();
+    try {
+      f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+      const response = await f.receive(`${f.name} em Sinop${suffix}`);
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().result.status, "matched");
+      assert.equal(f.calls(), expectedCalls);
+      assert.equal((await f.state()).memory.location.value, "Sinop");
+      assert.equal(f.executionEvents().at(-1)?.path, expectedCalls ? "ai_interpretation" : "deterministic_fast_path");
+    } finally { await f.cleanup(); }
+  });
+}
+
 for (const modifier of ["hoje", "amanhã", "agora", "urgente"]) {
   test(`B2 terminal ${modifier} keeps interpretation and persists only the interpreted city`, async () => {
     const f = await fixture();
