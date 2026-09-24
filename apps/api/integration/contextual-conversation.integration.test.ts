@@ -645,8 +645,11 @@ test("B2 rejects the sole named hypothesis without AI, search, selection or cons
     assert.equal(f.calls(), calls);
     assert.equal(f.compositions(), compositions);
     assert.equal(f.geoCalls(), 0);
-    assert.deepEqual(f.executionEvents().at(-1), { path: "rejected_hypothesis", interpretationCalled: false,
-      compositionCalled: false, finalStatus: "needs_service" });
+    const execution = f.executionEvents().at(-1);
+    assert.equal(execution?.path, "rejected_hypothesis");
+    assert.equal(execution?.interpretationCalled, false);
+    assert.equal(execution?.compositionCalled, false);
+    assert.equal(execution?.finalStatus, "needs_service");
     assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_requests WHERE service_id=$1", [f.serviceId])).rows[0].count, 0);
     assert.equal((await query("SELECT COUNT(*)::int AS count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 0);
     assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_conversations WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 0);
