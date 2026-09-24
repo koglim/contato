@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import OpenAI, { APIError } from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
+import { runCheckpointed, type CheckpointRow } from "./model-migration-checkpoint.js";
 import { DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS } from "../src/config/contextual-conversation.js";
 import {
   controlContextualProposal, contextualInterpretationSchema, emptyMemory, normalizeContextualText,
@@ -49,17 +52,7 @@ type Sample = {
   expected: { intent: string; speech_act: string; service_keys: string[]; location: string | null;
     decision: string; slots: Slots };
 };
-type Row = {
-  case_id: string; category: string; variant: string; model: string; reasoning_effort: string;
-  execution_order: number; structural_valid: boolean; semantic_agreement: boolean;
-  expected_decision: string; actual_decision: string | null;
-  expected_service: string | null; actual_service: string | null;
-  expected_location: string | null; actual_location: string | null;
-  expected_hypotheses: string[]; actual_hypotheses: string[];
-  duration_ms: number; input_tokens: number; cached_input_tokens: number; output_tokens: number;
-  reasoning_tokens: number; total_tokens: number; response_status: string | null;
-  incomplete_reason: string | null; http_status: number | null; estimated_cost_usd: number;
-};
+type Row = CheckpointRow;
 const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const corpusBytes = readFileSync(new URL("../evaluations/b2/model-migration-v1.json", import.meta.url));
 const corpus = JSON.parse(corpusBytes.toString("utf8")) as Corpus;
@@ -142,6 +135,24 @@ const executionPlan = samples.flatMap((sample, caseIndex) => {
     ({ sample, variant, execution_order: caseIndex * VARIANTS.length + variantIndex + 1 }));
 });
 assert.equal(executionPlan.length, 160);
+const checkpointPlan = executionPlan.map(({ sample, variant, execution_order }) => ({
+  case_id: sample.id, category: sample.category, variant: variant.name, model: variant.model,
+  reasoning_effort: variant.effort ?? "runtime_default", execution_order,
+  expected_decision: sample.expected.decision, expected_service: sample.expected.slots.service,
+  expected_location: sample.expected.slots.location, expected_hypotheses: sample.expected.slots.hypotheses,
+}));
+const corpusHash = digest(corpusBytes.toString("utf8").replace(/\r\n/gu, "\n"));
+const promptHash = digest(CONTEXTUAL_INSTRUCTIONS);
+const checkpointMetadata = {
+  version: "model-migration-v1-checkpoint" as const,
+  corpus_sha256: corpusHash, prompt_sha256: promptHash,
+  schedule_sha256: digest(JSON.stringify(checkpointPlan)),
+  max_output_tokens: MAX_OUTPUT_TOKENS, calls_planned: executionPlan.length,
+  variants: VARIANTS.map(item => ({ name: item.name, model: item.model,
+    reasoning_effort: item.effort ?? "runtime_default" })),
+};
+const checkpointPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../..",
+  ".eval-results", `model-migration-v1-${corpusHash}-${promptHash}.jsonl`);
 for (const variant of VARIANTS) {
   assert.equal(executionPlan.filter(step => step.variant.name === variant.name).length, samples.length);
   for (let position = 0; position < VARIANTS.length; position++) {
@@ -178,8 +189,7 @@ function selfCheck() {
     ({ name: item.name, model: item.model, reasoning_effort: item.effort ?? "runtime_default" })),
     max_output_tokens: MAX_OUTPUT_TOKENS, calls_planned: executionPlan.length, model_calls: 0,
     categories, source_sha256: corpus.source_sha256,
-    corpus_sha256: digest(corpusBytes.toString("utf8").replace(/\r\n/gu, "\n")),
-    prompt_sha256: digest(CONTEXTUAL_INSTRUCTIONS),
+    corpus_sha256: corpusHash, prompt_sha256: promptHash,
     schedule: executionPlan.map(step => ({ case_id: step.sample.id, variant: step.variant.name,
       execution_order: step.execution_order })) };
 }
@@ -188,14 +198,16 @@ if (args.length === 1 && args[0] === "--self-check") {
   console.log(JSON.stringify(selfCheck(), null, 2));
 } else {
   // A separate, explicit authorization is required after PR review. No network client exists before this gate.
-  if (args.length !== 2 || !args.includes("--authorize-paid-evaluation")
-    || !args.includes("--max-calls=160") || !process.env.OPENAI_API_KEY?.trim()) {
+  const allowed = new Set(["--authorize-paid-evaluation", "--max-calls=160", "--resume"]);
+  if (args.length !== new Set(args).size || args.some(arg => !allowed.has(arg))
+    || !args.includes("--authorize-paid-evaluation") || !args.includes("--max-calls=160")
+    || !process.env.OPENAI_API_KEY?.trim()) {
     throw new Error("Paid evaluation needs separate authorization, OPENAI_API_KEY and --max-calls=160; no request was made");
   }
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY,
     timeout: DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS, maxRetries: 0 });
-  const rows: Row[] = [];
-  for (const { sample, variant, execution_order } of executionPlan) {
+  const invoke = async (executionOrder: number): Promise<Row> => {
+    const { sample, variant, execution_order } = executionPlan[executionOrder - 1]!;
     const started = Date.now();
     let row: Row = { case_id: sample.id, category: sample.category, variant: variant.name, model: variant.model,
       reasoning_effort: variant.effort ?? "runtime_default", execution_order,
@@ -236,8 +248,14 @@ if (args.length === 1 && args[0] === "--self-check") {
     }
     row.duration_ms = Date.now() - started;
     row.estimated_cost_usd = estimateCost(variant.name, row.input_tokens, row.cached_input_tokens, row.output_tokens);
-    rows.push(row);
-  }
+    return row;
+  };
+  const result = await runCheckpointed({
+    path: checkpointPath, metadata: checkpointMetadata, plan: checkpointPlan,
+    resume: args.includes("--resume"), invoke: step => invoke(step.execution_order),
+    progress: line => { process.stderr.write(line + "\n"); },
+  });
+  const { rows } = result;
   const summary = VARIANTS.map(variant => {
     const subset = rows.filter(row => row.variant === variant.name);
     const estimatedCost = subset.reduce((sum, row) => sum + row.estimated_cost_usd, 0);
@@ -258,9 +276,10 @@ if (args.length === 1 && args[0] === "--self-check") {
       estimated_cost_per_semantic_success_usd: success ? estimatedCost / success : null };
   });
   console.log(JSON.stringify({ mode: "controlled_paid_model_migration_only", cases: samples.length,
-    calls: rows.length, max_output_tokens: MAX_OUTPUT_TOKENS,
-    corpus_sha256: digest(corpusBytes.toString("utf8").replace(/\r\n/gu, "\n")),
-    prompt_sha256: digest(CONTEXTUAL_INSTRUCTIONS), production_effects: "none",
+    calls: rows.length, calls_planned: executionPlan.length, calls_completed: rows.length,
+    resumed_calls: result.resumed_calls, new_model_calls: result.new_model_calls,
+    max_output_tokens: MAX_OUTPUT_TOKENS, corpus_sha256: corpusHash,
+    prompt_sha256: promptHash, production_effects: "none",
     cost_note: "Approximation at documented standard token rates; cache writes and unknown usage are not priced",
     summary, rows }, null, 2));
 }

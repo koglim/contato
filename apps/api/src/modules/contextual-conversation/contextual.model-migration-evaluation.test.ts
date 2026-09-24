@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
@@ -16,6 +17,7 @@ function invoke(args: string[]) {
 test("model-migration corpus and deterministic four-variant schedule self-check without API calls", () => {
   const result = invoke(["--self-check"]);
   assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr.trim(), "");
   const report = JSON.parse(result.stdout) as {
     mode: string; cases: number; calls_planned: number; model_calls: number; max_output_tokens: number;
     variants: { name: string; model: string; reasoning_effort: string }[];
@@ -51,4 +53,10 @@ test("paid runner refuses execution without separate authorization", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /separate authorization/);
   assert.match(result.stderr, /no request was made/);
+  const resume = invoke(["--max-calls=160", "--resume"]);
+  assert.notEqual(resume.status, 0);
+  assert.match(resume.stderr, /separate authorization/);
+  const runner = readFileSync(script, "utf8");
+  assert.match(runner, /progress: line => \{ process\.stderr\.write\(line \+ "\\n"\)/u);
+  assert.match(runner, /console\.log\(JSON\.stringify\(\{ mode: "controlled_paid_model_migration_only"/u);
 });

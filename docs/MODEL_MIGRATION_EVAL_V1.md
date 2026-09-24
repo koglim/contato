@@ -56,14 +56,16 @@ de saída estrutural, sozinha, não é classificada como sucesso.
 
 A [página oficial do Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra)
 confirma esses esforços, Responses API e Structured Outputs. O limite do
-**experimento** é `max_output_tokens=4096` em todas as quatro variantes.
+**experimento** é `max_output_tokens=4096` em todas as quatro variantes:
+um *quality-comparison ceiling*, não uma reprodução exata de produção.
 O benchmark anterior observou 896 tokens de reasoning em 900 tokens de output
 permitidos, com resposta incompleta. O teto 4096 reduz esse truncamento como
 confundidor de qualidade; ainda será medido `incomplete_reason`. Não altera
 o teto de produção (900). O timeout de 20 s e `maxRetries=0` permanecem
 iguais entre as variantes. A baseline preserva effort implícito; esta é uma
-comparação de modelo/configuração efetiva, não uma comparação que isola apenas
-o nome do modelo.
+*current-model evaluation baseline*, não uma simulação idêntica do runtime.
+Se Terra se destacar, uma validação posterior separada deverá usar o limite e
+timeout reais de produção antes de qualquer migração.
 
 São planejadas exatamente 160 chamadas (40 casos × 4 variantes). Cada caso
 recebe as quatro variantes consecutivamente; a ordem é rotacionada por caso e
@@ -104,6 +106,36 @@ separada de autorização, contagem exata e chave `OPENAI_API_KEY` **existente**
 Esta PR não executa a etapa paga; os resultados e a decisão de eventual
 migração exigem revisão posterior. Nunca adicionar a chave ou resultados
 sensíveis ao repositório.
+
+## Progresso e retomada da execução futura
+
+O runner escreve somente em **stderr** um início e um fim por posição, por
+exemplo `[1/160] adaptive-01 / baseline` e
+`[1/160] done 4231ms valid=true semantic=true status=completed incomplete=null http=200`.
+Não imprime mensagem, prompt, resposta, chave, telefone ou coordenadas. O
+relatório JSON completo continua aparecendo apenas em **stdout** depois de
+160 posições concluídas.
+
+Cada row sanitizado é anexado e sincronizado em disco após a chamada em
+`.eval-results/model-migration-v1-<corpus-sha256>-<prompt-sha256>.jsonl`,
+diretório ignorado pelo Git. A primeira linha contém metadados: hashes de
+corpus/prompt/plano, variantes, `max_output_tokens` e 160 chamadas planejadas.
+Linhas seguintes contêm somente os campos seguros do row. O checkpoint
+permanece para auditoria local; sem `--resume`, uma nova execução recusa
+sobrescrevê-lo. Uma trava local impede execuções simultâneas sobre o mesmo
+checkpoint; uma trava deixada por processo encerrado é isolada antes da
+retomada.
+
+`--resume` valida os metadados e cada row contra o prefixo contínuo do plano
+antes de criar qualquer nova chamada. Pula somente posições completas e
+válidas. Uma linha final sem terminador de linha (possível queda durante a
+gravação) não é aceita como concluída e será repetida; uma linha completa
+incompatível aborta. Erro conhecido de request/timeout produz row com
+`request_error`, persistido sem retry automático; `maxRetries=0`. Uma chamada
+interrompida sem row persistido pode ser cobrada e repetida ao retomar — não
+há garantia de execução exatamente uma vez em falhas entre resposta e fsync.
+O resumo final inclui `calls_planned`, `calls_completed`, `resumed_calls`
+e `new_model_calls`.
 
 Nenhuma ENV nova ou alterada. Não criar `OPENAI_REASONING_EFFORT` nem
 `OPENAI_PROMPT_CACHE_KEY`. Sem migration nova, mudança n8n ou deploy.
