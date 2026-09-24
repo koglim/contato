@@ -589,6 +589,38 @@ test("B2 combines compatible semantic evidence with an existing hypothesis witho
   } finally { await f.cleanup(); }
 });
 
+test("B2 explicitly confirms the sole matching service hypothesis without AI interpretation", async () => {
+  const f = await fixture();
+  try {
+    f.setCompose(async input => ({ target: input.target, question: `Você precisa de ${f.name} para esse problema?` }));
+    f.set(async () => basic({ speech_act: "request", confidence: "medium",
+      services: [{ key: f.name, evidence: "eletricitta" }] }));
+    const hypothesis = await f.receive("Preciso de um eletricitta");
+    assert.equal(hypothesis.statusCode, 200, hypothesis.body);
+    assert.deepEqual((await f.state()).memory.hypotheses.map((item: { name: string }) => item.name), [f.name]);
+
+    const beforeQuestionCalls = f.calls();
+    f.set(async () => basic({ intent: "clarify", speech_act: "information" }));
+    const question = await f.receive(`Vocês têm ${f.name}?`);
+    assert.equal(question.statusCode, 200, question.body);
+    assert.equal(f.calls(), beforeQuestionCalls + 1, "a pergunta informativa precisa seguir para interpretação");
+    assert.equal((await f.state()).memory.service, null);
+
+    const beforeConfirmationCalls = f.calls();
+    f.set(async () => { throw new Error("a confirmação explícita não deve chamar interpretação AI"); });
+    const confirmed = await f.receive(`Sim, preciso de ${f.name}`);
+    assert.equal(confirmed.statusCode, 200, confirmed.body);
+    assert.equal(confirmed.json().result.status, "needs_location");
+    assert.equal(f.calls(), beforeConfirmationCalls);
+    const memory = (await f.state()).memory;
+    assert.equal(memory.service.value, f.name);
+    assert.equal(memory.service.source, "user_confirmation");
+    assert.deepEqual(memory.hypotheses, []);
+    assert.equal(f.executionEvents().at(-1)?.path, "confirmed_hypothesis");
+    assert.equal(f.geoCalls(), 0);
+  } finally { await f.cleanup(); }
+});
+
 test("invalid AI interpretation still uses explicit catalog alias and city through deterministic search", async () => {
   const f = await fixture();
   try {

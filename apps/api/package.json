@@ -16,6 +16,7 @@
     "eval:model-migration": "tsx scripts/evaluate-model-migration.ts",
     "eval:model-migration:analyze": "tsx scripts/analyze-model-migration.ts",
     "eval:model-migration:production-shaped": "tsx scripts/evaluate-model-migration-production-shaped.ts",
+    "eval:model-migration:stability": "tsx scripts/evaluate-model-migration-stability.ts",
     "eval:composition-budget": "tsx scripts/evaluate-composition-budget.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -74,6 +74,32 @@ test("checkpoint persists sanitized rows, progress stays separate, and resume sk
   } finally { temp.cleanup(); }
 });
 
+test("stability checkpoint resumes repeated cases by execution order and repetition", async () => {
+  const temp = temporaryCheckpoint();
+  const repeatedPlan: CheckpointStep[] = [1, 2].map(repetition => ({ ...plan[0]!, case_id: "adaptive-02",
+    variant: "terra_medium", model: "gpt-5.6-terra", reasoning_effort: "medium",
+    repetition, execution_order: repetition }));
+  const repeatedMetadata: CheckpointMetadata = { ...metadata,
+    version: "model-migration-stability-v1-checkpoint", max_output_tokens: 900, calls_planned: 2,
+    variants: [{ name: "terra_medium", model: "gpt-5.6-terra", reasoning_effort: "medium" }] };
+  try {
+    await assert.rejects(runCheckpointed({ path: temp.path, metadata: repeatedMetadata,
+      plan: repeatedPlan, resume: false, progress: () => {}, invoke: async step => {
+        if (step.repetition === 2) throw new Error("interrupted after first repetition");
+        return row(step);
+      } }), /interrupted after first repetition/);
+    let calls = 0;
+    const result = await runCheckpointed({ path: temp.path, metadata: repeatedMetadata,
+      plan: repeatedPlan, resume: true, progress: () => {}, invoke: async step => {
+        calls++;
+        return row(step);
+      } });
+    assert.equal(calls, 1);
+    assert.equal(result.resumed_calls, 1);
+    assert.deepEqual(result.rows.map(item => item.repetition), [1, 2]);
+  } finally { temp.cleanup(); }
+});
+
 test("fresh execution refuses an existing checkpoint before invoking a provider", async () => {
   const temp = temporaryCheckpoint();
   try {

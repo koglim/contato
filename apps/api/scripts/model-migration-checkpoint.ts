@@ -10,7 +10,8 @@ const variant = z.object({
 }).strict();
 export const checkpointMetadataSchema = z.object({
   version: z.union([z.literal("model-migration-v1-checkpoint"),
-    z.literal("model-migration-production-shaped-v1-checkpoint")]),
+    z.literal("model-migration-production-shaped-v1-checkpoint"),
+    z.literal("model-migration-stability-v1-checkpoint")]),
   corpus_sha256: hash, prompt_sha256: hash, schedule_sha256: hash,
   max_output_tokens: z.number().int().positive(), calls_planned: z.number().int().positive(),
   variants: z.array(variant).min(1),
@@ -38,11 +39,12 @@ export const checkpointRowSchema = z.object({
   service_keys_match: z.boolean().optional(), proposal_location_match: z.boolean().optional(),
   decision_match: z.boolean().optional(), slots_match: z.boolean().optional(),
   effective_runtime_outcome_agreement: z.boolean().optional(),
+  hypothesis_exact_match: z.boolean().optional(), repetition: z.number().int().positive().optional(),
 }).strict();
 export type CheckpointRow = z.infer<typeof checkpointRowSchema>;
 export type CheckpointStep = Pick<CheckpointRow,
   "case_id" | "category" | "variant" | "model" | "reasoning_effort" | "execution_order"
-  | "expected_decision" | "expected_service" | "expected_location" | "expected_hypotheses">;
+  | "expected_decision" | "expected_service" | "expected_location" | "expected_hypotheses" | "repetition">;
 
 const metadataLine = z.object({ kind: z.literal("metadata"), value: checkpointMetadataSchema }).strict();
 const rowLine = z.object({ kind: z.literal("row"), value: checkpointRowSchema }).strict();
@@ -94,6 +96,7 @@ function acquireLock(path: string): () => void {
 
 function validateRow(row: CheckpointRow, step: CheckpointStep): void {
   assert.equal(row.execution_order, step.execution_order, "checkpoint execution_order mismatch");
+  assert.equal(row.repetition, step.repetition, "checkpoint repetition mismatch");
   for (const field of ["case_id", "category", "variant", "model", "reasoning_effort",
     "expected_decision", "expected_service", "expected_location"] as const) {
     assert.equal(row[field], step[field], `checkpoint ${field} mismatch`);
