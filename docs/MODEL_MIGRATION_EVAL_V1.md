@@ -89,9 +89,13 @@ O custo usa preços padrão publicados nas páginas oficiais de
 [GPT-5 Mini](https://developers.openai.com/api/docs/models/gpt-5-mini) e
 [GPT-5.6 Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra)
 na preparação desta PR: Mini input/cached/output US$0,25/0,025/2 e Terra
-US$2/0,20/12 por milhão de tokens. É uma **estimativa**, não fatura: cache
-write e requisições sem uso reportado não podem ser atribuídos precisamente.
-Rever tarifas antes de uma execução futura.
+US$2/0,20/12 por milhão de tokens. É uma **estimativa histórica**, não
+fatura: cache write e requisições sem uso reportado não podem ser atribuídos
+precisamente. A [tabela oficial atual](https://developers.openai.com/api/docs/pricing)
+também distingue contexto curto/longo para GPT-5.6, e a página do
+[Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra) documenta
+regras específicas de contexto longo e cache write. Não recalcular as rows
+históricas nem usar o custo atual para decidir a variante nesta análise.
 
 ## Self-check local, sem custo
 
@@ -103,11 +107,12 @@ O self-check valida hashes das fontes, unicidade, 40 oráculos completos, suas
 decisões/slots no controller, 160 posições e distribuição equilibrada. Reporta
 `model_calls=0`; não cria cliente OpenAI. A execução real tem guarda
 separada de autorização, contagem exata e chave `OPENAI_API_KEY` **existente**.
-Esta PR não executa a etapa paga; os resultados e a decisão de eventual
-migração exigem revisão posterior. Nunca adicionar a chave ou resultados
-sensíveis ao repositório.
+A rodada paga autorizada separadamente foi concluída depois da preparação
+desta PR: 160/160 posições, sem retomada. A análise abaixo não executa nem
+repete chamadas. A decisão de eventual migração exige revisão posterior.
+Nunca adicionar a chave ou resultados sensíveis ao repositório.
 
-## Progresso e retomada da execução futura
+## Progresso e retomada da execução paga
 
 O runner escreve somente em **stderr** um início e um fim por posição, por
 exemplo `[1/160] adaptive-01 / baseline` e
@@ -139,3 +144,48 @@ e `new_model_calls`.
 
 Nenhuma ENV nova ou alterada. Não criar `OPENAI_REASONING_EFFORT` nem
 `OPENAI_PROMPT_CACHE_KEY`. Sem migration nova, mudança n8n ou deploy.
+
+## Análise offline do resultado efetivo do controller
+
+```sh
+pnpm --filter @contatocerto/api eval:model-migration:analyze
+```
+
+O analisador não precisa de `OPENAI_API_KEY`, não cria cliente nem executa
+requisições. Ele lê **somente** o checkpoint existente, exige 160 rows completas
+e valida os hashes de corpus, prompt e plano, variantes, limites, ordem e
+campos esperados contra o plano recompilado. Arquivo incompleto ou incompatível
+interrompe a análise sem alterar o checkpoint. Os resultados locais ficam em
+`.eval-results/model-migration-v1-analysis.json` e `.md`, ambos ignorados pelo
+Git. Eles contêm agregados, IDs e categorias sintéticos, nunca prompts,
+respostas brutas, mensagens privadas, telefones ou coordenadas.
+
+`semantic_agreement` permanece idêntico nas rows históricas e no runner.
+No relatório, é rotulado conceitualmente como
+`proposal_semantic_agreement`: intenção, speech act, chaves de serviço,
+localização da proposal, decisão e slots finais devem concordar. A métrica
+adicional `controller_outcome_agreement` compara somente decisão e slots finais
+(serviço, localização e hipóteses), pois são o resultado efetivo após o
+controller. O JSON também separa cada componente, matriz por caso contra
+baseline, categorias originais e grupos documentados. O agrupamento é apenas
+apresentação: nenhum caso é excluído, e categorias não mapeadas aparecem em
+`other`. Não há ranking automático ou escolha de variante.
+
+| Variante | Estrutural | Proposal estrita original | Controller outcome | Mediana | Reasoning tokens | Incomplete | Request errors |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 40/40 | 16/40 | 26/40 | 7254 ms | 24064 | 0 | 0 |
+| terra_medium | 40/40 | 22/40 | 32/40 | 1699 ms | 92 | 0 | 0 |
+| terra_low | 40/40 | 19/40 | 30/40 | 1587 ms | 0 | 0 | 0 |
+| terra_none | 40/40 | 22/40 | 33/40 | 1731,5 ms | 0 | 0 | 0 |
+
+Contra a baseline, medium melhora 7 casos e regride 1; low melhora 8 e
+regride 4; none melhora 10 e regride 3. Há 21 casos em que todas as variantes
+passam e 4 em que todas falham. Esses quatro precisam de revisão de oráculo,
+prompt, schema e política do controller antes de fundamentar uma migração.
+O relatório local traz as listas de caso e os passes/total por categoria.
+
+Para **futuras** execuções, rows novas registram somente seis booleans
+sanitizados (`intent_match`, `speech_act_match`, `service_keys_match`,
+`proposal_location_match`, `decision_match`, `slots_match`). Rows históricas
+continuam válidas sem esses campos; o benchmark não será repetido para
+preenchê-los. Isso não altera o runtime de produção.

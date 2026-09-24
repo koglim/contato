@@ -153,6 +153,8 @@ const checkpointMetadata = {
 };
 const checkpointPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../..",
   ".eval-results", `model-migration-v1-${corpusHash}-${promptHash}.jsonl`);
+// Importing this plan is offline: the OpenAI client is created only by the paid CLI branch below.
+export const modelMigrationAnalysisContext = { checkpointPath, checkpointMetadata, checkpointPlan };
 for (const variant of VARIANTS) {
   assert.equal(executionPlan.filter(step => step.variant.name === variant.name).length, samples.length);
   for (let position = 0; position < VARIANTS.length; position++) {
@@ -165,11 +167,19 @@ function assess(sample: Sample, proposal: ContextualProposal) {
     structuredClone(sample.memory), sample.catalog, sample.explicitService);
   const actual = slots(decision.memory);
   const expected = sample.expected;
-  const semantic = proposal.intent === expected.intent && proposal.speech_act === expected.speech_act
-    && JSON.stringify([...proposal.services.map(item => item.key)].sort()) === JSON.stringify([...expected.service_keys].sort())
-    && normalizeContextualText(proposal.location?.text ?? "") === normalizeContextualText(expected.location ?? "")
-    && decision.kind === expected.decision && JSON.stringify(actual) === JSON.stringify(expected.slots);
-  return { decision: decision.kind, slots: actual, semantic };
+  const diagnostics = {
+    intent_match: proposal.intent === expected.intent,
+    speech_act_match: proposal.speech_act === expected.speech_act,
+    service_keys_match: JSON.stringify([...proposal.services.map(item => item.key)].sort())
+      === JSON.stringify([...expected.service_keys].sort()),
+    proposal_location_match: normalizeContextualText(proposal.location?.text ?? "")
+      === normalizeContextualText(expected.location ?? ""),
+    decision_match: decision.kind === expected.decision,
+    slots_match: JSON.stringify(actual) === JSON.stringify(expected.slots),
+  };
+  // Preserve the original strict semantic metric exactly; these booleans only diagnose future rows.
+  const semantic = Object.values(diagnostics).every(Boolean);
+  return { decision: decision.kind, slots: actual, semantic, diagnostics };
 }
 function estimateCost(variant: typeof VARIANTS[number]["name"], inputTokens: number, cachedTokens: number, outputTokens: number) {
   const price = PRICES_PER_MILLION[variant];
@@ -193,6 +203,7 @@ function selfCheck() {
     schedule: executionPlan.map(step => ({ case_id: step.sample.id, variant: step.variant.name,
       execution_order: step.execution_order })) };
 }
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === "--self-check") {
   console.log(JSON.stringify(selfCheck(), null, 2));
@@ -241,6 +252,7 @@ if (args.length === 1 && args[0] === "--self-check") {
         row.actual_service = result.slots.service;
         row.actual_location = result.slots.location;
         row.actual_hypotheses = result.slots.hypotheses;
+        Object.assign(row, result.diagnostics);
       } catch { /* Never log model output, request, prompt or provider error body. */ }
     } catch (error) {
       row.response_status = "request_error";
@@ -282,4 +294,5 @@ if (args.length === 1 && args[0] === "--self-check") {
     prompt_sha256: promptHash, production_effects: "none",
     cost_note: "Approximation at documented standard token rates; cache writes and unknown usage are not priced",
     summary, rows }, null, 2));
+}
 }

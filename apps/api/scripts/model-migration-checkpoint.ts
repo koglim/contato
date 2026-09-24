@@ -32,6 +32,10 @@ export const checkpointRowSchema = z.object({
   response_status: z.string().nullable(), incomplete_reason: z.string().nullable(),
   http_status: z.number().int().min(100).max(599).nullable(),
   estimated_cost_usd: z.number().finite().nonnegative(),
+  // Optional: historical paid rows must remain valid and unchanged.
+  intent_match: z.boolean().optional(), speech_act_match: z.boolean().optional(),
+  service_keys_match: z.boolean().optional(), proposal_location_match: z.boolean().optional(),
+  decision_match: z.boolean().optional(), slots_match: z.boolean().optional(),
 }).strict();
 export type CheckpointRow = z.infer<typeof checkpointRowSchema>;
 export type CheckpointStep = Pick<CheckpointRow,
