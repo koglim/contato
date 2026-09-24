@@ -21,6 +21,10 @@ UF e negação). Ela não altera os conjuntos congelados.
 `latency-v1.json` é um corpus sintético separado de elegibilidade do caminho
 determinístico. Rode `pnpm --filter @contatocerto/api eval:latency --summary`;
 o benchmark mede apenas a função local, sem OpenAI, banco ou latência de rede.
+`hypothesis-rejection-v1.json` é uma regressão sintética separada para a rejeição
+determinística de hipótese única. Os casos são executados pelos testes unitários
+de `contextual.confirmation.test.ts`; não alteram os resultados históricos B2,
+readiness, regression-v1, latency-v1 ou os checkpoints pagos.
 
 ## Execução sem gasto
 
