@@ -46,7 +46,7 @@ type CorpusRef = {
   setup?: SourceCase["setup"]; oracle?: unknown; expected?: string; expected_slots?: Slots;
 };
 type Corpus = { version: string; source_sha256: Record<SourceName, string>; cases: CorpusRef[] };
-type Sample = {
+export type Sample = {
   id: string; category: string; source: SourceName | "authored"; input: ContextualInput; memory: ContextualMemory;
   catalog: ContextualCatalogItem[]; explicitService: string | null; oracle: ContextualProposal;
   expected: { intent: string; speech_act: string; service_keys: string[]; location: string | null;
@@ -128,6 +128,7 @@ function compile(): Sample[] {
   });
 }
 const samples = compile();
+export const modelMigrationSamples = samples;
 const executionPlan = samples.flatMap((sample, caseIndex) => {
   const offset = caseIndex % VARIANTS.length;
   const order = caseIndex % 8 < 4 ? [...VARIANTS] : [...VARIANTS].reverse();
@@ -154,7 +155,9 @@ const checkpointMetadata = {
 const checkpointPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../..",
   ".eval-results", `model-migration-v1-${corpusHash}-${promptHash}.jsonl`);
 // Importing this plan is offline: the OpenAI client is created only by the paid CLI branch below.
-export const modelMigrationAnalysisContext = { checkpointPath, checkpointMetadata, checkpointPlan };
+export const modelMigrationAnalysisContext = { checkpointPath, checkpointMetadata, checkpointPlan,
+  runtimeCases: samples.map(sample => ({ case_id: sample.id, message: sample.input.message,
+    pendingSlot: sample.input.pending })) };
 for (const variant of VARIANTS) {
   assert.equal(executionPlan.filter(step => step.variant.name === variant.name).length, samples.length);
   for (let position = 0; position < VARIANTS.length; position++) {
@@ -162,7 +165,7 @@ for (const variant of VARIANTS) {
       && (step.execution_order - 1) % VARIANTS.length === position).length, 10);
   }
 }
-function assess(sample: Sample, proposal: ContextualProposal) {
+export function assess(sample: Sample, proposal: ContextualProposal) {
   const decision = controlContextualProposal(sample.input.message, BENCHMARK_ID, proposal,
     structuredClone(sample.memory), sample.catalog, sample.explicitService);
   const actual = slots(decision.memory);
@@ -181,7 +184,7 @@ function assess(sample: Sample, proposal: ContextualProposal) {
   const semantic = Object.values(diagnostics).every(Boolean);
   return { decision: decision.kind, slots: actual, semantic, diagnostics };
 }
-function estimateCost(variant: typeof VARIANTS[number]["name"], inputTokens: number, cachedTokens: number, outputTokens: number) {
+export function estimateCost(variant: typeof VARIANTS[number]["name"], inputTokens: number, cachedTokens: number, outputTokens: number) {
   const price = PRICES_PER_MILLION[variant];
   return ((inputTokens - cachedTokens) * price.input + cachedTokens * price.cached_input
     + outputTokens * price.output) / 1_000_000;

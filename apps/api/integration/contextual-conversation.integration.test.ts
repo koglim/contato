@@ -441,6 +441,26 @@ test("B2 negated, informational and hypothetical mentions never use the direct s
   }
 });
 
+test("B2 model delegate outside pending selection clarifies without selection or critical writes", async () => {
+  const f = await fixture();
+  try {
+    const first = await f.receive(`Preciso de ${f.name}`);
+    assert.equal(first.statusCode, 200, first.body);
+    const before = await f.state();
+    assert.equal(before.pending_slot, "location");
+    f.set(async () => basic({ intent: "selection" }));
+    const second = await f.receive(`Não quero mais ${f.name}`);
+    assert.equal(second.statusCode, 200, second.body);
+    assert.equal(second.json().result.route, "contextual");
+    assert.equal(second.json().result.status, "clarification");
+    const after = await f.state();
+    assert.equal(after.pending_slot, "location");
+    assert.deepEqual(after.memory, before.memory);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 0);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_requests WHERE service_id=$1", [f.serviceId])).rows[0].count, 0);
+  } finally { await f.cleanup(); }
+});
+
 test("B2 accepts city before service and no_matches keeps a valid active conversation", async () => {
   const f = await fixture();
   try {

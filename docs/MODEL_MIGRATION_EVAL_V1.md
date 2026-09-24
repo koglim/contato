@@ -189,3 +189,71 @@ sanitizados (`intent_match`, `speech_act_match`, `service_keys_match`,
 `proposal_location_match`, `decision_match`, `slots_match`). Rows históricas
 continuam válidas sem esses campos; o benchmark não será repetido para
 preenchê-los. Isso não altera o runtime de produção.
+
+## Resultado efetivo do runtime (análise offline)
+
+A terceira métrica, `effective_runtime_outcome_agreement`, mantém intactos os
+critérios anteriores. Ela aplica ao resultado do controller o roteamento
+determinístico que o serviço faria em seguida. `delegate` fora de uma seleção
+pendente produz esclarecimento: não entra no resolver de seleção. Para seleção
+pendente, o analisador usa o parser de comandos e o resolver de nomes/ordinais
+com opções **sintéticas**. Uma rota de seleção é rotulada somente como
+`selection_attempt`, jamais como contato revelado ou seleção concluída. A
+comparação exige também os slots finais do oráculo, inclusive hipóteses.
+
+Essa é uma simulação offline do efeito do controller, não uma integração de
+ponta a ponta: não consulta banco, geocoder, matching, consentimento ou
+WhatsApp. `search_ready` significa intenção e slots para busca, não que a busca
+achou profissionais. O relatório local mantém as matrizes antigas lado a lado.
+
+| Variante | Proposal estrita | Controller outcome | Effective runtime outcome |
+| --- | ---: | ---: | ---: |
+| baseline | 16/40 | 26/40 | 33/40 |
+| terra_medium | 22/40 | 32/40 | 37/40 |
+| terra_low | 19/40 | 30/40 | 36/40 |
+| terra_none | 22/40 | 33/40 | 37/40 |
+
+Na métrica efetiva, Terra medium melhora quatro casos contra a baseline e não
+regride nenhum dos 40; low melhora cinco e regride dois (`readiness-06`,
+`b2-062`); none melhora seis e regride dois (`b2-042`, `b2-201`). Assim,
+`b2-042` continua uma regressão real para none: a correção da cidade não é
+preservada. O comportamento de `b2-201` em none também continua divergente.
+Esses números são uma triagem de 40 casos, não aprovação de migração.
+
+As quatro falhas unânimes anteriores eram da métrica *controller outcome*:
+
+- `b2-161`, `b2-181`, `b2-182`: o `delegate` do modelo, no contexto desses
+  casos, não faz seleção. O parser/resolver não reconhece a negação, hipótese
+  ou hesitação como escolha. O resultado efetivo é esclarecimento, sem tentativa
+  de seleção, nas quatro variantes.
+- `confirmation-electric`: permanece falha efetiva nas quatro variantes. A
+  confirmação deveria retomar a busca, mas termina em esclarecimento.
+
+`readiness-05` com Terra medium também é esclarecimento efetivo, pois o
+`delegate` ocorre fora de seleção pendente; não há mutação crítica. Um teste de
+integração com PostgreSQL cobre essa proteção no serviço real. Nenhuma dessas
+constatações muda prompt, controller ou runtime.
+
+## Runner production-shaped preparado, não executado
+
+O segundo experimento é **separado** do checkpoint de 160 chamadas e compara
+somente baseline atual (`gpt-5-mini-2025-08-07`, effort omitido) contra
+`gpt-5.6-terra` com `medium`, nos mesmos 40 casos. Intercala as variantes por
+caso, invertendo a ordem a cada caso: 80 posições, 40 por variante e 20 vezes
+cada uma na primeira posição. Usa o mesmo prompt, schema, entrada e controller,
+com `max_output_tokens=900`, timeout de 20 s, `maxRetries=0` e `store=false`,
+como no runtime atual. O teto menor pode gerar respostas incompletas e será
+medido, não corrigido automaticamente.
+
+```sh
+pnpm --filter @contatocerto/api eval:model-migration:production-shaped --self-check
+```
+
+O self-check valida o plano e retorna `model_calls=0`, sem chave. O runner pago
+exige autorização separada, chave `OPENAI_API_KEY` já existente e limite exato
+de 80 chamadas. Grava progresso em stderr e cada row sanitizado com fsync em
+checkpoint próprio ignorado pelo Git; `--resume` verifica hashes, metadados e
+prefixo contínuo antes de prosseguir. O mesmo limite de retomada permanece:
+uma chamada interrompida antes do fsync pode ter sido cobrada e ser repetida.
+**As 80 chamadas não foram autorizadas nem executadas nesta PR.** Nenhuma ENV
+nova ou alterada; nenhuma configuração EasyPanel necessária.

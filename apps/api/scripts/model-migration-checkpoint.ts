@@ -9,7 +9,8 @@ const variant = z.object({
   name: z.string().min(1), model: z.string().min(1), reasoning_effort: z.string().min(1),
 }).strict();
 export const checkpointMetadataSchema = z.object({
-  version: z.literal("model-migration-v1-checkpoint"),
+  version: z.union([z.literal("model-migration-v1-checkpoint"),
+    z.literal("model-migration-production-shaped-v1-checkpoint")]),
   corpus_sha256: hash, prompt_sha256: hash, schedule_sha256: hash,
   max_output_tokens: z.number().int().positive(), calls_planned: z.number().int().positive(),
   variants: z.array(variant).min(1),
@@ -36,6 +37,7 @@ export const checkpointRowSchema = z.object({
   intent_match: z.boolean().optional(), speech_act_match: z.boolean().optional(),
   service_keys_match: z.boolean().optional(), proposal_location_match: z.boolean().optional(),
   decision_match: z.boolean().optional(), slots_match: z.boolean().optional(),
+  effective_runtime_outcome_agreement: z.boolean().optional(),
 }).strict();
 export type CheckpointRow = z.infer<typeof checkpointRowSchema>;
 export type CheckpointStep = Pick<CheckpointRow,
