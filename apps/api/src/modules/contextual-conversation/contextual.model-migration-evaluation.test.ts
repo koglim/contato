@@ -40,7 +40,8 @@ test("model-migration corpus and deterministic four-variant schedule self-check 
         && (item.execution_order - 1) % 4 === position).length, 10);
     }
   }
-  assert.ok((report.categories.typos ?? 0) + (report.categories.noisy_portuguese ?? 0) >= 2);
+  assert.equal(report.categories.noisy_portuguese, 1);
+  assert.equal(report.categories.accents_missing, 1);
   assert.ok((report.categories.semantic ?? 0) + (report.categories.colloquial_portuguese ?? 0) >= 4);
   assert.equal(report.categories.confirmation, 1);
 });
