@@ -226,34 +226,56 @@ As quatro falhas unânimes anteriores eram da métrica *controller outcome*:
   casos, não faz seleção. O parser/resolver não reconhece a negação, hipótese
   ou hesitação como escolha. O resultado efetivo é esclarecimento, sem tentativa
   de seleção, nas quatro variantes.
-- `confirmation-electric`: permanece falha efetiva nas quatro variantes. A
-  confirmação deveria retomar a busca, mas termina em esclarecimento.
+- `confirmation-electric`: na simulação histórica de 160 chamadas, permanece
+  falha efetiva nas quatro variantes. A confirmação determinística explícita
+  foi adicionada posteriormente e é coberta por testes separados; as rows
+  históricas não foram reescritas.
 
 `readiness-05` com Terra medium também é esclarecimento efetivo, pois o
 `delegate` ocorre fora de seleção pendente; não há mutação crítica. Um teste de
 integração com PostgreSQL cobre essa proteção no serviço real. Nenhuma dessas
 constatações muda prompt, controller ou runtime.
 
-## Runner production-shaped preparado, não executado
+## Benchmark production-shaped concluído (80/80)
 
-O segundo experimento é **separado** do checkpoint de 160 chamadas e compara
+O segundo experimento é **separado** do checkpoint de 160 chamadas e comparou
 somente baseline atual (`gpt-5-mini-2025-08-07`, effort omitido) contra
 `gpt-5.6-terra` com `medium`, nos mesmos 40 casos. Intercala as variantes por
 caso, invertendo a ordem a cada caso: 80 posições, 40 por variante e 20 vezes
 cada uma na primeira posição. Usa o mesmo prompt, schema, entrada e controller,
 com `max_output_tokens=900`, timeout de 20 s, `maxRetries=0` e `store=false`,
-como no runtime atual. O teto menor pode gerar respostas incompletas e será
-medido, não corrigido automaticamente.
+como no runtime atual. Com esse teto, a baseline teve sete respostas
+incompletas e Terra medium nenhuma. Nenhum limite de produção foi alterado.
 
 ```sh
 pnpm --filter @contatocerto/api eval:model-migration:production-shaped --self-check
 ```
 
-O self-check valida o plano e retorna `model_calls=0`, sem chave. O runner pago
-exige autorização separada, chave `OPENAI_API_KEY` já existente e limite exato
-de 80 chamadas. Grava progresso em stderr e cada row sanitizado com fsync em
+O self-check valida o plano e retorna `model_calls=0`, sem chave. A rodada paga
+foi autorizada separadamente e concluída com 80/80 chamadas, sem resume. O
+runner exige a chave `OPENAI_API_KEY` já existente e limite exato de 80
+chamadas. Gravou progresso em stderr e cada row sanitizado com fsync em
 checkpoint próprio ignorado pelo Git; `--resume` verifica hashes, metadados e
 prefixo contínuo antes de prosseguir. O mesmo limite de retomada permanece:
 uma chamada interrompida antes do fsync pode ter sido cobrada e ser repetida.
-**As 80 chamadas não foram autorizadas nem executadas nesta PR.** Nenhuma ENV
-nova ou alterada; nenhuma configuração EasyPanel necessária.
+**Não repetir as 80 chamadas.** Nenhuma ENV nova ou alterada; nenhuma
+configuração EasyPanel necessária.
+
+| Métrica production-shaped | GPT-5 Mini atual | Terra medium |
+| --- | ---: | ---: |
+| Estrutural | 33/40 | 40/40 |
+| Proposal semântica | 15/40 | 18/40 |
+| Controller outcome | 25/40 | 29/40 |
+| Effective runtime outcome | 28/40 | 36/40 |
+| Mediana | 7039,5 ms | 1660 ms |
+| Incomplete | 7 | 0 |
+| Request errors | 0 | 0 |
+
+Terra medium teve regressões efetivas em `adaptive-02`, `readiness-17` e
+`confirmation-electric`. A confirmação explícita da hipótese única passou a
+ser determinística; os dois outros casos permanecem semânticos. A rodada
+separada de estabilidade de **40/40 chamadas** repetiu apenas esses dois casos
+com Terra medium/high. Seus resultados e a análise pareada constam em
+[Model Migration Stability v1](MODEL_MIGRATION_STABILITY_V1.md). No conjunto,
+160 + 80 + 40 chamadas pagas já foram concluídas; **nenhum benchmark deve ser
+repetido**. Não houve migração de modelo, e high global não foi aprovado.
