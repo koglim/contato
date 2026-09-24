@@ -20,6 +20,7 @@ npm-debug.log*
 
 # Local evaluation traces (may contain reviewer notes; CI stores its synthetic artifacts separately)
 /apps/api/b2-*-report.json
+/.eval-results/
 
 # IDE and OS files
 .vscode/

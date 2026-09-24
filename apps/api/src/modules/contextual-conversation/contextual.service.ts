@@ -28,6 +28,7 @@ import { ContextualBusyError, PostgresContextualRepository, type ContextualSnaps
 import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 import { classifyConversationAIError, withConversationAITimeout, type ConversationAIFallbackEvent, type ConversationAIFallbackReason, type ConversationAIStage } from "./contextual.provider.js";
 import { deterministicSearchProposal } from "./contextual.fast-path.js";
+import { confirmedUniqueHypothesis } from "./contextual.confirmation.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
 export { CONTEXTUAL_COST_POLICY } from "./contextual.reply.js";
@@ -101,7 +102,17 @@ export class ContextualConversationService implements ContextualInboxHandler {
       const recoveredSelection = !global && await new DefaultSelectionCommandService({ selectionMatchRepository: new PostgresSelectionMatchRepository() })
         .recoverSelection(snapshot.customerId, record.id);
       const command = parseSelectionConversationCommand(record.rawText);
-      const confirmation = normalizeContextualText(record.rawText);
+      const confirmation = confirmedUniqueHypothesis(record.rawText, snapshot.memory.hypotheses);
+      let confirmedHypothesis = confirmation?.explicitService ? null : confirmation?.hypothesis ?? null;
+      if (confirmation?.explicitService && snapshot.pendingSlot !== "selection") {
+        try {
+          const resolved = await this.services.resolve({ text: record.rawText });
+          if (resolved.status === "resolved" && resolved.match
+            && resolved.match.method !== "fuzzy" && resolved.match.service.slug === confirmation.hypothesis.key) {
+            confirmedHypothesis = confirmation.hypothesis;
+          }
+        } catch { /* Resolver failure leaves the normal interpretation path available. */ }
+      }
       let namedSelection = false;
       if (!global && !recoveredSelection && snapshot.pendingSlot === "selection" && snapshot.conversationId) {
         const current = await new PostgresSearchConversationRepository().findById(snapshot.conversationId);
@@ -121,10 +132,9 @@ export class ContextualConversationService implements ContextualInboxHandler {
       if (global || recoveredSelection || (snapshot.pendingSlot === "selection" && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null))) {
         path = "critical_delegate";
         decision = { kind: "delegate", memory: snapshot.memory, correction: false };
-      } else if (snapshot.memory.hypotheses.length === 1 && /^(sim|isso|isso mesmo|confirmo)$/.test(confirmation)) {
+      } else if (snapshot.pendingSlot !== "selection" && confirmedHypothesis) {
         path = "confirmed_hypothesis";
-        const hypothesis = snapshot.memory.hypotheses[0];
-        decision = { kind: "search", correction: false, memory: { ...snapshot.memory, service: { value: hypothesis.name, source: "user_confirmation", inboundId: record.id }, hypotheses: [] } };
+        decision = { kind: "search", correction: false, memory: { ...snapshot.memory, service: { value: confirmedHypothesis.name, source: "user_confirmation", inboundId: record.id }, hypotheses: [] } };
       } else {
         let providerAttempted = false;
         let fallbackStage: ConversationAIStage = "catalog";
