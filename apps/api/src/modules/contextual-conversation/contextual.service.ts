@@ -265,7 +265,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
         try { validatePersistedContextualQuestion(question, questionContext); }
         catch { throw new InboxPermanentError("persisted_draft_invalid"); }
       }
-      if (questionContext && !question && (questionContext.target === "location" || (questionContext.target === "service" && questionContext.reason === "missing"))) {
+      if (questionContext && !question && (questionContext.target === "location" || questionContext.target === "service_confirmation" || (questionContext.target === "service" && questionContext.reason === "missing"))) {
         question = contextualClarificationText(questionContext);
         await this.repository.saveDraft(record, snapshot, question);
       }
