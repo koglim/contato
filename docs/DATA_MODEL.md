@@ -1,5 +1,15 @@
 # Modelo de dados
 
+## Evolução 021 — identidade e ownership profissional
+
+`accounts` identifica pessoas independentemente de `professionals`;
+`account_identifiers` guarda telefone/email canônicos e sua verificação;
+`professional_memberships` autoriza uma conta para um perfil profissional.
+Contato do perfil não é credencial nem prova de ownership. A migration não
+faz backfill. `professional_membership_events` audita mudanças sem PII e o down
+`P0021` protege dados existentes. O dashboard atual não usa essa fundação ainda.
+Ver [PROFESSIONAL_IDENTITY_FOUNDATION.md](PROFESSIONAL_IDENTITY_FOUNDATION.md).
+
 ## Evolução 017 — recibo e retenção de entrega
 
 `channel_outbound_messages.sent_token_hash` guarda SHA-256 do token que confirmou
@@ -35,6 +45,10 @@ O modelo sustenta busca, matching, conversas, Inbox/Outbox e seleção idempoten
 - `services`: serviços pesquisáveis pertencentes a uma categoria, como Eletricista.
 - `service_aliases`: formas alternativas normalizadas de descrever um serviço. O catálogo inicial não precisa preenchê-las ainda.
 - `professionals`: perfis dos prestadores, incluindo estado operacional e disponibilidade declarada.
+- `accounts`: principais individuais, independentes dos perfis profissionais.
+- `account_identifiers`: identificadores normalizados de contas, com verificação explícita.
+- `professional_memberships`: autorização de uma conta para um perfil, com role e status.
+- `professional_membership_events`: auditoria append-only das mudanças de membership.
 - `professional_services`: vínculo entre profissional e serviço, com preço em centavos e o modo de precificação.
 - `professional_service_areas`: pontos centrais e raios, em metros, das áreas em que um profissional atende.
 - `search_requests`: a solicitação original do cliente. `raw_text` é imutável em intenção e preserva o texto informado.
@@ -50,6 +64,9 @@ O modelo sustenta busca, matching, conversas, Inbox/Outbox e seleção idempoten
 ```text
 service_categories 1 ── N services 1 ── N service_aliases
 professionals      N ── N services (professional_services)
+accounts           1 ── N account_identifiers
+accounts           N ── N professionals (professional_memberships)
+professional_memberships 1 ── N professional_membership_events
 professionals      1 ── N professional_service_areas
 customers          1 ── N search_requests
 search_requests    1 ── N matches N ── 1 professionals
