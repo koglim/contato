@@ -13,10 +13,10 @@ const input: ContextualInput = {
   catalog: [{ key: "encanador", name: "Encanador", description: "Reparos hidráulicos" }],
 };
 
-function fakeProvider(output: unknown, status = "completed", error?: Error, responseOverrides: Record<string, unknown> = {}) {
+function fakeProvider(output: unknown, status = "completed", error?: Error, responseOverrides: Record<string, unknown> = {}, model = "configured-model") {
   let options: ClientOptions | undefined;
   let request: unknown;
-  const provider = new OpenAIContextualProvider("configured-model", "super-secret", {
+  const provider = new OpenAIContextualProvider(model, "super-secret", {
     timeoutMs: 27_000,
     clientFactory: clientOptions => {
       options = clientOptions;
@@ -57,6 +57,43 @@ test("OpenAI conversation provider uses Responses Structured Outputs without too
   const messages = request.input as Array<Record<string, unknown>>;
   assert.equal(messages.length, 1);
   assert.deepEqual(JSON.parse(String(messages[0]?.content)), input);
+});
+
+test("Terra interpretation sends explicit medium reasoning with unchanged request limits", async () => {
+  const output = { intent: "greeting", speech_act: "information", services: [], location: null,
+    natural_reply: "Olá! Como posso ajudar?", confidence: "high", uncertain: false };
+  const context = fakeProvider(output, "completed", undefined, {}, "gpt-5.6-terra");
+  assert.deepEqual(await context.provider.interpret(input), output);
+  const request = record(context.request());
+  assert.equal(request.model, "gpt-5.6-terra");
+  assert.deepEqual(request.reasoning, { effort: "medium" });
+  assert.equal(request.store, false);
+  assert.equal(request.max_output_tokens, 900);
+  assert.deepEqual(context.options(), { apiKey: "super-secret", timeout: 27_000, maxRetries: 0 });
+});
+
+test("Mini interpretation omits Terra reasoning policy for rollback compatibility", async () => {
+  const output = { intent: "greeting", speech_act: "information", services: [], location: null,
+    natural_reply: "Olá! Como posso ajudar?", confidence: "high", uncertain: false };
+  const context = fakeProvider(output, "completed", undefined, {}, "gpt-5-mini-2025-08-07");
+  assert.deepEqual(await context.provider.interpret(input), output);
+  const request = record(context.request());
+  assert.equal(request.model, "gpt-5-mini-2025-08-07");
+  assert.equal("reasoning" in request, false);
+  assert.equal(request.store, false);
+  assert.equal(request.max_output_tokens, 900);
+});
+
+test("Terra composition keeps its existing request shape without a new reasoning policy", async () => {
+  const output = { target: "location", question: "Em qual cidade você precisa do serviço?" };
+  const context = fakeProvider(output, "completed", undefined, {}, "gpt-5.6-terra");
+  assert.deepEqual(await context.provider.composeQuestion({ target: "location", services: ["Encanador"], location: null, reason: "missing" }), output);
+  const request = record(context.request());
+  assert.equal(request.model, "gpt-5.6-terra");
+  assert.equal("reasoning" in request, false);
+  assert.equal(request.store, false);
+  assert.equal(request.max_output_tokens, 300);
+  assert.deepEqual(context.options(), { apiKey: "super-secret", timeout: 27_000, maxRetries: 0 });
 });
 
 test("OpenAI conversation provider accepts strict structured output from output_text", async () => {

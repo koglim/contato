@@ -229,6 +229,7 @@ export class OpenAIContextualProvider implements ContextualProvider {
     try {
       const response = await this.getClient().responses.create({
         model: this.model, store: false, max_output_tokens: CONTEXTUAL_POLICY.maxOutputTokens,
+        ...(this.model === "gpt-5.6-terra" ? { reasoning: { effort: "medium" as const } } : {}),
         instructions: CONTEXTUAL_INSTRUCTIONS,
         input: [{ role: "user", content: JSON.stringify(input) }],
         text: { format: zodTextFormat(contextualInterpretationSchema, "contextual_interpretation") },
