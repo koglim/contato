@@ -175,6 +175,21 @@ jobs:
           END $$;
           SQL
 
+      - name: Verify migration 021 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='021_add_professional_identity_foundation')
+              OR to_regclass('accounts') IS NULL
+              OR to_regclass('account_identifiers') IS NULL
+              OR to_regclass('professional_memberships') IS NULL
+              OR to_regclass('professional_membership_events') IS NULL
+              OR to_regclass('account_identifiers_kind_value_uidx') IS NULL
+              OR to_regclass('professional_memberships_active_professional_idx') IS NULL
+            THEN RAISE EXCEPTION 'migration 021 incomplete'; END IF;
+          END $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 
@@ -281,7 +296,7 @@ jobs:
             ('00000000-0000-0000-0000-000000000016', 'professional_contact_notification', 'test', '+5566900000016', 'retry rollback fixture', NOW() + INTERVAL '1 minute');
           SQL
           set +e
-          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 5 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 6 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
           rollback_status=$?
           set -e
           echo "$rollback_output"
@@ -343,6 +358,18 @@ jobs:
              SET status = 'cancelled',
                  pending_slot = NULL
            WHERE id = '00000000-0000-0000-0000-000000000002';
+          SQL
+
+      - name: Roll back migration 021 with compatible data
+        run: |
+          node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF to_regclass('accounts') IS NOT NULL OR to_regclass('account_identifiers') IS NOT NULL
+              OR to_regclass('professional_memberships') IS NOT NULL
+              OR to_regclass('professional_membership_events') IS NOT NULL
+            THEN RAISE EXCEPTION 'migration 021 remained'; END IF;
+          END $$;
           SQL
 
       - name: Roll back migration 020 with compatible data
@@ -547,7 +574,7 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 020
+      - name: Reapply migrations 008 through 021
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
       - name: Test PostgreSQL integrations after reapply
