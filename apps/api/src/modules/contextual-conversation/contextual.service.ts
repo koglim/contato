@@ -25,10 +25,10 @@ import { parseBilateralConfirmation } from "../bilateral-contact/bilateral-conta
 import { resolveProfessionalSelection } from "../selection-command/professional-selection.resolver.js";
 import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider } from "./contextual.contract.js";
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
-import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
+import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, CONTEXTUAL_HYPOTHESIS_REJECTED, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 import { classifyConversationAIError, withConversationAITimeout, type ConversationAIFallbackEvent, type ConversationAIFallbackReason, type ConversationAIStage } from "./contextual.provider.js";
 import { deterministicSearchProposal } from "./contextual.fast-path.js";
-import { confirmedUniqueHypothesis } from "./contextual.confirmation.js";
+import { confirmedUniqueHypothesis, rejectedUniqueHypothesis } from "./contextual.confirmation.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
 export { CONTEXTUAL_COST_POLICY } from "./contextual.reply.js";
@@ -44,7 +44,7 @@ type ContextualConversationOptions = {
     locationResolution: "resolved" | "ambiguous" | "unresolved" | "not_attempted";
     fallback: boolean;
   }) => void;
-  onExecutionPath?: (event: { path: "deterministic_fast_path" | "ai_interpretation" | "persisted_proposal" | "confirmed_hypothesis" | "critical_delegate";
+  onExecutionPath?: (event: { path: "deterministic_fast_path" | "ai_interpretation" | "persisted_proposal" | "confirmed_hypothesis" | "rejected_hypothesis" | "critical_delegate";
     interpretationCalled: boolean; compositionCalled: boolean; serviceResolution: "exact" | "phrase" | "fuzzy" | "semantic" | "confirmed_memory" | "none";
     locationResolution: "resolved" | "ambiguous" | "unresolved" | "not_attempted"; finalStatus: string; totalDurationMs: number }) => void;
 };
@@ -121,20 +121,31 @@ export class ContextualConversationService implements ContextualInboxHandler {
           namedSelection = resolveProfessionalSelection(record.rawText, shown).kind !== "unresolved";
         }
       }
+      const criticalDelegate = global || recoveredSelection || (snapshot.pendingSlot === "selection"
+        && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null));
+      let rejection: Awaited<ReturnType<typeof rejectedUniqueHypothesis>> = null;
+      if (!criticalDelegate && snapshot.pendingSlot !== "selection" && !confirmedHypothesis) {
+        try { rejection = await rejectedUniqueHypothesis(record.rawText, snapshot.memory.hypotheses, this.services); }
+        catch { /* Resolver failure leaves the normal interpretation path available. */ }
+      }
       let decision: ContextualDecision = { kind: "clarify", memory: snapshot.memory, correction: false };
       let fallback = false;
       const hadPriorHypothesis = snapshot.memory.hypotheses.length > 0;
       let serviceResolution: "exact" | "phrase" | "fuzzy" | "semantic" | "confirmed_memory" | "none" = snapshot.memory.service ? "confirmed_memory" : "none";
       let locationCandidate = false;
-      let path: "deterministic_fast_path" | "ai_interpretation" | "persisted_proposal" | "confirmed_hypothesis" | "critical_delegate" = "ai_interpretation";
+      let path: "deterministic_fast_path" | "ai_interpretation" | "persisted_proposal" | "confirmed_hypothesis" | "rejected_hypothesis" | "critical_delegate" = "ai_interpretation";
       let interpretationCalled = false;
       let compositionCalled = false;
-      if (global || recoveredSelection || (snapshot.pendingSlot === "selection" && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null))) {
+      if (criticalDelegate) {
         path = "critical_delegate";
         decision = { kind: "delegate", memory: snapshot.memory, correction: false };
       } else if (snapshot.pendingSlot !== "selection" && confirmedHypothesis) {
         path = "confirmed_hypothesis";
         decision = { kind: "search", correction: false, memory: { ...snapshot.memory, service: { value: confirmedHypothesis.name, source: "user_confirmation", inboundId: record.id }, hypotheses: [] } };
+      } else if (rejection) {
+        path = "rejected_hypothesis";
+        serviceResolution = rejection.method;
+        decision = { kind: "clarify", correction: false, memory: { ...snapshot.memory, service: null, hypotheses: [] } };
       } else {
         let providerAttempted = false;
         let fallbackStage: ConversationAIStage = "catalog";
@@ -320,6 +331,10 @@ export class ContextualConversationService implements ContextualInboxHandler {
           text = decision.naturalReply ?? CONTEXTUAL_SMALL_TALK; status = "information";
         } else if (!fallback && decision.kind === "out_of_scope") {
           text = decision.naturalReply ?? CONTEXTUAL_SCOPE; status = "information";
+        } else if (!fallback && rejection) {
+          status = "needs_service";
+          text = CONTEXTUAL_HYPOTHESIS_REJECTED;
+          if (conversationId) await execute(`UPDATE search_conversations SET pending_slot = 'service', updated_at = NOW() WHERE id = $1`, [conversationId]);
         } else if (!fallback && decision.kind === "clarify" && decision.naturalReply) {
           text = decision.naturalReply;
         } else if (!fallback && memory.hypotheses.length) {

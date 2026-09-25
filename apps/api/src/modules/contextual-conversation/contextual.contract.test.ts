@@ -69,6 +69,21 @@ test("B2 uncertainty, negations and hypotheses never trigger a search", () => {
   }
   assert.equal(run("qualquer coisa", proposal()).kind, "clarify");
 });
+test("a comma-separated correction to a different explicit service does not become a refusal", () => {
+  const services = [...catalog, { key: "eletricista", name: "Eletricista", description: null }];
+  const memory = emptyMemory();
+  memory.hypotheses = [{ key: "eletricista", name: "Eletricista", evidence: "eletricitta", inboundId: randomUUID() }];
+  const correction = { ...proposal({ intent: "correct_service", services: [{ key: "encanador", evidence: "encanador" }] }), speech_act: "request" as const };
+  const result = controlContextualProposal("não, preciso de encanador", randomUUID(), correction, memory, services, "Encanador");
+  assert.equal(result.kind, "search");
+  assert.equal(result.memory.service?.value, "Encanador");
+  assert.deepEqual(result.memory.hypotheses, []);
+  for (const unsafe of ["não preciso de encanador", "não, preciso de encanador?", "não, preciso de encanador se tiver"]) {
+    const blocked = controlContextualProposal(unsafe, randomUUID(), correction, memory, services, "Encanador");
+    assert.equal(blocked.kind, "clarify", unsafe);
+    assert.deepEqual(blocked.memory, memory, unsafe);
+  }
+});
 test("B2 structured requests accept question marks without losing explicit slots", () => {
   const services = [...catalog, { key: "eletricista", name: "Eletricista", description: null }];
   for (const [text, name, city] of [["Pode procurar um encanador em Sinop?", "Encanador", "Sinop"],

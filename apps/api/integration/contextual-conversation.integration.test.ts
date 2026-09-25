@@ -621,6 +621,112 @@ test("B2 explicitly confirms the sole matching service hypothesis without AI int
   } finally { await f.cleanup(); }
 });
 
+test("B2 rejects the sole named hypothesis without AI, search, selection or consent", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", confidence: "medium",
+      services: [{ key: f.name, evidence: "eletricitta" }] }));
+    const first = await f.receive("Preciso de um eletricitta");
+    assert.equal(first.statusCode, 200, first.body);
+    assert.deepEqual((await f.state()).memory.hypotheses.map((item: { name: string }) => item.name), [f.name]);
+    const calls = f.calls(), compositions = f.compositions(), before = await f.state();
+    f.set(async () => { throw new Error("rejection must not call interpretation AI"); });
+    f.setCompose(async () => { throw new Error("rejection must not call composer AI"); });
+    const rejected = await f.receive(`não, ${f.name} não`);
+    assert.equal(rejected.statusCode, 200, rejected.body);
+    assert.equal(rejected.json().result.status, "needs_service");
+    assert.equal(rejected.json().reply_text, "Entendi. Qual serviço você precisa? Pode me contar o que aconteceu.");
+    const after = await f.state();
+    assert.deepEqual(after.memory.hypotheses, []);
+    assert.equal(after.memory.service, null);
+    assert.equal(after.pending_slot, null, "no active conversation means no pending domain slot");
+    assert.equal(after.search_request_id, null);
+    assert.equal(after.id, before.id);
+    assert.equal(f.calls(), calls);
+    assert.equal(f.compositions(), compositions);
+    assert.equal(f.geoCalls(), 0);
+    const execution = f.executionEvents().at(-1);
+    assert.equal(execution?.path, "rejected_hypothesis");
+    assert.equal(execution?.interpretationCalled, false);
+    assert.equal(execution?.compositionCalled, false);
+    assert.equal(execution?.finalStatus, "needs_service");
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_requests WHERE service_id=$1", [f.serviceId])).rows[0].count, 0);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 0);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_conversations WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 rejection advances an existing pending conversation to the service slot without searching", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic());
+    const started = await f.receive(`preciso de ${f.name}`);
+    assert.equal(started.json().result.status, "needs_location");
+    assert.equal((await f.state()).pending_slot, "location");
+    f.set(async () => basic({ speech_act: "request", confidence: "medium",
+      services: [{ key: f.name, evidence: "eletricitta" }] }));
+    const hypothesis = await f.receive("Preciso de um eletricitta");
+    assert.equal(hypothesis.statusCode, 200, hypothesis.body);
+    assert.equal((await f.state()).memory.hypotheses.length, 1);
+    const calls = f.calls();
+    const rejected = await f.receive(`não quero ${f.name}`);
+    assert.equal(rejected.statusCode, 200, rejected.body);
+    assert.equal(rejected.json().result.status, "needs_service");
+    const state = await f.state();
+    assert.equal(state.pending_slot, "service");
+    assert.equal(state.memory.service, null);
+    assert.deepEqual(state.memory.hypotheses, []);
+    assert.equal(state.search_request_id, null);
+    assert.equal(f.calls(), calls);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_requests WHERE service_id=$1", [f.serviceId])).rows[0].count, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 correction to a different service is interpreted instead of discarded as rejection", async () => {
+  const f = await fixture();
+  try {
+    const other = await f.addService();
+    f.set(async () => basic({ speech_act: "request", confidence: "medium",
+      services: [{ key: f.name, evidence: "eletricitta" }] }));
+    await f.receive("Preciso de um eletricitta");
+    const calls = f.calls();
+    f.set(async () => basic({ intent: "correct_service", speech_act: "request", confidence: "high",
+      services: [{ key: other.name, evidence: other.name }] }));
+    const corrected = await f.receive(`não, preciso de ${other.name}`);
+    assert.equal(corrected.statusCode, 200, corrected.body);
+    assert.equal(f.calls(), calls + 1, "a correção deve seguir para interpretação normal");
+    assert.notEqual(f.executionEvents().at(-1)?.path, "rejected_hypothesis");
+    assert.equal((await f.state()).memory.service?.value, other.name);
+    assert.deepEqual((await f.state()).memory.hypotheses, []);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 pending selection keeps priority over a rejection-shaped message", async () => {
+  const f = await fixture();
+  try {
+    const matched = await f.receive(`preciso de ${f.name} em Sinop`);
+    assert.equal(matched.json().result.status, "matched");
+    const before = await f.state();
+    assert.equal(before.pending_slot, "selection");
+    const memory = structuredClone(before.memory);
+    memory.hypotheses = [{ key: f.name, name: f.name, evidence: "eletricitta", inboundId: randomUUID() }];
+    await query(`UPDATE contextual_memories SET memory = $2::jsonb
+      WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164 = $1)`, [f.phone, JSON.stringify(memory)]);
+    const calls = f.calls();
+    f.set(async () => basic({ intent: "clarify", speech_act: "negated", confidence: "low", uncertain: true }));
+    f.setCompose(async input => ({ target: input.target, question: `Você precisa de ${f.name} para esse problema?` }));
+    const response = await f.receive(`não, ${f.name} não`);
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(f.calls(), calls + 1);
+    assert.notEqual(f.executionEvents().at(-1)?.path, "rejected_hypothesis");
+    const after = await f.state();
+    assert.equal(after.search_request_id, before.search_request_id);
+    assert.equal(after.pending_slot, "selection");
+    assert.equal(after.memory.hypotheses.length, 1);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 0);
+  } finally { await f.cleanup(); }
+});
+
 test("invalid AI interpretation still uses explicit catalog alias and city through deterministic search", async () => {
   const f = await fixture();
   try {

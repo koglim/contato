@@ -86,6 +86,17 @@ export function hasUnsafeRequestContext(text: string) {
   return /\b(?:se precisar|talvez|nao (?:quero|preciso|autorizo|confirme|selecione)|ignore|prompt)\b/u.test(text);
 }
 
+function explicitlyCorrectsUniqueHypothesis(raw: string, proposal: ContextualProposal, memory: ContextualMemory, explicitService: string | null): boolean {
+  if (proposal.intent !== "correct_service" || proposal.speech_act !== "request" || memory.hypotheses.length !== 1 || !explicitService
+    || normalizeContextualText(memory.hypotheses[0]!.name) === normalizeContextualText(explicitService)
+    || /[?\u00bf\n\r]/u.test(raw)) return false;
+  // Preserve the comma: "nao preciso de X" is a refusal, whereas the entire
+  // utterance "nao, preciso de Y" can correct the rejected hypothesis.
+  const folded = raw.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/[.!]+$/u, "").trim();
+  const alternative = /^nao,\s*preciso de (.+)$/u.exec(folded)?.[1];
+  return alternative !== undefined && normalizeContextualText(alternative) === normalizeContextualText(explicitService);
+}
+
 // Proposals cannot authorize selection, consent, ranking or disclosure. Those use the original message.
 export function controlContextualProposal(raw: string, inboundId: string, value: unknown, memory: ContextualMemory, catalog: ContextualCatalogItem[], explicitService: string | null): ContextualDecision {
   const proposal = contextualProposalSchema.parse(value);
@@ -96,9 +107,11 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   const explicitLocation = discardedExplicitLocation ? null : extractedLocation;
   const evidenceExists = (evidence: string) => (` ${text} `).includes(` ${normalizeContextualText(evidence)} `);
   const requestSpeechAct = proposal.speech_act === undefined || proposal.speech_act === "request";
-  const strongExplicitService = explicitService !== null && requestSpeechAct && !hasUnsafeRequestContext(text)
+  const unsafeRequestContext = hasUnsafeRequestContext(text)
+    && !explicitlyCorrectsUniqueHypothesis(raw, proposal, memory, explicitService);
+  const strongExplicitService = explicitService !== null && requestSpeechAct && !unsafeRequestContext
     && catalog.some(item => item.name === explicitService);
-  const compatibleHypothesis = requestSpeechAct && !hasUnsafeRequestContext(text) && memory.hypotheses.some(hypothesis =>
+  const compatibleHypothesis = requestSpeechAct && !unsafeRequestContext && memory.hypotheses.some(hypothesis =>
     proposal.services.some(service => service.key === hypothesis.key && evidenceExists(service.evidence) && catalog.some(item => item.key === service.key)),
   );
   if (proposal.intent === "selection") return { kind: "delegate", memory, correction: false };
@@ -127,7 +140,7 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   if (proposal.speech_act && proposal.speech_act !== "request" && proposal.speech_act !== "information") return { kind: "clarify", memory, correction: false };
   // A negated defect ("a descarga não para") is not a refusal ("não quero").
   // These are defense-in-depth checks, not the primary intent classifier or a phrase allowlist.
-  if (hasUnsafeRequestContext(text)) return { kind: "clarify", memory, correction: false };
+  if (unsafeRequestContext) return { kind: "clarify", memory, correction: false };
   const proposedCatalogServices = proposal.services.map(item => catalog.find(c => c.key === item.key)
     ?? (explicitService ? catalog.find(c => c.name === explicitService) : undefined));
   const locationIsLiteral = proposal.location !== null && !hasTrailingNonGeographicModifier(proposal.location.text) && (evidenceExists(proposal.location.text)

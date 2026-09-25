@@ -4,6 +4,7 @@ import { validateContextualQuestion, type ContextualDecision, type ContextualRep
 export const CONTEXTUAL_COST_POLICY = "Usar o ContatoCerto é gratuito para o cliente. O valor do serviço é combinado e pago diretamente ao profissional. Sua busca continua de onde parou.";
 export const CONTEXTUAL_FALLBACK = "Não consegui entender sua mensagem com segurança agora. Sua busca foi preservada. Pode me dizer o que precisa ou o que quer corrigir?";
 export const CONTEXTUAL_CLARIFY = "Pode esclarecer o que você quer mudar ou qual opção quer escolher?";
+export const CONTEXTUAL_HYPOTHESIS_REJECTED = "Entendi. Qual serviço você precisa? Pode me contar o que aconteceu.";
 export const CONTEXTUAL_SCOPE = "Posso ajudar você a encontrar e escolher profissionais de serviços na sua região. Sua busca continua salva. Qual atendimento você precisa?";
 export const CONTEXTUAL_GREETING = "Olá! Me conta como posso ajudar. Qual serviço você procura para sua casa ou empresa?";
 export const CONTEXTUAL_SMALL_TALK = "Estou por aqui para ajudar você a encontrar um profissional. Qual serviço está precisando?";

@@ -1,0 +1,26 @@
+{
+  "version": "hypothesis-rejection-v1",
+  "description": "Synthetic, offline regression cases for rejection of one grounded service hypothesis; no historical benchmark inputs are changed.",
+  "cases": [
+    { "id": "no-service-no", "message": "não, eletricista não", "expected": true },
+    { "id": "not-service", "message": "não é eletricista", "expected": true },
+    { "id": "service-no", "message": "eletricista não", "expected": true },
+    { "id": "do-not-need", "message": "não preciso de eletricista", "expected": true },
+    { "id": "do-not-want", "message": "não quero eletricista", "expected": true },
+    { "id": "exact-alias", "message": "não quero instalação elétrica", "expected": true, "matched_term": "instalacao eletrica", "method": "exact" },
+    { "id": "article-phrase", "message": "não quero um eletricista", "expected": true, "matched_term": "eletricista", "method": "phrase" },
+    { "id": "worker-did-not-come", "message": "o eletricista não veio", "expected": false },
+    { "id": "worker-not-available", "message": "o eletricista não atende hoje", "expected": false },
+    { "id": "uncertain", "message": "não sei se é eletricista", "expected": false },
+    { "id": "maybe", "message": "talvez não seja eletricista", "expected": false },
+    { "id": "conditional", "message": "se não for eletricista...", "expected": false },
+    { "id": "information", "message": "vocês têm eletricista?", "expected": false },
+    { "id": "waiting-refusal", "message": "não quero esperar o eletricista", "expected": false, "matched_term": "eletricista", "method": "phrase" },
+    { "id": "different-service-correction", "message": "não, preciso de encanador", "expected": false },
+    { "id": "same-service-correction", "message": "não, preciso de eletricista", "expected": false },
+    { "id": "different-service", "message": "não quero encanador", "expected": false, "slug": "encanador", "matched_term": "encanador" },
+    { "id": "mixed-services", "message": "não quero eletricista e encanador", "expected": false, "matched_term": "eletricista", "method": "phrase" },
+    { "id": "fuzzy-only", "message": "não quero eletricitta", "expected": false, "matched_term": "eletricista", "method": "fuzzy" },
+    { "id": "multiple-hypotheses", "message": "não é eletricista", "expected": false, "hypotheses": ["eletricista", "encanador"] }
+  ]
+}
