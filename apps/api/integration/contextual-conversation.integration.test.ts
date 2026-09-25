@@ -10,6 +10,7 @@ import { PostgresChannelInboundMessageRepository } from "../src/modules/channel-
 import { rollbackThrough } from "./rollback-helper.js";
 import type { LocationResolutionService } from "../src/modules/location-resolution/location-resolution.types.js";
 import { ConversationAIProviderError, type ConversationAIFallbackEvent } from "../src/modules/contextual-conversation/contextual.provider.js";
+import { contextualClarificationText } from "../src/modules/contextual-conversation/contextual.reply.js";
 
 after(closeDatabaseConnection);
 const headers = { "x-internal-key": "b2-integration" };
@@ -346,7 +347,7 @@ async function fixture() {
     });
   };
   const addService = async () => {
-    const id = randomUUID(), name = `Eletricista${id.replaceAll("-", "")}`;
+    const id = randomUUID(), name = `Eletricista${id.replaceAll("-", "").replace(/[0-9]/gu, digit => String.fromCharCode(103 + Number(digit)))}`;
     serviceIds.push(id);
     await query("INSERT INTO services(id,category_id,name,slug) VALUES ($1,$2,$3,$3)", [id, categoryId, name]);
     for (const professionalId of professionalIds) await query("INSERT INTO professional_services(professional_id,service_id) VALUES ($1,$2)", [professionalId, id]);
@@ -587,6 +588,101 @@ test("B2 combines compatible semantic evidence with an existing hypothesis witho
     assert.deepEqual(memory.hypotheses.map((item: { name: string }) => item.name), [f.name]);
     assert.equal(f.fallbackEvents().length, 0);
   } finally { await f.cleanup(); }
+});
+
+test("B2 semantic service hypothesis uses deterministic confirmation after interpretation", async () => {
+  const f = await fixture();
+  try {
+    const electric = await f.addService();
+    f.set(async () => basic({ speech_act: "request", confidence: "medium",
+      services: [{ key: electric.name, evidence: "eletricitta" }] }));
+    f.setCompose(async () => { throw new Error("service confirmation must not call composition AI"); });
+    const result = await f.receive("Preciso de um eletricitta");
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().result.status, "clarification");
+    const expected = contextualClarificationText({ target: "service_confirmation", services: [electric.name], location: null, reason: "ambiguous" });
+    assert.equal(result.json().reply_text, expected);
+    assert.equal(f.calls(), 1);
+    assert.equal(f.compositions(), 0);
+    const memory = (await f.state()).memory;
+    assert.equal(memory.service, null);
+    assert.deepEqual(memory.hypotheses.map((item: { name: string }) => item.name), [electric.name]);
+    assert.equal((await query("SELECT reply_draft FROM contextual_turns WHERE inbound_id=$1", [result.json().message_id])).rows[0].reply_draft, expected);
+    const execution = f.executionEvents().at(-1);
+    assert.equal(execution?.path, "ai_interpretation");
+    assert.equal(execution?.interpretationCalled, true);
+    assert.equal(execution?.compositionCalled, false);
+    assert.equal(execution?.finalStatus, "clarification");
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_requests WHERE service_id=$1", [electric.id])).rows[0].count, 0);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 0);
+    assert.equal((await f.state()).pending_slot, null);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 multiple semantic hypotheses ask deterministically without selecting a service", async () => {
+  const f = await fixture();
+  try {
+    const electric = await f.addService();
+    f.set(async () => basic({ speech_act: "request", confidence: "medium",
+      services: [{ key: f.name, evidence: "pia vaza" }, { key: electric.name, evidence: "chuveiro queimou" }] }));
+    f.setCompose(async () => { throw new Error("multiple hypotheses must not call composition AI"); });
+    const result = await f.receive("Minha pia vaza e meu chuveiro queimou");
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().result.status, "clarification");
+    assert.equal(result.json().reply_text, contextualClarificationText({ target: "service_confirmation",
+      services: [f.name, electric.name], location: null, reason: "ambiguous" }));
+    assert.equal(f.calls(), 1);
+    assert.equal(f.compositions(), 0);
+    const memory = (await f.state()).memory;
+    assert.equal(memory.service, null);
+    assert.deepEqual(memory.hypotheses.map((item: { name: string }) => item.name), [f.name, electric.name]);
+    assert.equal(f.executionEvents().at(-1)?.compositionCalled, false);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_requests WHERE service_id=ANY($1::uuid[])", [[f.serviceId, electric.id]])).rows[0].count, 0);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].count, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("B2 deterministic service confirmation draft survives retry and replay without composer", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", confidence: "medium",
+      services: [{ key: f.name, evidence: "eletricitta" }] }));
+    f.setCompose(async () => { throw new Error("service confirmation must not call composition AI"); });
+    await query(`CREATE FUNCTION b2_confirmation_fail_outbound() RETURNS trigger AS $$ BEGIN
+      IF NEW.recipient_phone_e164 = '${f.phone}' THEN RAISE EXCEPTION 'injected confirmation outbox failure'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
+    await query("CREATE TRIGGER b2_confirmation_fail_outbound BEFORE INSERT ON channel_outbound_messages FOR EACH ROW EXECUTE FUNCTION b2_confirmation_fail_outbound()");
+    const id = randomUUID(), text = "Preciso de um eletricitta";
+    assert.equal((await f.receive(text, id)).statusCode, 500);
+    const expected = contextualClarificationText({ target: "service_confirmation", services: [f.name], location: null, reason: "ambiguous" });
+    const turn = (await query(`SELECT t.proposal, t.reply_draft FROM contextual_turns t JOIN channel_inbound_messages i ON i.id=t.inbound_id
+      WHERE i.provider_message_id=$1 AND i.phone_e164=$2`, [id, f.phone])).rows[0];
+    assert.ok(turn.proposal);
+    assert.equal(turn.reply_draft, expected);
+    assert.equal(f.calls(), 1);
+    assert.equal(f.compositions(), 0);
+    await query("DROP TRIGGER b2_confirmation_fail_outbound ON channel_outbound_messages");
+    await query("DROP FUNCTION b2_confirmation_fail_outbound()");
+    f.set(async () => { throw new Error("retry must reuse persisted interpretation"); });
+    assert.equal((await f.receive(text, id)).statusCode, 409);
+    await query("UPDATE channel_inbound_messages SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE provider_message_id=$1 AND phone_e164=$2", [id, f.phone]);
+    const retry = await f.receive(text, id);
+    assert.equal(retry.statusCode, 200, retry.body);
+    assert.equal(retry.json().reply_text, expected);
+    assert.equal(retry.json().result.status, "clarification");
+    assert.equal(f.calls(), 1);
+    assert.equal(f.compositions(), 0);
+    assert.deepEqual((await f.state()).memory.hypotheses.map((item: { name: string }) => item.name), [f.name]);
+    const replay = await f.receive(text, id);
+    assert.equal(replay.json().duplicate, true);
+    assert.equal(replay.json().reply_text, expected);
+    assert.equal(f.calls(), 1);
+    assert.equal(f.compositions(), 0);
+    assert.equal((await query("SELECT COUNT(*)::int AS count FROM search_requests WHERE service_id=$1", [f.serviceId])).rows[0].count, 0);
+  } finally {
+    await query("DROP TRIGGER IF EXISTS b2_confirmation_fail_outbound ON channel_outbound_messages");
+    await query("DROP FUNCTION IF EXISTS b2_confirmation_fail_outbound()");
+    await f.cleanup();
+  }
 });
 
 test("B2 explicitly confirms the sole matching service hypothesis without AI interpretation", async () => {
