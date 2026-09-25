@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
-import { closeDatabaseConnection, query, withTransaction } from "../src/database/connection.js";
+import { closeDatabaseConnection, inDatabaseTransaction, query, withTransaction } from "../src/database/connection.js";
 import { PostgresAccountIdentityRepository } from "../src/modules/account-identity/account-identity.repository.js";
 import { PostgresProfessionalAccessRepository } from "../src/modules/professional-access/professional-access.repository.js";
 import { ProfessionalAccessService } from "../src/modules/professional-access/professional-access.service.js";
@@ -15,7 +15,7 @@ after(closeDatabaseConnection);
 async function rolledBack(operation: () => Promise<void>) {
   const marker = new Error("identity_test_rollback");
   try {
-    await withTransaction(async () => { await operation(); throw marker; });
+    await withTransaction(client => inDatabaseTransaction(client, async () => { await operation(); throw marker; }));
   } catch (error) {
     if (error !== marker) throw error;
   }
