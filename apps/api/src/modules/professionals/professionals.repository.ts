@@ -15,7 +15,7 @@ type ProfessionalRow = Omit<ProfessionalResponse, "available_now_updated_at" | "
 type SqlValue = string | number | boolean | Date | null;
 
 const professionalColumns = `
-  id, display_name, slug, bio, phone_e164, email, profile_image_url, status,
+  id, display_name, slug, bio, phone_e164, email, profile_image_url, status, management_mode,
   is_verified, is_available_now, available_now_updated_at, created_at, updated_at
 `;
 

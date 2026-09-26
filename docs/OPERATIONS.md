@@ -146,3 +146,9 @@ Keep `PROFESSIONAL_AUTH_ENABLED=false` until verified account identifiers and me
 ## Migration 023 rollback
 
 Migration 023 may be rolled back only before any membership event contains its provenance. Once present, rollback fails closed with SQLSTATE `P0023` and `PROFESSIONAL_ONBOARDING_AUDIT_ROLLBACK_BLOCKED`. Preserve the evidence and investigate instead of deleting audit rows. See [Professional onboarding and eligibility v1](PROFESSIONAL_ONBOARDING_ELIGIBILITY.md).
+
+## Migration 024 rollback and activation readiness
+
+Migration 024 may be rolled back only before any profile is in `account_managed` mode and before any `legacy_claim` membership event exists. If managed profiles or claim events exist, rollback fails closed with SQLSTATE `P0024` and `PROFESSIONAL_MANAGEMENT_MODE_ROLLBACK_BLOCKED`. Never delete audit events or mutate management modes to force downgrade.
+
+In production, `PROFESSIONAL_AUTH_ENABLED` remains `false` (zero production activation). No new environment variables are added for PR #13, and zero paid OpenAI calls occur. See [PROFESSIONAL_SIGNUP_LEGACY_CLAIM.md](PROFESSIONAL_SIGNUP_LEGACY_CLAIM.md).

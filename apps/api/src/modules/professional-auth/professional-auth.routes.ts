@@ -5,12 +5,18 @@ import { ProfessionalAccessService } from "../professional-access/professional-a
 import { PostgresProfessionalAuthRepository } from "./professional-auth.repository.js";
 import { ProfessionalAuthService } from "./professional-auth.service.js";
 import { requestProfessionalAuthChallengeSchema, verifyProfessionalAuthChallengeSchema } from "./professional-auth.types.js";
-import { createSelfServiceProfessionalSchema, professionalDashboardAggregateSchema,
-  updateProfessionalAvailabilitySchema, updateSelfServiceProfileSchema } from "@contatocerto/shared";
+import {
+  claimableProfessionalsResponseSchema,
+  claimProfessionalResponseSchema,
+  createSelfServiceProfessionalSchema,
+  professionalDashboardAggregateSchema,
+  updateProfessionalAvailabilitySchema,
+  updateSelfServiceProfileSchema,
+} from "@contatocerto/shared";
 import { ProfessionalOnboardingService } from "../professional-onboarding/professional-onboarding.service.js";
 import { ProfessionalEligibilityService } from "../professional-eligibility/professional-eligibility.service.js";
 
-type AuthService = Pick<ProfessionalAuthService, "requestChallenge" | "verify" | "authenticate" | "revoke">;
+type AuthService = Pick<ProfessionalAuthService, "requestChallenge" | "verify" | "authenticate" | "revoke" | "listClaimableProfiles" | "claimProfile">;
 type AccessService = Pick<ProfessionalAccessService, "resolveProfessionalAccess">;
 type OnboardingService = Pick<ProfessionalOnboardingService,"createProfile">;
 type EligibilityService = Pick<ProfessionalEligibilityService,"get"|"publish"|"unpublish"|"updateAvailability">;
@@ -112,6 +118,30 @@ export const professionalAuthRoutes: FastifyPluginAsync<Options> = async (app, o
     const principal=await service.authenticate(bearer(request));if(!principal)return reply.code(401).send({error:"unauthorized"});
     const body=createSelfServiceProfessionalSchema.safeParse(request.body);if(!body.success)return reply.code(400).send({error:"invalid_request"});
     try{return reply.code(201).send(await onboardingService.createProfile(principal.accountId,body.data));}catch(error){return domainError(reply,error);}
+  });
+
+  app.get("/claimable-profiles", { preHandler: guard }, async (request, reply) => {
+    const principal = await service.authenticate(bearer(request));
+    if (!principal) return reply.code(401).send({ error: "unauthorized" });
+    const items = await service.listClaimableProfiles(principal.accountId);
+    return claimableProfessionalsResponseSchema.parse({ items });
+  });
+
+  app.post("/profiles/:professionalId/claim", { preHandler: guard }, async (request, reply) => {
+    const params = profileParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const principal = await service.authenticate(bearer(request));
+    if (!principal) return reply.code(401).send({ error: "unauthorized" });
+    try {
+      const result = await service.claimProfile(principal.accountId, params.data.professionalId);
+      return reply.code(200).send(claimProfessionalResponseSchema.parse(result));
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "internal_error";
+      if (code === "account_unavailable" || code === "claim_forbidden") return reply.code(403).send({ error: "forbidden" });
+      if (code === "professional_not_found") return reply.code(404).send({ error: "professional_not_found" });
+      if (code === "claim_conflict") return reply.code(409).send({ error: "claim_conflict" });
+      return domainError(reply, error);
+    }
   });
 
   app.get("/profiles/:professionalId/access", { preHandler: guard }, async (request, reply) => {

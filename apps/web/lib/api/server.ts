@@ -1,5 +1,6 @@
 import "server-only";
 import type {
+  ClaimableProfessional,
   ProfessionalResponse,
   ProfessionalEligibility,
   ProfessionalServiceResponse,
@@ -19,7 +20,7 @@ export type ReadyDashboardData = {
   eligibility: ProfessionalEligibility;
   profiles?: DashboardProfile[];
 };
-export type DashboardData = ReadyDashboardData | { status: "no_profiles"; profiles: [] };
+export type DashboardData = ReadyDashboardData | { status: "no_profiles"; profiles: []; claimableProfiles?: ClaimableProfessional[] };
 
 function demoEligibility(professional: ProfessionalResponse, services: ProfessionalServiceResponse[], areas: ServiceAreaResponse[]): ProfessionalEligibility {
   const identityVerified = true;
@@ -83,7 +84,10 @@ export async function authApi<T>(path: string, init: RequestInit = {}) {
 export async function dashboardProfessionalContext() {
   if (!professionalAuthEnabled()) return { status: "ready" as const, id: dashboardProfessionalId(), profiles: undefined };
   const profiles = (await authApi<{ items: DashboardProfile[] }>("/profiles")).items;
-  if (profiles.length === 0) return { status: "no_profiles" as const, profiles: [] as [] };
+  if (profiles.length === 0) {
+    const claimableProfiles = (await authApi<{ items: ClaimableProfessional[] }>("/claimable-profiles")).items;
+    return { status: "no_profiles" as const, profiles: [] as [], claimableProfiles };
+  }
   const selected = (await cookies()).get("contatocerto_dashboard_profile")?.value;
   const profile = profiles.find(item => item.id === selected) ?? profiles[0]!;
   return { status: "ready" as const, id: profile.id, profiles };

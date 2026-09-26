@@ -19,14 +19,46 @@ export class PostgresProfessionalAuthRepository {
     return withTransaction(async client => {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,22))", [input.phone]);
       const found = await client.query<IdentifierRow>(
-        `SELECT i.id,a.id account_id,a.status account_status
+        `SELECT i.id, a.id account_id, a.status account_status
            FROM account_identifiers i
-           JOIN accounts a ON a.id=i.account_id
-          WHERE i.kind='phone' AND i.normalized_value=$1 AND i.verified_at IS NOT NULL`,
+           JOIN accounts a ON a.id = i.account_id
+          WHERE i.kind = 'phone' AND i.normalized_value = $1`,
         [input.phone],
       );
-      const identity = found.rows[0];
-      if (!identity || identity.account_status !== "active") return null;
+      let identity = found.rows[0];
+      if (identity) {
+        if (identity.account_status !== "active") return null;
+      } else {
+        const newAccount = await client.query<{ id: string }>(
+          `INSERT INTO accounts(status) VALUES('active') RETURNING id`,
+        );
+        const newAccountId = newAccount.rows[0]!.id;
+        const newIdentifier = await client.query<{ id: string }>(
+          `INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at)
+           VALUES($1, 'phone', $2, NULL)
+           ON CONFLICT (kind, normalized_value) DO NOTHING
+           RETURNING id`,
+          [newAccountId, input.phone],
+        );
+        if (!newIdentifier.rows[0]) {
+          await client.query("DELETE FROM accounts WHERE id = $1", [newAccountId]);
+          const refound = await client.query<IdentifierRow>(
+            `SELECT i.id, a.id account_id, a.status account_status
+               FROM account_identifiers i
+               JOIN accounts a ON a.id = i.account_id
+              WHERE i.kind = 'phone' AND i.normalized_value = $1`,
+            [input.phone],
+          );
+          identity = refound.rows[0];
+          if (!identity || identity.account_status !== "active") return null;
+        } else {
+          identity = {
+            id: newIdentifier.rows[0]!.id,
+            account_id: newAccountId,
+            account_status: "active",
+          };
+        }
+      }
 
       const recent = await client.query<{ id: string; created_at: Date }>(
         `SELECT id,created_at FROM professional_auth_challenges
@@ -91,12 +123,12 @@ export class PostgresProfessionalAuthRepository {
 
   verifyChallenge(internalId: string, candidateHash: string, tokenHash: string, sessionExpiresAt: Date) {
     return withTransaction(async client => {
-      const result = await client.query<ChallengeRow>(
-        `SELECT c.*,i.account_id,a.status account_status
+      const result = await client.query<ChallengeRow & { identifier_id: string }>(
+        `SELECT c.*, i.id identifier_id, i.account_id, a.status account_status
            FROM professional_auth_challenges c
            JOIN account_identifiers i ON i.id=c.account_identifier_id
            JOIN accounts a ON a.id=i.account_id
-          WHERE c.id=$1 AND i.kind='phone' AND i.verified_at IS NOT NULL
+          WHERE c.id=$1 AND i.kind='phone'
           FOR UPDATE OF c`,
         [internalId],
       );
@@ -119,6 +151,10 @@ export class PostgresProfessionalAuthRepository {
         [internalId],
       );
       if (consumed.rows.length !== 1) return null;
+      await client.query(
+        `UPDATE account_identifiers SET verified_at=COALESCE(verified_at, NOW()) WHERE id=$1`,
+        [row.identifier_id],
+      );
       const session = await client.query<{ id: string }>(
         `INSERT INTO professional_sessions(account_id,token_hash,expires_at) VALUES($1,$2,$3) RETURNING id`,
         [row.account_id, tokenHash, sessionExpiresAt],
@@ -154,5 +190,132 @@ export class PostgresProfessionalAuthRepository {
       [accountId],
     );
     return result.rows;
+  }
+
+  async listClaimableProfiles(accountId: string) {
+    const result = await query<{ id: string; display_name: string; slug: string; status: "draft" | "active" | "suspended" }>(
+      `SELECT p.id, p.display_name, p.slug, p.status
+         FROM professionals p
+        WHERE p.management_mode = 'legacy_unmanaged'
+          AND p.phone_e164 IN (
+            SELECT i.normalized_value
+              FROM account_identifiers i
+             WHERE i.account_id = $1
+               AND i.kind = 'phone'
+               AND i.verified_at IS NOT NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM professional_memberships m
+             WHERE m.professional_id = p.id
+               AND m.status = 'active'
+          )
+        ORDER BY p.display_name, p.id`,
+      [accountId],
+    );
+    return result.rows;
+  }
+
+  claimProfile(accountId: string, professionalId: string) {
+    return withTransaction(async client => {
+      const accountRes = await client.query<{ status: "active" | "blocked" }>(
+        `SELECT status FROM accounts WHERE id = $1 FOR UPDATE`,
+        [accountId],
+      );
+      const account = accountRes.rows[0];
+      if (!account || account.status !== "active") {
+        throw new Error("account_unavailable");
+      }
+
+      const profRes = await client.query<{
+        id: string;
+        display_name: string;
+        slug: string;
+        phone_e164: string;
+        status: "draft" | "active" | "suspended";
+        management_mode: "legacy_unmanaged" | "account_managed";
+      }>(
+        `SELECT id, display_name, slug, phone_e164, status, management_mode
+           FROM professionals
+          WHERE id = $1
+          FOR UPDATE`,
+        [professionalId],
+      );
+      const professional = profRes.rows[0];
+      if (!professional) {
+        throw new Error("professional_not_found");
+      }
+
+      if (professional.management_mode === "account_managed") {
+        const memberships = await client.query<{ account_id: string; role: string; status: string }>(
+          `SELECT account_id, role, status FROM professional_memberships WHERE professional_id = $1 AND status = 'active'`,
+          [professionalId],
+        );
+        if (memberships.rows.length === 1 && memberships.rows[0]!.account_id === accountId && memberships.rows[0]!.role === "owner") {
+          return {
+            claimed: true as const,
+            professional: {
+              id: professional.id,
+              display_name: professional.display_name,
+              slug: professional.slug,
+              status: professional.status,
+            },
+          };
+        }
+        throw new Error("claim_conflict");
+      }
+
+      if (professional.management_mode !== "legacy_unmanaged") {
+        throw new Error("claim_conflict");
+      }
+
+      const verifiedPhone = await client.query<{ id: string }>(
+        `SELECT id FROM account_identifiers
+          WHERE account_id = $1 AND kind = 'phone' AND normalized_value = $2 AND verified_at IS NOT NULL`,
+        [accountId, professional.phone_e164],
+      );
+      if (!verifiedPhone.rows[0]) {
+        throw new Error("claim_forbidden");
+      }
+
+      const activeMemberships = await client.query<{ account_id: string }>(
+        `SELECT account_id FROM professional_memberships WHERE professional_id = $1 AND status = 'active'`,
+        [professionalId],
+      );
+      if (activeMemberships.rows.length > 0) {
+        throw new Error("claim_conflict");
+      }
+
+      await client.query(
+        `SELECT set_config('contatocerto.membership_actor_account_id', $1, true),
+                set_config('contatocerto.membership_source', 'legacy_claim', true)`,
+        [accountId],
+      );
+
+      await client.query(
+        `INSERT INTO professional_memberships(account_id, professional_id, role, status)
+         VALUES($1, $2, 'owner', 'active')`,
+        [accountId, professionalId],
+      );
+
+      const updated = await client.query<{
+        id: string;
+        display_name: string;
+        slug: string;
+        status: "draft" | "active" | "suspended";
+      }>(
+        `UPDATE professionals
+            SET management_mode = 'account_managed',
+                updated_at = NOW()
+          WHERE id = $1
+          RETURNING id, display_name, slug, status`,
+        [professionalId],
+      );
+
+      return {
+        claimed: true as const,
+        professional: updated.rows[0]!,
+      };
+    });
   }
 }

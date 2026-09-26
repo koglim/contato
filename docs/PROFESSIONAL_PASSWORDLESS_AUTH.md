@@ -6,7 +6,7 @@ The browser talks only to the Next.js BFF. The BFF keeps `INTERNAL_API_KEY` serv
 
 ## Rollout
 
-`PROFESSIONAL_AUTH_ENABLED=false` is the default and preserves the demo password, signed demo cookie and `DASHBOARD_PROFESSIONAL_ID`. When true, the demo path is disabled and `PROFESSIONAL_AUTH_PEPPER` must contain at least 32 bytes in the API. Startup rejects missing, empty or short values. No signup, profile claim or implicit membership creation exists in this version.
+`PROFESSIONAL_AUTH_ENABLED=false` is the default and preserves the demo password, signed demo cookie and `DASHBOARD_PROFESSIONAL_ID`. When true, the demo path is disabled and `PROFESSIONAL_AUTH_PEPPER` must contain at least 32 bytes in the API. Startup rejects missing, empty or short values. PR #13 introduces self-service signup (provisional account + identifier creation) and legacy profile claim via `POST /profiles/:professionalId/claim` (migration 024).
 
 ## Challenge lifecycle
 
@@ -38,4 +38,4 @@ Cookies use HttpOnly, Secure in production, SameSite=Lax and Path `/`. When pass
 
 ## Rollback and future boundary
 
-Migration 022 allows rollback only while challenges, sessions and authentication outboxes are empty. Otherwise it raises `PROFESSIONAL_AUTH_ROLLBACK_BLOCKED` (`P0022`) to preserve evidence. Signup, identifier verification, historical profile claim and team management remain separate future work. Before team role management, membership audit events need actor/source attribution.
+Migration 022 allows rollback only while challenges, sessions and authentication outboxes are empty. Otherwise it raises `PROFESSIONAL_AUTH_ROLLBACK_BLOCKED` (`P0022`) to preserve evidence. PR #13 implements signup, identifier verification, legacy profile discovery and claim via migration 024 (`P0024`). Team role management and subscription billing remain separate future work.

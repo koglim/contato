@@ -3,6 +3,7 @@ import { withTransaction } from "../../database/connection.js";
 import { CANDIDATE_POOL_SIZE, presentationPageSize } from "./matching-policy.js";
 import { RANKING_POLICY, rankingCtes, rankingOrder } from "./matching-ranking.js";
 import { MATCHING_AVAILABILITY_FRESHNESS_MINUTES, type MatchingRepository, type MatchingSearchOutcome, type SearchExecutionContext } from "./matching.types.js";
+import { eligibleManagedIdentitySql } from "../professional-eligibility/eligible-managed-identity.js";
 
 type ServiceRow = { id: string; name: string; slug: string; is_active: boolean };
 type SearchRequestRow = { id: string };
@@ -65,6 +66,13 @@ export class PostgresMatchingRepository implements MatchingRepository {
            JOIN professional_service_areas ON professional_service_areas.professional_id = professionals.id
            CROSS JOIN requested_location
            WHERE professionals.status = 'active'
+             AND (
+               professionals.management_mode = 'legacy_unmanaged'
+               OR (
+                 professionals.management_mode = 'account_managed'
+                 AND ${eligibleManagedIdentitySql("professionals")}
+               )
+             )
              AND length(trim(professionals.display_name)) >= 2
              AND professionals.phone_e164 ~ '^[+][1-9][0-9]{7,14}$'
              AND length(trim(professionals.slug)) > 0

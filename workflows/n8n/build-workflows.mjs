@@ -9,7 +9,7 @@ const node = (name, type, parameters, x, y = 0, extra = {}) => ({
     webhook: 2.1, respondToWebhook: 1.4, convertToFile: 1.1 })[type],
   position: [x, y], parameters, ...extra,
 });
-const code = (name, jsCode, x, y = 0, mode = "runOnceForEachItem") => node(name, "code", { mode, jsCode: `${httpResponse.toString()}\n${jsCode}` }, x, y);
+const code = (name, jsCode, x, y = 0, mode = "runOnceForEachItem") => node(name, "code", { mode, jsCode: `${httpResponse.toString()}\n${jsCode}`.replaceAll("\r\n", "\n") }, x, y);
 const branch = (name, expression, x, y = 0) => node(name, "if", { conditions: {
   options: { caseSensitive: true, typeValidation: "strict", version: 2 },
   conditions: [{ id: name, leftValue: expression, rightValue: "", operator: { type: "boolean", operation: "true", singleValue: true } }], combinator: "and",

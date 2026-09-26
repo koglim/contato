@@ -34,6 +34,7 @@ test("multi-profile selector remains available after onboarding", () => {
 const professional = (status: ProfessionalResponse["status"]): ProfessionalResponse => ({
   id: "11111111-1111-4111-8111-111111111111", display_name: "Ana Profissional", slug: "ana-profissional",
   bio: null, phone_e164: "+5566999999999", email: null, profile_image_url: null, status,
+  management_mode: "account_managed",
   is_verified: false, is_available_now: false, available_now_updated_at: null,
   created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString(),
 });
@@ -67,4 +68,30 @@ test("passwordless mode renders lifecycle and applies eligibility availability g
   assert.match(active, /Despublicar perfil/u);
   const unavailable = renderDashboard("availability", "draft", false, true);
   assert.match(unavailable, /disabled=""/u);
+});
+
+test("claimable profiles render alongside explicit claim and new profile creation", () => {
+  const onboarding = read("components/dashboard/onboarding.tsx");
+  assert.match(onboarding, /Encontramos perfil existente/u);
+  assert.match(onboarding, /Este perfil é meu/u);
+  assert.match(onboarding, /Criar novo perfil/u);
+  assert.match(onboarding, /claimableProfiles/u);
+  assert.match(onboarding, /\/api\/dashboard\/claim/u);
+});
+
+test("claim route sets profile selection cookie and guards with same-origin", () => {
+  const route = read("app/api/dashboard/claim/route.ts");
+  assert.match(route, /sameOriginError\(request\)/u);
+  assert.match(route, /contatocerto_dashboard_profile/u);
+  assert.match(route, /result\.professional\.id/u);
+});
+
+test("access UI adapts copy between passwordless and demo mode", () => {
+  const pageSource = read("app/(dashboard-access)/dashboard/access/page.tsx");
+  const formSource = read("components/dashboard/access-form.tsx");
+  assert.match(pageSource, /Entrar ou criar conta/u);
+  assert.match(pageSource, /Informe seu WhatsApp para continuar/u);
+  assert.match(pageSource, /Seu trabalho, organizado\./u);
+  assert.match(formSource, /Continuar com WhatsApp/u);
+  assert.match(formSource, /Acessar painel/u);
 });
