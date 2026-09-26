@@ -10,6 +10,7 @@ import { createInternalKeyGuard } from "../internal/internal-auth.js";
 import { validationError } from "../internal/validation.js";
 import { PostgresProfessionalsRepository } from "./professionals.repository.js";
 import type { ProfessionalsRepository } from "./professionals.types.js";
+import { professionalSlugBase, professionalSlugCandidate } from "./professional-slug.js";
 
 type ProfessionalsRoutesOptions = {
   internalApiKey?: string;
@@ -17,17 +18,6 @@ type ProfessionalsRoutesOptions = {
 };
 
 const professionalIdParamsSchema = z.object({ id: z.string().uuid() });
-
-function slugify(value: string) {
-  const slug = value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || "professional";
-}
 
 function isUniqueViolation(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
@@ -44,10 +34,10 @@ export const professionalsRoutes: FastifyPluginAsync<ProfessionalsRoutesOptions>
       return validationError(reply, parsed.error.issues);
     }
 
-    const baseSlug = slugify(parsed.data.display_name);
+    const baseSlug = professionalSlugBase(parsed.data.display_name);
 
     for (let suffix = 1; suffix <= 100; suffix += 1) {
-      const slug = suffix === 1 ? baseSlug : `${baseSlug}-${suffix}`;
+      const slug = professionalSlugCandidate(baseSlug, suffix);
 
       try {
         const professional = await repository.create({ ...parsed.data, slug });

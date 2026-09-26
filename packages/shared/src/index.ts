@@ -143,3 +143,9 @@ export { contextualMessageSchema } from "./schemas/contextual-message.js";
 export { inboxRecoveryResponseSchema, inboxDispositionSchema, inboxDispositionResponseSchema, inboxQueueStatusSchema } from "./schemas/inbox-recovery.js";
 export type { InboxDisposition } from "./schemas/inbox-recovery.js";
 export * from './schemas/channel-transport.js';
+export { createSelfServiceProfessionalSchema, professionalDashboardAggregateSchema,
+  professionalEligibilityReasonSchema, professionalEligibilitySchema,
+  professionalLifecycleResponseSchema } from "./schemas/professional-onboarding.js";
+export type { CreateSelfServiceProfessionalInput, ProfessionalDashboardAggregate,
+  ProfessionalEligibility, ProfessionalEligibilityReason,
+  ProfessionalLifecycleResponse } from "./types/professional-onboarding.js";

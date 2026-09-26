@@ -31,6 +31,7 @@ test("every state-changing dashboard BFF route uses the centralized same-origin 
     "app/api/dashboard/logout/route.ts",
     "app/api/dashboard/profile/route.ts",
     "app/api/dashboard/route.ts",
+    "app/api/dashboard/onboarding/route.ts",
   ]) {
     const source = readFileSync(path, "utf8");
     assert.match(source, /sameOriginError\(request\)/u, path);

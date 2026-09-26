@@ -143,3 +143,6 @@ nem limpar auditoria para rollback. B2 off; sem alteração operacional neste ch
 # Professional auth rollout
 
 Keep `PROFESSIONAL_AUTH_ENABLED=false` until verified account identifiers and memberships have been provisioned and the versioned n8n workflows have been reviewed. Enabling requires an API-only `PROFESSIONAL_AUTH_PEPPER` with at least 32 bytes; the API derives separate OTP, Outbox and public-reference keys and rejects weak configuration. Never reuse or expose the pepper to the browser. Roll back migration 022 only before any challenge, session or authentication outbox data exists; otherwise down fails with `P0022`. The 30-second authentication delivery margin is versioned in code and must not be bypassed operationally. Rollout does not require or authorize a remote n8n or EasyPanel change.
+## Migration 023 rollback
+
+Migration 023 may be rolled back only before any membership event contains its provenance. Once present, rollback fails closed with SQLSTATE `P0023` and `PROFESSIONAL_ONBOARDING_AUDIT_ROLLBACK_BLOCKED`. Preserve the evidence and investigate instead of deleting audit rows. See [Professional onboarding and eligibility v1](PROFESSIONAL_ONBOARDING_ELIGIBILITY.md).

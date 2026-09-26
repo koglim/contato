@@ -137,3 +137,6 @@ Retenção operacional e limites de WAL/backups: [TRANSPORT_DURABILITY.md](TRANS
 Migration 022 adds `professional_auth_challenges` and `professional_sessions`. Challenges reference verified account identifiers and optional durable outboxes; sessions reference accounts and store only token hashes. `channel_outbound_messages.expires_at` prevents an authentication message from being claimed after its challenge expires. See `PROFESSIONAL_PASSWORDLESS_AUTH.md`.
 
 The partial unique index `professional_auth_challenges_one_active_idx` enforces at most one unconsumed, non-invalidated challenge per account identifier. The repository invalidates stale rows before insertion under the per-phone advisory transaction lock. `channel_outbound_messages_auth_claim_idx` supports the concrete authentication expiry and claim scan. Public challenge references are encrypted transport tokens and are not stored as identity or authorization data.
+## Professional onboarding audit and eligibility
+
+Migration 023 extends append-only `professional_membership_events` with transaction-scoped provenance. The complete invariants and the derived `eligibility-v1` policy are documented in [Professional onboarding and eligibility v1](PROFESSIONAL_ONBOARDING_ELIGIBILITY.md).

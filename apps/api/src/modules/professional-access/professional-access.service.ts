@@ -13,6 +13,6 @@ export class ProfessionalAccessService {
     if (!state.membershipStatus) return { status: "not_member" };
     if (state.membershipStatus === "revoked") return { status: "membership_revoked" };
     if (!state.hasVerifiedIdentifier) return { status: "identity_unverified" };
-    return { status: "authorized" };
+    return { status: "authorized", role: state.membershipRole! };
   }
 }

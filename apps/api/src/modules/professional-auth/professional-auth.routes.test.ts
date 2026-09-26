@@ -5,6 +5,7 @@ import { professionalAuthRoutes } from "./professional-auth.routes.js";
 
 const profileA = "11111111-1111-4111-8111-111111111111";
 const profileB = "22222222-2222-4222-8222-222222222222";
+const now = new Date().toISOString();
 
 test("self-service revalidates exact membership on every read and mutation", async () => {
   const app = Fastify();
@@ -22,22 +23,49 @@ test("self-service revalidates exact membership on every read and mutation", asy
   const accessService = {
     resolveProfessionalAccess: async ({ professionalId }: { accountId: string; professionalId: string }) => {
       checks.push(professionalId);
-      return { status: membershipActive && professionalId === profileA ? "authorized" as const : "not_member" as const };
+      return membershipActive && professionalId === profileA ? { status: "authorized" as const, role: "owner" as const } : { status: "not_member" as const };
     },
   };
-  app.get("/internal/professionals/:id", async request => ({ id: (request.params as { id: string }).id, display_name: "A" }));
+  const eligibility = { policy_version: "eligibility-v1" as const, professional_id: profileA, identity_verified: true,
+    profile_complete: true, has_active_service: false, has_service_area: false, profile_status: "draft" as const,
+    ready_to_publish: false, can_appear_in_matching: false, can_receive_opportunities: false,
+    can_set_available_now: false, reasons: ["no_active_service" as const, "no_service_area" as const, "profile_draft" as const] };
+  const eligibilityService = { get: async () => eligibility, publish: async () => { throw new Error("unused"); },
+    unpublish: async () => { throw new Error("unused"); }, updateAvailability: async () => { throw new Error("unused"); } };
+  app.get("/internal/professionals/:id", async request => ({ id: (request.params as { id: string }).id, display_name: "A", slug: "a",
+    bio: null, phone_e164: "+5566999999999", email: null, profile_image_url: null, status: "draft", is_verified: false,
+    is_available_now: false, available_now_updated_at: null, created_at: now, updated_at: now }));
   app.get("/internal/professionals/:id/services", async () => ({ items: [] }));
   app.get("/internal/professionals/:id/service-areas", async () => ({ items: [] }));
   app.get("/internal/catalog/services", async () => ({ items: [] }));
   app.patch("/internal/professionals/:id", async request => ({ ...(request.body as object), id: (request.params as { id: string }).id }));
-  await app.register(professionalAuthRoutes, { prefix: "/internal/professional-auth", internalApiKey: "key", service, accessService });
+  await app.register(professionalAuthRoutes, { prefix: "/internal/professional-auth", internalApiKey: "key", service, accessService, eligibilityService });
 
   const headers = { "x-internal-key": "key", authorization: "Bearer session" };
   const readA = await app.inject({ method: "GET", url: `/internal/professional-auth/profiles/${profileA}/dashboard`, headers });
   assert.equal(readA.statusCode, 200);
   assert.equal((readA.json() as { professional: { id: string } }).professional.id, profileA);
   assert.equal((await app.inject({ method: "GET", url: `/internal/professional-auth/profiles/${profileB}/dashboard`, headers })).statusCode, 403);
-  assert.equal((await app.inject({ method: "PATCH", url: `/internal/professional-auth/profiles/${profileA}`, headers, payload: { display_name: "Novo" } })).statusCode, 200);
+  const allowed = await app.inject({ method: "PATCH", url: `/internal/professional-auth/profiles/${profileA}`, headers, payload: { display_name: "Novo nome" } });
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(allowed.json().display_name, "Novo nome");
+
+  const forbiddenProfileUpdates = [
+    { status: "active" },
+    { status: "draft" },
+    { phone_e164: "+5566999999999" },
+    { is_verified: true },
+    { is_available_now: true },
+    { slug: "forcado" },
+    { role: "owner" },
+    { professional_id: profileA },
+    { display_name: "Novo", status: "active" },
+  ];
+  for (const payload of forbiddenProfileUpdates) {
+    const response = await app.inject({ method: "PATCH", url: `/internal/professional-auth/profiles/${profileA}`, headers, payload });
+    assert.equal(response.statusCode, 400, JSON.stringify(payload));
+    assert.deepEqual(response.json(), { error: "invalid_request" });
+  }
 
   membershipActive = false;
   assert.equal((await app.inject({ method: "GET", url: `/internal/professional-auth/profiles/${profileA}/dashboard`, headers })).statusCode, 403);
@@ -45,6 +73,7 @@ test("self-service revalidates exact membership on every read and mutation", asy
 
   accountActive = false;
   assert.equal((await app.inject({ method: "GET", url: `/internal/professional-auth/profiles/${profileA}/dashboard`, headers })).statusCode, 401);
-  assert.deepEqual(checks, [profileA, profileB, profileA, profileA, profileA]);
+  assert.equal(checks.filter(id => id === profileA).length, 13);
+  assert.equal(checks.filter(id => id === profileB).length, 1);
   await app.close();
 });

@@ -12,12 +12,16 @@ export const professionalMembershipInputSchema = professionalAccessQuerySchema.e
 export type ProfessionalAccessQuery = z.infer<typeof professionalAccessQuerySchema>;
 export type ProfessionalMembershipInput = z.infer<typeof professionalMembershipInputSchema>;
 export type ProfessionalAccessStatus = "authorized" | "not_member" | "membership_revoked" | "account_blocked" | "identity_unverified" | "not_found";
-export type ProfessionalAccessResult = { status: ProfessionalAccessStatus };
+export type ProfessionalMembershipRole = "owner" | "admin" | "member";
+export type AuthorizedProfessionalAccess = { status: "authorized"; role: ProfessionalMembershipRole };
+export type ProfessionalAccessResult = AuthorizedProfessionalAccess
+  | { status: Exclude<ProfessionalAccessStatus, "authorized"> };
 
 export type ProfessionalAccessSnapshot = {
   accountStatus: "active" | "blocked" | null;
   professionalExists: boolean;
   membershipStatus: "active" | "revoked" | null;
+  membershipRole: ProfessionalMembershipRole | null;
   hasVerifiedIdentifier: boolean;
 };
 

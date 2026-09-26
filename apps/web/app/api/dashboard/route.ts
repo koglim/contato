@@ -43,6 +43,7 @@ async function mutate(request: Request) {
         }
       : dashboardProfessionalId,
     api: enabled ? authApi : api,
+    selfServiceLifecycleEnabled: enabled,
     ...(enabled ? { professionalBase: (id: string) => `/profiles/${id}` } : {}),
   });
 }
