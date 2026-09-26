@@ -75,6 +75,8 @@ import { inboxRecoveryRoutes } from "./modules/channel-inbox/inbox-recovery.rout
 import { channelTransportRoutes } from './modules/channel-media/channel-transport.routes.js';
 import { ChannelMediaService } from './modules/channel-media/channel-media.service.js';
 import { OutboundDispositionService } from './modules/channel-outbox/outbound-disposition.service.js';
+import { professionalAuthRoutes } from "./modules/professional-auth/professional-auth.routes.js";
+import type { ProfessionalAuthService } from "./modules/professional-auth/professional-auth.service.js";
 
 type AppDependencies = {
   contextualConversation?: ContextualInboxHandler;
@@ -109,6 +111,7 @@ type AppDependencies = {
   channelOutboundConfig?: ChannelOutboundConfig;
   internalApiKey?: string;
   professionalOpportunityService?: Pick<ProfessionalOpportunityService, "handle">;
+  professionalAuthService?: ProfessionalAuthService;
 };
 
 function createLazyLocationResolutionService(provider: GeocodingProvider | undefined, observe: (diagnostic: LocationResolutionDiagnostic) => void): LocationResolutionService {
@@ -169,6 +172,7 @@ export function buildApp({
   channelOutboundService,
   channelOutboundConfig,
   professionalOpportunityService,
+  professionalAuthService,
   logStream,
   contextualConversation,
 }: AppDependencies = {}) {
@@ -340,6 +344,9 @@ export function buildApp({
   app.register(channelOutboundRoutes, { prefix: "/internal/channel/outbound", service: resolvedChannelOutboundService, internalApiKey });
   app.register(channelTransportRoutes,{prefix:'/internal/channel',internalApiKey,
     media:new ChannelMediaService(Boolean(contextualConversation)||resolvedContextualConfig.enabled),admin:new OutboundDispositionService()});
+  if (process.env.PROFESSIONAL_AUTH_ENABLED === "true" || professionalAuthService) {
+    app.register(professionalAuthRoutes, { prefix: "/internal/professional-auth", internalApiKey, service: professionalAuthService });
+  }
 
   return app;
 }

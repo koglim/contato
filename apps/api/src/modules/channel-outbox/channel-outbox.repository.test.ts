@@ -60,6 +60,11 @@ test("outbox repository recovers one legacy outbound, associates ranked matches,
   assert.match(current.calls[5]!.text, /processing_started_at <=/u);
   assert.match(current.calls[5]!.text, /attempt_count = attempt_count \+ 1/u);
   assert.match(current.calls[5]!.text, /customer_reply_expiry_v1/u);
+  assert.match(current.calls[5]!.text, /professional_auth_expiry_v1/u);
+  assert.match(current.calls[5]!.text, /clock_timestamp\(\)\+\(30 \* INTERVAL '1 second'\)/u);
+  assert.match(current.calls[5]!.text, /challenge\.outbound_id = outbound\.id/u);
+  assert.match(current.calls[5]!.text, /challenge\.invalidated_at IS NULL/u);
+  assert.match(current.calls[5]!.text, /challenge\.consumed_at IS NULL/u);
   assert.match(current.calls[5]!.text, /administrative_closed_at = clock_timestamp\(\)/u);
   assert.deepEqual(current.calls[5]!.values, [id, token, 60, 5, 300, "customer_reply_expired"]);
   assert.equal(await current.repository.markSent(id, { processing_token: token, provider_message_id: "evolution-001" }), true);
@@ -103,7 +108,7 @@ test("outbox repository creates an independent purpose and atomically claims the
   assert.equal(independent.purpose, "professional_contact_notification");
   assert.equal(independent.channelInboundMessageId, null);
   assert.match(current.calls[0]!.text, /purpose/u);
-  assert.match(current.calls[0]!.text, /VALUES \(NULL, \$1, \$2, \$3, \$4, \$5\)/u);
+  assert.match(current.calls[0]!.text, /VALUES \(NULL, \$1, \$2, \$3, \$4, \$5, \$6\)/u);
 
   const claimed = await current.repository.claimNextPending(token, 60);
   assert.equal(claimed?.status, "processing");
@@ -114,6 +119,11 @@ test("outbox repository creates an independent purpose and atomically claims the
   assert.match(current.calls[1]!.text, /FOR UPDATE SKIP LOCKED/u);
   assert.match(current.calls[1]!.text, /purpose = 'customer_reply'/u);
   assert.match(current.calls[1]!.text, /action,reason,payload_hash,result/u);
+  assert.match(current.calls[1]!.text, /auth_challenge_expired/u);
+  assert.match(current.calls[1]!.text, /clock_timestamp\(\)\+\(30 \* INTERVAL '1 second'\)/u);
+  assert.match(current.calls[1]!.text, /challenge\.outbound_id = outbound\.id/u);
+  assert.match(current.calls[1]!.text, /challenge\.invalidated_at IS NULL/u);
+  assert.match(current.calls[1]!.text, /challenge\.consumed_at IS NULL/u);
   assert.deepEqual(current.calls[1]!.values, [60, 5, token, 300, "customer_reply_expired"]);
 });
 

@@ -34,3 +34,10 @@ Configure estas variáveis no serviço web, sem valores em arquivos versionados:
 - `DASHBOARD_SESSION_SECRET`.
 
 O EasyPanel fornece `PORT` quando necessário; a imagem usa `3000` como fallback e escuta em `0.0.0.0`. A URL da API deve ser informada pela rede interna do ambiente, nunca codificada na imagem.
+# Passwordless rollout
+
+With `PROFESSIONAL_AUTH_ENABLED=false`, the existing demo login is unchanged. With the flag enabled, `/dashboard/access` requests a phone challenge and verifies the OTP through the BFF. The opaque session stays in an HttpOnly cookie; profile access is resolved from active memberships and supports zero, one or multiple profiles.
+
+In passwordless mode the BFF calls only the authenticated self-service routes under `/internal/professional-auth/profiles/:id`. The API rechecks the exact active membership on every read and mutation. A profile-selection cookie chooses among currently authorized profiles and never grants access. Zero profiles remain authenticated and show “Nenhum perfil profissional está vinculado a esta conta.” One opens directly; many show the selector.
+
+All passwordless state changes, including challenge/verify, logout, profile selection and dashboard mutations, require an exact same-origin `Origin` header. Logout clears both the session and profile-selection cookies even when API revocation is already idempotently complete.

@@ -24,6 +24,7 @@ export type ChannelOutboundMessageRecord = {
   sentAt: Date | null;
   nextAttemptAt: Date | null;
   administrativeClosedAt: Date | null;
+  expiresAt: Date | null;
 };
 
 export type CreateChannelOutboundMessage = {
@@ -37,10 +38,11 @@ export type CreateChannelOutboundMessage = {
 
 export type CreateIndependentChannelOutboundMessage = {
   businessKey: string;
-  purpose: "professional_contact_notification" | "channel_notice";
+  purpose: "professional_contact_notification" | "channel_notice" | "professional_auth_challenge";
   provider: string;
   recipientPhoneE164: string;
   textContent: string;
+  expiresAt?: Date | null;
 };
 
 export interface ChannelOutboundMessageRepository {

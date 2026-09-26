@@ -92,3 +92,27 @@ test("upstream failures never leak internal URL, credentials or arbitrary errors
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: "Não foi possível salvar suas alterações." });
 });
+
+test("passwordless mutations use only the authenticated self-service boundary", async () => {
+  const calls: string[] = [];
+  const response = await handleDashboardMutation(request({ action: "profile", data: { bio: "Eletricista" } }), {
+    authorize: async () => {},
+    professionalId: () => owner,
+    professionalBase: id => `/profiles/${id}`,
+    api: async path => { calls.push(path); return { ok: true }; },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [`/profiles/${owner}`]);
+  assert.equal(calls.some(path => path.startsWith("/internal/professionals/")), false);
+});
+
+test("revoked membership is returned as forbidden on the next mutation", async () => {
+  const response = await handleDashboardMutation(request({ action: "availability", data: { is_available_now: true } }), {
+    authorize: async () => {},
+    professionalId: () => owner,
+    professionalBase: id => `/profiles/${id}`,
+    api: async () => { throw new Error("professional_forbidden"); },
+  });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "forbidden" });
+});

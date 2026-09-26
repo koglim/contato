@@ -2,7 +2,7 @@ import { z } from "zod";
 import { phoneE164Schema } from "./phone.js";
 
 export const channelOutboundMessageStatusSchema = z.enum(["pending", "processing", "sent", "failed"]);
-export const channelOutboundMessagePurposeSchema = z.enum(["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice"]);
+export const channelOutboundMessagePurposeSchema = z.enum(["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice", "professional_auth_challenge"]);
 
 export const channelOutboundMessageSummarySchema = z.object({
   id: z.string().uuid(),
@@ -71,5 +71,5 @@ export const channelOutboundQueueStatusSchema = z.object({
     failed: queueCount,
     dead_letter: queueCount,
     oldest_unfinished_at: z.string().datetime({ offset: true }),
-  }).strict()).max(5),
+  }).strict()).max(6),
 }).strict();
