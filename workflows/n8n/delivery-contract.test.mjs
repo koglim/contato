@@ -22,7 +22,7 @@ test("empty, already sent and busy claims never authorize transport", () => {
 });
 
 test("delivery preserves recipient and content from each claimed message, including independent purposes", () => {
-  for (const purpose of ["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update"]) {
+  for (const purpose of ["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice", "professional_auth_challenge"]) {
     const item = { ...message(), purpose };
     const decision = claimDecision(response(item), "evolution");
     assert.equal(decision.message.text_content, item.text_content);
@@ -30,6 +30,7 @@ test("delivery preserves recipient and content from each claimed message, includ
     assert.equal(decision.message.processing_token, item.processing_token);
     assert.equal(decision.message.purpose, purpose);
   }
+  assert.throws(() => claimDecision(response({ ...message(), purpose: "unknown" }), "evolution"), /claim_invalid/u);
 });
 
 test("acceptance must match the recipient and provider message id; only proven rejection goes to failed", () => {

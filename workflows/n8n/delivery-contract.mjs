@@ -14,7 +14,7 @@ export function claimDecision(response, expectedProvider) {
   if (response?.statusCode !== 200) throw new Error("outbox_claim_unavailable");
   const message = response.body;
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-  const purposes = ["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice"];
+  const purposes = ["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice", "professional_auth_challenge"];
   if (!uuid.test(message?.id ?? "") || !purposes.includes(message?.purpose)
     || !Number.isInteger(message?.attempt_count) || message.attempt_count < 0) throw new Error("outbox_claim_invalid");
   if (message.status === "sent") return { action: "stop", reason: "sent" };

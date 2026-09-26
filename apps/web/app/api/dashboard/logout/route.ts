@@ -1,0 +1,4 @@
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { dashboardCookieName,professionalAuthEnabled } from "../../../../lib/auth/dashboard";
+export async function POST(request:Request){const origin=request.headers.get("origin"),expected=new URL(request.url).origin;if(origin&&origin!==expected)return NextResponse.json({error:"invalid_origin"},{status:403});const token=(await cookies()).get(dashboardCookieName)?.value;if(professionalAuthEnabled()&&token&&process.env.CONTATOCERTO_API_URL&&process.env.INTERNAL_API_KEY)await fetch(`${process.env.CONTATOCERTO_API_URL}/internal/professional-auth/logout`,{method:"POST",headers:{"x-internal-key":process.env.INTERNAL_API_KEY,authorization:`Bearer ${token}`}}).catch(()=>null);const response=NextResponse.json({ok:true});response.cookies.set(dashboardCookieName,"",{httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",path:"/",maxAge:0});return response;}

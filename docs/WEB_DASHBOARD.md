@@ -34,3 +34,6 @@ Configure estas variáveis no serviço web, sem valores em arquivos versionados:
 - `DASHBOARD_SESSION_SECRET`.
 
 O EasyPanel fornece `PORT` quando necessário; a imagem usa `3000` como fallback e escuta em `0.0.0.0`. A URL da API deve ser informada pela rede interna do ambiente, nunca codificada na imagem.
+# Passwordless rollout
+
+With `PROFESSIONAL_AUTH_ENABLED=false`, the existing demo login is unchanged. With the flag enabled, `/dashboard/access` requests a phone challenge and verifies the OTP through the BFF. The opaque session stays in an HttpOnly cookie; profile access is resolved from active memberships and supports zero, one or multiple profiles.

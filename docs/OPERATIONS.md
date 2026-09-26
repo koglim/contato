@@ -140,3 +140,6 @@ Monitorar GET /internal/channel/transport/diagnostics; retenção de bytes exige
 consumer ativo ou /media/purge agendado. Falhas totais do worker deixam a expiração
 lógica preservada mas atrasam exclusão física. Nunca reenviar hold sem evidência
 nem limpar auditoria para rollback. B2 off; sem alteração operacional neste checkpoint.
+# Professional auth rollout
+
+Keep `PROFESSIONAL_AUTH_ENABLED=false` until verified account identifiers and memberships have been provisioned and the versioned n8n workflows have been reviewed. Enabling requires a strong API-only `PROFESSIONAL_AUTH_PEPPER`. Never reuse or expose the pepper to the browser. Roll back migration 022 only before any challenge, session or authentication outbox data exists.

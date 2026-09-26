@@ -1,0 +1,16 @@
+import type { FastifyPluginAsync } from "fastify";
+import { createInternalKeyGuard } from "../internal/internal-auth.js";
+import { requestProfessionalAuthChallengeSchema,verifyProfessionalAuthChallengeSchema } from "./professional-auth.types.js";
+import { ProfessionalAuthService } from "./professional-auth.service.js";
+import { PostgresProfessionalAuthRepository } from "./professional-auth.repository.js";
+import { ProfessionalAccessService } from "../professional-access/professional-access.service.js";
+import { z } from "zod";
+type Options={internalApiKey?:string;service?:ProfessionalAuthService};
+export const professionalAuthRoutes:FastifyPluginAsync<Options>=async(app,options)=>{const guard=createInternalKeyGuard(options.internalApiKey??process.env.INTERNAL_API_KEY),service=options.service??new ProfessionalAuthService();
+ app.post("/challenge",{preHandler:guard},async(request,reply)=>{const body=requestProfessionalAuthChallengeSchema.safeParse(request.body);if(!body.success)return reply.code(400).send({error:"invalid_request"});reply.header("cache-control","no-store");return service.requestChallenge(body.data.phone_e164);});
+ app.post("/verify",{preHandler:guard},async(request,reply)=>{const body=verifyProfessionalAuthChallengeSchema.safeParse(request.body);if(!body.success)return reply.code(400).send({error:"invalid_or_expired_code"});const result=await service.verify(body.data.challenge_reference,body.data.code);if(!result.ok)return reply.code(401).send({error:"invalid_or_expired_code"});reply.header("cache-control","no-store");return result;});
+ app.post("/logout",{preHandler:guard},async(request,reply)=>{await service.revoke(request.headers.authorization?.replace(/^Bearer\s+/iu,""));return reply.code(204).send();});
+ app.get("/session",{preHandler:guard},async(request,reply)=>{const principal=await service.authenticate(request.headers.authorization?.replace(/^Bearer\s+/iu,""));return principal?{authenticated:true,expires_at:principal.expiresAt.toISOString()}:reply.code(401).send({error:"unauthorized"});});
+ app.get("/profiles",{preHandler:guard},async(request,reply)=>{const principal=await service.authenticate(request.headers.authorization?.replace(/^Bearer\s+/iu,""));if(!principal)return reply.code(401).send({error:"unauthorized"});return{items:await new PostgresProfessionalAuthRepository().listProfiles(principal.accountId)};});
+ app.get("/profiles/:professionalId/access",{preHandler:guard},async(request,reply)=>{const params=z.object({professionalId:z.string().uuid()}).safeParse(request.params);if(!params.success)return reply.code(400).send({error:"invalid_request"});const principal=await service.authenticate(request.headers.authorization?.replace(/^Bearer\s+/iu,""));if(!principal)return reply.code(401).send({error:"unauthorized"});const access=await new ProfessionalAccessService().resolveProfessionalAccess({accountId:principal.accountId,professionalId:params.data.professionalId});return access.status==="authorized"?{authorized:true}:reply.code(403).send({error:"forbidden"});});
+};

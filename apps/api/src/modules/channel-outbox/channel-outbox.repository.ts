@@ -70,6 +70,23 @@ function expireCustomerRepliesSql(
     )`;
 }
 
+function expireAuthChallengesSql() {
+  return `expired_auth_candidates AS (
+    SELECT id FROM channel_outbound_messages WHERE purpose='professional_auth_challenge'
+      AND expires_at<=clock_timestamp() AND status<>'sent' AND administrative_closed_at IS NULL
+    FOR UPDATE SKIP LOCKED
+  ), expired_auth AS (
+    UPDATE channel_outbound_messages outbound SET status='failed',last_error_code='auth_challenge_expired',
+      administrative_closed_at=clock_timestamp(),processing_token=NULL,processing_started_at=NULL,next_attempt_at=NULL
+    FROM expired_auth_candidates candidate WHERE outbound.id=candidate.id RETURNING outbound.id
+  ), auth_expiry_audit AS (
+    INSERT INTO channel_transport_events(outbound_id,event_key,action,reason,payload_hash,result)
+    SELECT id,'professional_auth_expiry_v1','close','auth_challenge_expired',
+      encode(digest(id::text||':auth_challenge_expired','sha256'),'hex'),'{"status":"failed","reason":"auth_challenge_expired"}'::jsonb
+    FROM expired_auth ON CONFLICT(outbound_id,event_key) DO NOTHING
+  )`;
+}
+
 // Independent business notifications are FIFO. Inline replies retain their
 // compatibility path (including a new delivered consent prompt replacing an
 // unsent prompt); they must not be blocked by an older inline reply.
@@ -107,6 +124,7 @@ export type ChannelOutboundMessageRow = {
   sent_at: Date | null;
   next_attempt_at: Date | null;
   administrative_closed_at: Date | null;
+  expires_at: Date | null;
 };
 
 export type ChannelOutboxQuery = <T extends QueryResultRow>(text: string, values?: unknown[]) => Promise<{ rows: T[] }>;
@@ -115,7 +133,7 @@ export type ChannelOutboxTransaction = <T>(callback: (client: DatabaseClient) =>
 export const channelOutboundMessageColumns = `
   id, channel_inbound_message_id, purpose, provider, recipient_phone_e164, message_type, text_content,
   status, processing_token, processing_started_at, provider_message_id, attempt_count, last_error_code, sent_at,
-  next_attempt_at, administrative_closed_at
+  next_attempt_at, administrative_closed_at, expires_at
 `;
 
 const qualifiedChannelOutboundMessageColumns = `
@@ -123,7 +141,7 @@ const qualifiedChannelOutboundMessageColumns = `
   outbound.recipient_phone_e164, outbound.message_type, outbound.text_content, outbound.status,
   outbound.processing_token, outbound.processing_started_at, outbound.provider_message_id,
   outbound.attempt_count, outbound.last_error_code, outbound.sent_at, outbound.next_attempt_at,
-  outbound.administrative_closed_at
+  outbound.administrative_closed_at, outbound.expires_at
 `;
 
 export class MatchReservationConflictError extends Error {
@@ -153,6 +171,7 @@ export function toChannelOutboundMessageRecord(row: ChannelOutboundMessageRow): 
     sentAt: row.sent_at,
     nextAttemptAt: row.next_attempt_at,
     administrativeClosedAt: row.administrative_closed_at,
+    expiresAt: row.expires_at,
   };
 }
 
@@ -164,11 +183,11 @@ export async function createIndependentOutbound(client: DatabaseClient, input: C
   }
   const inserted = await client.query<ChannelOutboundMessageRow>(
     `INSERT INTO channel_outbound_messages (
-       channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, business_key
-     ) VALUES (NULL, $1, $2, $3, $4, $5)
+       channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, business_key, expires_at
+     ) VALUES (NULL, $1, $2, $3, $4, $5, $6)
      ON CONFLICT (business_key) WHERE business_key IS NOT NULL DO NOTHING
      RETURNING ${channelOutboundMessageColumns}`,
-    [input.purpose, input.provider, input.recipientPhoneE164, input.textContent, input.businessKey],
+    [input.purpose, input.provider, input.recipientPhoneE164, input.textContent, input.businessKey, input.expiresAt ?? null],
   );
   if (inserted.rows[0]) return toChannelOutboundMessageRecord(inserted.rows[0]);
   const existing = await client.query<ChannelOutboundMessageRow>(
@@ -303,7 +322,7 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
 
   async claim(id: string, processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<ChannelOutboundMessageRow>(
-      `WITH ${expireCustomerRepliesSql("$3", "$4", "$5", "$6", "expirable.id = $1")},
+      `WITH ${expireAuthChallengesSql()}, ${expireCustomerRepliesSql("$3", "$4", "$5", "$6", "expirable.id = $1")},
        exhausted AS (${exhaustAbandonedSql("$3", "$4")})
        UPDATE channel_outbound_messages AS outbound
        SET status = 'processing', processing_token = $2, processing_started_at = NOW(),
@@ -311,6 +330,7 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
        WHERE id = $1
          AND attempt_count < $4 AND delivery_hold_reason IS NULL
          AND administrative_closed_at IS NULL
+         AND (expires_at IS NULL OR expires_at > clock_timestamp())
          AND (purpose <> 'customer_reply' OR created_at > clock_timestamp() - ($5 * INTERVAL '1 second'))
          AND ${recipientTurnSql}
          AND (
@@ -327,12 +347,13 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
 
   async claimNextPending(processingToken: string, processingLeaseSeconds: number) {
     const result = await this.execute<ChannelOutboundMessageRow>(
-      `WITH ${expireCustomerRepliesSql("$1", "$2", "$4", "$5")},
+      `WITH ${expireAuthChallengesSql()}, ${expireCustomerRepliesSql("$1", "$2", "$4", "$5")},
        exhausted AS (${exhaustAbandonedSql("$1", "$2")}), candidate AS (
          SELECT outbound.id
            FROM channel_outbound_messages AS outbound
           WHERE attempt_count < $2 AND delivery_hold_reason IS NULL
             AND outbound.administrative_closed_at IS NULL
+            AND (outbound.expires_at IS NULL OR outbound.expires_at > clock_timestamp())
             AND (outbound.purpose <> 'customer_reply'
               OR outbound.created_at > clock_timestamp() - ($4 * INTERVAL '1 second'))
             AND ${recipientTurnSql}

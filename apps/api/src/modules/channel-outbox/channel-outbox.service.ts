@@ -11,6 +11,7 @@ import type {
 } from "./channel-outbox.types.js";
 import type { MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 import { CUSTOMER_REPLY_EXPIRY_REASON } from "./channel-outbox.expiry.js";
+import { decryptAuthMessage } from "../professional-auth/professional-auth.crypto.js";
 
 function claimResponse(record: ChannelOutboundMessageRecord) {
   if (record.status === "sent") return { id: record.id, status: "sent" as const, attempt_count: record.attemptCount, purpose: record.purpose };
@@ -25,7 +26,9 @@ function claimResponse(record: ChannelOutboundMessageRecord) {
     provider: record.provider,
     recipient_phone_e164: record.recipientPhoneE164,
     message_type: record.messageType,
-    text_content: record.textContent,
+    text_content: record.purpose === "professional_auth_challenge"
+      ? decryptAuthMessage(process.env.PROFESSIONAL_AUTH_PEPPER ?? "", record.textContent)
+      : record.textContent,
     processing_token: record.processingToken,
   };
 }

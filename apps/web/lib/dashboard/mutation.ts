@@ -2,7 +2,7 @@ import { dashboardMutationSchema, professionalResponseSchema } from "@contatocer
 
 type Dependencies = {
   authorize: () => Promise<void>;
-  professionalId: () => string;
+  professionalId: () => string | Promise<string>;
   api: (path: string, init: RequestInit) => Promise<unknown>;
 };
 
@@ -16,7 +16,7 @@ export async function handleDashboardMutation(request: Request, dependencies: De
     const parsed = dashboardMutationSchema.safeParse({ method: request.method, payload: await request.json() });
     if (!parsed.success) return Response.json({ error: "invalid_request" }, { status: 400 });
     const { method, payload } = parsed.data;
-    const owner = professionalResponseSchema.shape.id.parse(dependencies.professionalId());
+    const owner = professionalResponseSchema.shape.id.parse(await dependencies.professionalId());
     const base = `/internal/professionals/${owner}`;
     let path = base;
     if (payload.action === "availability") path += "/availability";

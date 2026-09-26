@@ -132,3 +132,6 @@ pela administração. channel_transport_events guarda requests/evidências/resul
 com chaves idempotentes e trigger que rejeita UPDATE/DELETE. Sem PII no diagnóstico.
 Índices parciais para fila e expurgo. Down protegido P0020; 001–019 intactas.
 Retenção operacional e limites de WAL/backups: [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md).
+# Passwordless professional authentication
+
+Migration 022 adds `professional_auth_challenges` and `professional_sessions`. Challenges reference verified account identifiers and optional durable outboxes; sessions reference accounts and store only token hashes. `channel_outbound_messages.expires_at` prevents an authentication message from being claimed after its challenge expires. See `PROFESSIONAL_PASSWORDLESS_AUTH.md`.
