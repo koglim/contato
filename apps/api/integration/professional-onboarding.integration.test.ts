@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
+import Fastify from "fastify";
 import { closeDatabaseConnection, inDatabaseTransaction, query, withTransaction, type DatabaseClient } from "../src/database/connection.js";
 import { PostgresMatchingRepository } from "../src/modules/matching/matching.repository.js";
 import { PostgresProfessionalEligibilityRepository } from "../src/modules/professional-eligibility/professional-eligibility.repository.js";
+import { ProfessionalEligibilityService } from "../src/modules/professional-eligibility/professional-eligibility.service.js";
+import { professionalAuthRoutes } from "../src/modules/professional-auth/professional-auth.routes.js";
 import { PostgresProfessionalOnboardingRepository } from "../src/modules/professional-onboarding/professional-onboarding.repository.js";
+import { ProfessionalOnboardingService } from "../src/modules/professional-onboarding/professional-onboarding.service.js";
 
 after(closeDatabaseConnection);
 
@@ -128,6 +132,75 @@ test("owner and admin can manage lifecycle while member, revoked membership and 
     await assert.rejects(eligibility.publish(adminId, professionalId), /professional_forbidden/u);
     await client.query("UPDATE accounts SET status='blocked' WHERE id=$1", [ownerId]);
     await assert.rejects(eligibility.publish(ownerId, professionalId), /professional_forbidden/u);
+  });
+});
+
+test("self-service PATCH cannot bypass eligibility before the official publish transition", async () => {
+  await rolledBack(async client => {
+    const tx = <T>(callback: (db: DatabaseClient) => Promise<T>) => inDatabaseTransaction(client, () => callback(client));
+    const accountId = await fixture(client);
+    const internalApiKey = "onboarding-boundary-test";
+    const headers = { "x-internal-key": internalApiKey, authorization: "Bearer session" };
+    const app = Fastify();
+    const onboardingService = new ProfessionalOnboardingService(new PostgresProfessionalOnboardingRepository(tx));
+    const eligibilityService = new ProfessionalEligibilityService(new PostgresProfessionalEligibilityRepository(tx));
+    const service = {
+      requestChallenge: async () => ({ accepted: true, challenge_reference: "unused", expires_in_seconds: 300 }),
+      verify: async () => ({ ok: false as const }),
+      authenticate: async (token: string | undefined) => token === "session"
+        ? { sessionId: randomUUID(), accountId, expiresAt: new Date(Date.now() + 60_000) }
+        : null,
+      revoke: async () => true,
+    };
+    const accessService = { resolveProfessionalAccess: async (input: { accountId: string; professionalId: string }) => {
+      const membership = await client.query<{ role: "owner" | "admin" | "member"; status: "active" | "revoked" }>(
+        "SELECT role,status FROM professional_memberships WHERE account_id=$1 AND professional_id=$2", [input.accountId, input.professionalId],
+      );
+      return membership.rows[0]?.status === "active"
+        ? { status: "authorized" as const, role: membership.rows[0].role }
+        : { status: "not_member" as const };
+    } };
+
+    app.patch("/internal/professionals/:id", async request => {
+      const id = (request.params as { id: string }).id;
+      const body = request.body as { status?: string; display_name?: string; phone_e164?: string };
+      if (body.status) await client.query("UPDATE professionals SET status=$2 WHERE id=$1", [id, body.status]);
+      if (body.phone_e164) await client.query("UPDATE professionals SET phone_e164=$2 WHERE id=$1", [id, body.phone_e164]);
+      if (body.display_name) await client.query("UPDATE professionals SET display_name=$2 WHERE id=$1", [id, body.display_name]);
+      return { id, ...body };
+    });
+    await app.register(professionalAuthRoutes, { prefix: "/internal/professional-auth", internalApiKey,
+      service, accessService, onboardingService, eligibilityService });
+
+    try {
+      const createdResponse = await app.inject({ method: "POST", url: "/internal/professional-auth/profiles", headers,
+        payload: { display_name: "Boundary Profile", phone_e164: "+5566999999921" } });
+      assert.equal(createdResponse.statusCode, 201, createdResponse.body);
+      const professionalId = (createdResponse.json() as { id: string }).id;
+      assert.deepEqual((await client.query("SELECT role,status FROM professional_memberships WHERE account_id=$1 AND professional_id=$2", [accountId, professionalId])).rows[0], { role: "owner", status: "active" });
+      assert.equal((await eligibilityService.get(professionalId)).ready_to_publish, false);
+
+      const bypass = await app.inject({ method: "PATCH", url: `/internal/professional-auth/profiles/${professionalId}`, headers, payload: { status: "active" } });
+      assert.equal(bypass.statusCode, 400, bypass.body);
+      assert.deepEqual(bypass.json(), { error: "invalid_request" });
+      assert.equal((await client.query<{ status: string }>("SELECT status FROM professionals WHERE id=$1", [professionalId])).rows[0]?.status, "draft");
+
+      const categoryId = randomUUID(), serviceId = randomUUID();
+      await client.query("INSERT INTO service_categories(id,name,slug) VALUES($1,'Boundary category',$2)", [categoryId, `category-${categoryId}`]);
+      await client.query("INSERT INTO services(id,category_id,name,slug) VALUES($1,$2,'Boundary service',$3)", [serviceId, categoryId, `service-${serviceId}`]);
+      const matching = new PostgresMatchingRepository(tx);
+      const before = await matching.search({ raw_text: "boundary", service_id: serviceId, latitude: -11.8, longitude: -55.5, city: "Sinop", state: "MT", limit: 10 });
+      assert.equal(before.kind, "success");
+      if (before.kind === "success") assert.equal(before.response.matches.some(item => item.professional.id === professionalId), false);
+
+      await client.query("INSERT INTO professional_services(professional_id,service_id) VALUES($1,$2)", [professionalId, serviceId]);
+      await client.query("INSERT INTO professional_service_areas(professional_id,city,state,country_code,center,radius_meters) VALUES($1,'Sinop','MT','BR',ST_SetSRID(ST_MakePoint(-55.5,-11.8),4326)::geography,50000)", [professionalId]);
+      const published = await app.inject({ method: "POST", url: `/internal/professional-auth/profiles/${professionalId}/publish`, headers });
+      assert.equal(published.statusCode, 200, published.body);
+      assert.equal((await client.query<{ status: string }>("SELECT status FROM professionals WHERE id=$1", [professionalId])).rows[0]?.status, "active");
+    } finally {
+      await app.close();
+    }
   });
 });
 

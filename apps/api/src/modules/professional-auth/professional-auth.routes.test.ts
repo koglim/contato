@@ -46,7 +46,26 @@ test("self-service revalidates exact membership on every read and mutation", asy
   assert.equal(readA.statusCode, 200);
   assert.equal((readA.json() as { professional: { id: string } }).professional.id, profileA);
   assert.equal((await app.inject({ method: "GET", url: `/internal/professional-auth/profiles/${profileB}/dashboard`, headers })).statusCode, 403);
-  assert.equal((await app.inject({ method: "PATCH", url: `/internal/professional-auth/profiles/${profileA}`, headers, payload: { display_name: "Novo" } })).statusCode, 200);
+  const allowed = await app.inject({ method: "PATCH", url: `/internal/professional-auth/profiles/${profileA}`, headers, payload: { display_name: "Novo nome" } });
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(allowed.json().display_name, "Novo nome");
+
+  const forbiddenProfileUpdates = [
+    { status: "active" },
+    { status: "draft" },
+    { phone_e164: "+5566999999999" },
+    { is_verified: true },
+    { is_available_now: true },
+    { slug: "forcado" },
+    { role: "owner" },
+    { professional_id: profileA },
+    { display_name: "Novo", status: "active" },
+  ];
+  for (const payload of forbiddenProfileUpdates) {
+    const response = await app.inject({ method: "PATCH", url: `/internal/professional-auth/profiles/${profileA}`, headers, payload });
+    assert.equal(response.statusCode, 400, JSON.stringify(payload));
+    assert.deepEqual(response.json(), { error: "invalid_request" });
+  }
 
   membershipActive = false;
   assert.equal((await app.inject({ method: "GET", url: `/internal/professional-auth/profiles/${profileA}/dashboard`, headers })).statusCode, 403);
@@ -54,6 +73,7 @@ test("self-service revalidates exact membership on every read and mutation", asy
 
   accountActive = false;
   assert.equal((await app.inject({ method: "GET", url: `/internal/professional-auth/profiles/${profileA}/dashboard`, headers })).statusCode, 401);
-  assert.deepEqual(checks, [profileA, profileB, profileA, profileA, profileA]);
+  assert.equal(checks.filter(id => id === profileA).length, 13);
+  assert.equal(checks.filter(id => id === profileB).length, 1);
   await app.close();
 });

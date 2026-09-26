@@ -84,14 +84,26 @@ test("existing availability, service and area operations keep their verbs and sc
   assert.equal(f.calls.at(-1)?.init.body, undefined);
 });
 
-test("publish and unpublish use dedicated lifecycle endpoints without a client-owned body", async () => {
+test("demo mode rejects lifecycle actions before calling an internal route", async () => {
   const f = boundary();
   for (const action of ["publish", "unpublish"] as const) {
-    assert.equal((await f.send(request({ action }, "POST"))).status, 200);
-    assert.equal(f.calls.at(-1)?.path, `/internal/professionals/${owner}/${action}`);
-    assert.equal(f.calls.at(-1)?.init.method, "POST");
-    assert.equal(f.calls.at(-1)?.init.body, undefined);
+    assert.equal((await f.send(request({ action }, "POST"))).status, 400);
   }
+  assert.equal(f.calls.length, 0);
+});
+
+test("passwordless publish and unpublish use only dedicated self-service endpoints", async () => {
+  const calls: Array<{ path: string; init: RequestInit }> = [];
+  for (const action of ["publish", "unpublish"] as const) {
+    const response = await handleDashboardMutation(request({ action }, "POST"), {
+      authorize: async () => {}, professionalId: () => owner, selfServiceLifecycleEnabled: true,
+      professionalBase: id => `/profiles/${id}`,
+      api: async (path, init) => { calls.push({ path, init }); return { ok: true }; },
+    });
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(calls.map(call => call.path), [`/profiles/${owner}/publish`, `/profiles/${owner}/unpublish`]);
+  assert.equal(calls.every(call => call.init.method === "POST" && call.init.body === undefined), true);
 });
 
 test("upstream failures never leak internal URL, credentials or arbitrary errors", async () => {

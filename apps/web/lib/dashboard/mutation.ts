@@ -5,6 +5,7 @@ type Dependencies = {
   professionalId: () => string | Promise<string>;
   api: (path: string, init: RequestInit) => Promise<unknown>;
   professionalBase?: (professionalId: string) => string;
+  selfServiceLifecycleEnabled?: boolean;
 };
 
 export async function handleDashboardMutation(request: Request, dependencies: Dependencies): Promise<Response> {
@@ -16,6 +17,9 @@ export async function handleDashboardMutation(request: Request, dependencies: De
     const parsed = dashboardMutationSchema.safeParse({ method: request.method, payload: await request.json() });
     if (!parsed.success) return Response.json({ error: "invalid_request" }, { status: 400 });
     const { method, payload } = parsed.data;
+    if ((payload.action === "publish" || payload.action === "unpublish") && !dependencies.selfServiceLifecycleEnabled) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
     const owner = professionalResponseSchema.shape.id.parse(await dependencies.professionalId());
     const base = dependencies.professionalBase?.(owner) ?? `/internal/professionals/${owner}`;
     let path = base;

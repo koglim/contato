@@ -6,7 +6,7 @@ import { PostgresProfessionalAuthRepository } from "./professional-auth.reposito
 import { ProfessionalAuthService } from "./professional-auth.service.js";
 import { requestProfessionalAuthChallengeSchema, verifyProfessionalAuthChallengeSchema } from "./professional-auth.types.js";
 import { createSelfServiceProfessionalSchema, professionalDashboardAggregateSchema,
-  updateProfessionalAvailabilitySchema } from "@contatocerto/shared";
+  updateProfessionalAvailabilitySchema, updateSelfServiceProfileSchema } from "@contatocerto/shared";
 import { ProfessionalOnboardingService } from "../professional-onboarding/professional-onboarding.service.js";
 import { ProfessionalEligibilityService } from "../professional-eligibility/professional-eligibility.service.js";
 
@@ -160,7 +160,9 @@ export const professionalAuthRoutes: FastifyPluginAsync<Options> = async (app, o
     const params = profileParams.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });
     if (!await requireOwnership(request, reply, service, accessService, params.data.professionalId)) return;
-    return forward(app, reply, "PATCH", `/internal/professionals/${params.data.professionalId}`, internalApiKey, request.body);
+    const body = updateSelfServiceProfileSchema.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_request" });
+    return forward(app, reply, "PATCH", `/internal/professionals/${params.data.professionalId}`, internalApiKey, body.data);
   });
 
   app.patch("/profiles/:professionalId/availability", { preHandler: guard }, async (request, reply) => {
