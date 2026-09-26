@@ -208,7 +208,6 @@ export class PostgresProfessionalAuthRepository {
             SELECT 1
               FROM professional_memberships m
              WHERE m.professional_id = p.id
-               AND m.status = 'active'
           )
         ORDER BY p.display_name, p.id`,
       [accountId],
@@ -278,11 +277,11 @@ export class PostgresProfessionalAuthRepository {
         throw new Error("claim_forbidden");
       }
 
-      const activeMemberships = await client.query<{ account_id: string }>(
-        `SELECT account_id FROM professional_memberships WHERE professional_id = $1 AND status = 'active'`,
+      const existingMemberships = await client.query<{ account_id: string }>(
+        `SELECT account_id FROM professional_memberships WHERE professional_id = $1 LIMIT 1`,
         [professionalId],
       );
-      if (activeMemberships.rows.length > 0) {
+      if (existingMemberships.rows.length > 0) {
         throw new Error("claim_conflict");
       }
 

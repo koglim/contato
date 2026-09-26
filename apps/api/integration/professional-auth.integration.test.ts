@@ -345,6 +345,28 @@ test("claim discovery: listClaimableProfiles finds legacy unmanaged profiles mat
       verifiedPhone,
     ]);
 
+    const prof5 = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof 5', $2, $3, 'active', 'legacy_unmanaged')", [
+      prof5,
+      `claimable-5-${prof5}`,
+      verifiedPhone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'revoked')", [
+      accountId,
+      prof5,
+    ]);
+
+    const prof6 = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof 6', $2, $3, 'active', 'legacy_unmanaged')", [
+      prof6,
+      `claimable-6-${prof6}`,
+      verifiedPhone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'revoked')", [
+      otherAccount,
+      prof6,
+    ]);
+
     const claimable = await service.listClaimableProfiles(accountId);
     assert.equal(claimable.length, 1);
     assert.equal(claimable[0]!.id, prof1);
@@ -421,6 +443,115 @@ test("claim transaction: claimProfile updates management_mode atomically, create
       repository.claimProfile(accountId, randomUUID()),
       /professional_not_found/u,
     );
+  });
+});
+
+test("legacy claim rejection: legacy_unmanaged profile with revoked membership from same account is excluded from claimable list and direct claim throws claim_conflict without mutating profile or events", async () => {
+  await rolledBack(async () => {
+    const repository = new PostgresProfessionalAuthRepository();
+    const accountId = randomUUID();
+    const phone = `+5564${String(Date.now()).slice(-9)}`;
+
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [accountId]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', $2, NOW())", [
+      accountId,
+      phone,
+    ]);
+
+    const profId = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof Revoked Same', $2, $3, 'active', 'legacy_unmanaged')", [
+      profId,
+      `revoked-same-${profId}`,
+      phone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'revoked')", [
+      accountId,
+      profId,
+    ]);
+
+    // Not claimable via discovery
+    const claimable = await repository.listClaimableProfiles(accountId);
+    assert.equal(claimable.some(p => p.id === profId), false);
+
+    // Direct claim rejected with claim_conflict (no 500 error, no PK violation)
+    await assert.rejects(
+      repository.claimProfile(accountId, profId),
+      /claim_conflict/u,
+    );
+
+    // Assert management_mode stays legacy_unmanaged
+    const profRow = (await query<{ management_mode: string }>("SELECT management_mode FROM professionals WHERE id = $1", [profId])).rows[0]!;
+    assert.equal(profRow.management_mode, "legacy_unmanaged");
+
+    // Assert membership remains revoked
+    const memberships = (await query<{ account_id: string; role: string; status: string }>(
+      "SELECT account_id, role, status FROM professional_memberships WHERE professional_id = $1",
+      [profId],
+    )).rows;
+    assert.equal(memberships.length, 1);
+    assert.deepEqual(memberships[0], { account_id: accountId, role: "owner", status: "revoked" });
+
+    // Assert zero legacy_claim events created
+    const events = (await query<{ count: number }>(
+      "SELECT count(*)::int count FROM professional_membership_events WHERE professional_id = $1 AND source = 'legacy_claim'",
+      [profId],
+    )).rows[0]!.count;
+    assert.equal(events, 0);
+  });
+});
+
+test("legacy claim rejection: legacy_unmanaged profile with revoked membership from another account is excluded from claimable list and direct claim throws claim_conflict without mutations", async () => {
+  await rolledBack(async () => {
+    const repository = new PostgresProfessionalAuthRepository();
+    const accountA = randomUUID();
+    const accountB = randomUUID();
+    const phone = `+5564${String(Date.now()).slice(-9)}`;
+
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active'), ($2, 'active')", [accountA, accountB]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', $2, NOW())", [
+      accountA,
+      phone,
+    ]);
+
+    const profId = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof Revoked Other', $2, $3, 'active', 'legacy_unmanaged')", [
+      profId,
+      `revoked-other-${profId}`,
+      phone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'revoked')", [
+      accountB,
+      profId,
+    ]);
+
+    // Not claimable via discovery
+    const claimable = await repository.listClaimableProfiles(accountA);
+    assert.equal(claimable.some(p => p.id === profId), false);
+
+    // Direct claim rejected with claim_conflict
+    await assert.rejects(
+      repository.claimProfile(accountA, profId),
+      /claim_conflict/u,
+    );
+
+    // Assert management_mode stays legacy_unmanaged
+    const profRow = (await query<{ management_mode: string }>("SELECT management_mode FROM professionals WHERE id = $1", [profId])).rows[0]!;
+    assert.equal(profRow.management_mode, "legacy_unmanaged");
+
+    // Assert Account B membership remains revoked and no membership for Account A
+    const memberships = (await query<{ account_id: string; role: string; status: string }>(
+      "SELECT account_id, role, status FROM professional_memberships WHERE professional_id = $1",
+      [profId],
+    )).rows;
+    assert.equal(memberships.length, 1);
+    assert.deepEqual(memberships[0], { account_id: accountB, role: "owner", status: "revoked" });
+
+    // Assert zero legacy_claim events created
+    const events = (await query<{ count: number }>(
+      "SELECT count(*)::int count FROM professional_membership_events WHERE professional_id = $1 AND source = 'legacy_claim'",
+      [profId],
+    )).rows[0]!.count;
+    assert.equal(events, 0);
   });
 });
 

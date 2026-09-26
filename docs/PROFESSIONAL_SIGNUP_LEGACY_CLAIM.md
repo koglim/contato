@@ -6,7 +6,7 @@ O PR #13 introduz o cadastro self-service unificado via OTP, a descoberta e reiv
 
 ## Fluxo de cadastro e verificação (Signup)
 
-1. **Entrada unificada**: a rota pública de solicitação de desafio (`/api/dashboard/access/challenge`) não distingue login de signup. Qualquer número de WhatsApp válido em formato E.164 pode solicitar um código de 6 dígitos.
+1. **Entrada unificada**: a rota do BFF `POST /api/dashboard/access` (com `action = 'challenge'` ou `action = 'verify'`) unifica a autenticação e não distingue login de signup. Qualquer número de WhatsApp válido em formato E.164 pode solicitar um código de 6 dígitos.
 2. **Criação provisional**: sob lock consultivo transacional por telefone (`pg_advisory_xact_lock`), se a conta ou o identificador não existirem, são criados atomicamente com status `active` para a conta e `verified_at = NULL` para o identificador.
 3. **Idempotência e concorrência**: `ON CONFLICT (kind, normalized_value) DO NOTHING` e locks garantem que requisições concorrentes para o mesmo telefone nunca criem contas ou identificadores duplicados.
 4. **Verificação de posse**: enquanto o código OTP não for validado, `verified_at` permanece `NULL`. Uma tentativa incorreta não verifica o telefone. Na validação correta do OTP, `verified_at` é atualizado para `COALESCE(verified_at, NOW())` e a sessão de 7 dias é emitida atomicamente.
@@ -16,17 +16,17 @@ O PR #13 introduz o cadastro self-service unificado via OTP, a descoberta e reiv
 1. **Perfis reivindicáveis (`legacy_unmanaged`)**:
    - `management_mode = 'legacy_unmanaged'`
    - `phone_e164` idêntico ao identificador de telefone verificado da conta autenticada
-   - Nenhuma membership ativa (`status = 'active'`) associada ao perfil
+   - Nenhuma membership histórica (zero memberships registradas, ativas ou revogadas) associada ao perfil
 2. **Listagem (`GET /claimable-profiles`)**:
-   - Retorna a lista de perfis correspondentes ao telefone verificado da sessão atual, incluindo ID, nome de exibição, slug, telefone e data de criação.
+   - Retorna a lista de perfis correspondentes ao telefone verificado da sessão atual, incluindo ID, nome de exibição, slug e status (conforme o schema estrito `claimableProfessionalSchema`).
 3. **Reivindicação transacional (`POST /profiles/:professionalId/claim`)**:
    - Executa em transação serializada com `SELECT ... FOR UPDATE` no perfil e na conta.
-   - Revalida se o perfil ainda é `legacy_unmanaged` e não possui memberships ativas por outra conta.
+   - Revalida se o perfil ainda é `legacy_unmanaged` e possui zero memberships históricas (ativas ou revogadas).
    - Atualiza `professionals.management_mode = 'account_managed'`.
    - Insere `professional_memberships` com papel `owner` e status `active`.
    - Registra evento de auditoria append-only em `professional_membership_events` com `source = 'legacy_claim'` e `actor_account_id` da conta autenticada.
    - Idempotente: se a mesma conta já reivindicou o perfil, retorna sucesso sem duplicar membership ou evento.
-   - Rejeição estrita de conflito: se outra conta já possuir membership ativa, retorna `409 Conflict`.
+   - Rejeição estrita de conflito: se houver qualquer membership histórica associada ao perfil sob `legacy_unmanaged`, ou se outra conta já possuir o perfil sob `account_managed`, retorna `409 Conflict` (`claim_conflict`).
 
 ## Guarda seletiva de matching (Selective Matching Guard)
 
@@ -35,7 +35,7 @@ O algoritmo de matching diferencia a elegibilidade conforme o `management_mode`:
 - **`account_managed`**: perfis criados por self-onboarding ou reivindicados por claim exigem obrigatoriamente:
   - Uma membership com status `active`
   - Uma conta associada com status `active`
-  - Pelo menos um identificador de telefone com status `verified_at IS NOT NULL`
+  - Pelo menos um identificador verificado (`verified_at IS NOT NULL`, verificado genericamente pela regra `eligibleManagedIdentitySql`, enquanto o claim de perfil exige especificamente a verificação de telefone correspondente)
 - Se a membership for revogada ou a conta for bloqueada (`status = 'blocked'`), o perfil `account_managed` é imediatamente excluído do matching.
 
 ## Migration 024 (`024_add_professional_management_mode`)
