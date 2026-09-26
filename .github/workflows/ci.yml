@@ -190,6 +190,18 @@ jobs:
           END $$;
           SQL
 
+      - name: Verify migration 022 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='022_add_professional_passwordless_auth')
+              OR to_regclass('professional_auth_challenges') IS NULL
+              OR to_regclass('professional_sessions') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_outbound_messages' AND column_name='expires_at')
+            THEN RAISE EXCEPTION 'migration 022 incomplete'; END IF;
+          END $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 
@@ -305,6 +317,32 @@ jobs:
           echo "$rollback_output" | grep -q 'P0016'
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DELETE FROM channel_outbound_messages WHERE id = '00000000-0000-0000-0000-000000000016'"
 
+      - name: Verify migration 022 protected rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          WITH account AS (
+            INSERT INTO accounts(id, status) VALUES ('00000000-0000-0000-0000-000000000022', 'active') RETURNING id
+          ), identifier AS (
+            INSERT INTO account_identifiers(id, account_id, kind, normalized_value, verified_at)
+            SELECT '00000000-0000-0000-0001-000000000022', id, 'phone', '+5566900000022', NOW() FROM account RETURNING id
+          )
+          INSERT INTO professional_auth_challenges(account_identifier_id, code_hash, expires_at)
+          SELECT id, repeat('a', 64), NOW() + INTERVAL '5 minutes' FROM identifier;
+          SQL
+          set +e
+          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_status=$?
+          set -e
+          echo "$rollback_output"
+          test "$rollback_status" -ne 0
+          echo "$rollback_output" | grep -q 'PROFESSIONAL_AUTH_ROLLBACK_BLOCKED'
+          echo "$rollback_output" | grep -q 'P0022'
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DELETE FROM professional_auth_challenges WHERE account_identifier_id='00000000-0000-0000-0001-000000000022';
+          DELETE FROM account_identifiers WHERE id='00000000-0000-0000-0001-000000000022';
+          DELETE FROM accounts WHERE id='00000000-0000-0000-0000-000000000022';
+          SQL
+
       - name: Create rollback regression fixture
         run: |
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
@@ -358,6 +396,17 @@ jobs:
              SET status = 'cancelled',
                  pending_slot = NULL
            WHERE id = '00000000-0000-0000-0000-000000000002';
+          SQL
+
+      - name: Roll back migration 022 with compatible data
+        run: |
+          node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF to_regclass('professional_auth_challenges') IS NOT NULL OR to_regclass('professional_sessions') IS NOT NULL
+              OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_outbound_messages' AND column_name='expires_at')
+            THEN RAISE EXCEPTION 'migration 022 remained'; END IF;
+          END $$;
           SQL
 
       - name: Roll back migration 021 with compatible data
@@ -574,7 +623,7 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 021
+      - name: Reapply migrations 008 through 022
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
       - name: Test PostgreSQL integrations after reapply
