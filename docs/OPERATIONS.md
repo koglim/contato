@@ -152,3 +152,18 @@ Migration 023 may be rolled back only before any membership event contains its p
 Migration 024 may be rolled back only before any profile is in `account_managed` mode and before any `legacy_claim` membership event exists. If managed profiles or claim events exist, rollback fails closed with SQLSTATE `P0024` and `PROFESSIONAL_MANAGEMENT_MODE_ROLLBACK_BLOCKED`. Never delete audit events or mutate management modes to force downgrade.
 
 In production, `PROFESSIONAL_AUTH_ENABLED` remains `false` (zero production activation). No new environment variables are added for PR #13, and zero paid OpenAI calls occur. See [PROFESSIONAL_SIGNUP_LEGACY_CLAIM.md](PROFESSIONAL_SIGNUP_LEGACY_CLAIM.md).
+
+## Migration 025 rollback and subscription provisioning
+
+O domínio de assinaturas e direitos de acesso (PR #14) opera de forma agnóstica a provedores de pagamento externos (sem dependências de Stripe, Mercado Pago ou gateways externos).
+
+O provisionamento e controle de ciclo de vida são realizados via rotas internas autenticadas pelo cabeçalho `x-internal-key: INTERNAL_API_KEY`:
+- `POST /internal/professional-subscriptions/:professionalId/grant`: criação e concessão de assinatura (`plan_code`, `starts_at`, `ends_at`).
+- `POST /internal/professional-subscriptions/:professionalId/extend`: extensão da data de término (`ends_at`).
+- `POST /internal/professional-subscriptions/:professionalId/revoke`: revogação imediata (`revoked_at = NOW()`).
+- `POST /internal/professional-subscriptions/:professionalId/reactivate`: reativação com novo período de vigência.
+
+Todas as transições geram registros append-only imutáveis em `professional_subscription_events`.
+A migration 025 bloqueia rollback com SQLSTATE `P0025` e `PROFESSIONAL_SUBSCRIPTION_ROLLBACK_BLOCKED` se existirem assinaturas ou eventos de auditoria persistidos. Nunca exclua linhas de auditoria para forçar rollback.
+Ver [PROFESSIONAL_SUBSCRIPTIONS_ENTITLEMENTS.md](PROFESSIONAL_SUBSCRIPTIONS_ENTITLEMENTS.md).
+

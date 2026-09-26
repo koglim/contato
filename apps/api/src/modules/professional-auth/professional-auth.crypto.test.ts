@@ -52,7 +52,7 @@ test("public references are random authenticated envelopes and never expose the 
   assert.notEqual(first, second);
   assert.equal(first.includes(internalId), false);
   assert.equal(resolvePublicChallengeReference(pepper, first), internalId);
-  const tampered = `${first.slice(0, -1)}${first.endsWith("A") ? "B" : "A"}`;
+  const tampered = `${first.slice(0, 10)}${first[10] === "A" ? "B" : "A"}${first.slice(11)}`;
   assert.throws(() => resolvePublicChallengeReference(pepper, tampered));
   assert.throws(() => resolvePublicChallengeReference(`${pepper}-other`, first));
 });

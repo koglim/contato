@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createProfessionalSchema, professionalResponseSchema, professionalStatusSchema } from "./professional.js";
 import { professionalServiceResponseSchema, serviceCatalogItemSchema } from "./professional-service.js";
 import { serviceAreaResponseSchema } from "./service-area.js";
+import { professionalEntitlementSnapshotSchema } from "./professional-subscription.js";
 
 export const createSelfServiceProfessionalSchema = createProfessionalSchema;
 export const professionalEligibilityReasonSchema = z.enum([
@@ -15,6 +16,7 @@ export const professionalEligibilitySchema = z.object({
   can_appear_in_matching: z.boolean(), can_receive_opportunities: z.boolean(),
   can_set_available_now: z.boolean(), reasons: z.array(professionalEligibilityReasonSchema),
 }).strict();
+
 export const professionalLifecycleResponseSchema = z.object({
   professional: professionalResponseSchema, eligibility: professionalEligibilitySchema,
 }).strict();
@@ -22,4 +24,6 @@ export const professionalDashboardAggregateSchema = z.object({
   professional: professionalResponseSchema, services: z.array(professionalServiceResponseSchema),
   areas: z.array(serviceAreaResponseSchema), catalog: z.array(serviceCatalogItemSchema),
   eligibility: professionalEligibilitySchema,
+  entitlement: professionalEntitlementSnapshotSchema,
 }).strict();
+

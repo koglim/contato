@@ -4,7 +4,8 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DashboardContent } from "../../components/dashboard/dashboard-content";
-import type { ProfessionalEligibility, ProfessionalResponse } from "@contatocerto/shared";
+import type { ProfessionalEligibility, ProfessionalEntitlementSnapshot, ProfessionalResponse } from "@contatocerto/shared";
+
 
 const read = (path: string) => readFileSync(path, "utf8");
 
@@ -45,10 +46,10 @@ const eligibility = (status: ProfessionalResponse["status"], ready: boolean): Pr
   can_receive_opportunities: ready && status === "active", can_set_available_now: ready && status === "active",
   reasons: ready ? (status === "draft" ? ["profile_draft"] : []) : ["no_active_service", "no_service_area"],
 });
-function renderDashboard(section: "overview" | "availability", status: ProfessionalResponse["status"], ready: boolean, enabled: boolean) {
+function renderDashboard(section: "overview" | "availability", status: ProfessionalResponse["status"], ready: boolean, enabled: boolean, entitlement?: ProfessionalEntitlementSnapshot) {
   return renderToStaticMarkup(createElement(DashboardContent, {
     section, selfServiceLifecycleEnabled: enabled,
-    data: { professional: professional(status), eligibility: eligibility(status, ready), services: [], areas: [], catalog: [] },
+    data: { professional: professional(status), eligibility: eligibility(status, ready), services: [], areas: [], catalog: [], entitlement },
   }));
 }
 
@@ -95,3 +96,81 @@ test("access UI adapts copy between passwordless and demo mode", () => {
   assert.match(formSource, /Continuar com WhatsApp/u);
   assert.match(formSource, /Acessar painel/u);
 });
+
+test("subscription UI renders active, required, expired, and exempt states appropriately", () => {
+  const activeSub: ProfessionalEntitlementSnapshot = {
+    policy_version: "entitlement-v1",
+    professional_id: professional("active").id,
+    management_mode: "account_managed",
+    subscription_required: true,
+    state: "active",
+    plan_code: "marketplace_standard_v1",
+    starts_at: "2026-01-01T00:00:00.000Z",
+    ends_at: "2026-12-31T00:00:00.000Z",
+    has_marketplace_access: true,
+    reasons: [],
+  };
+  const activeHtml = renderDashboard("overview", "active", true, true, activeSub);
+  assert.match(activeHtml, /Assinatura ativa/u);
+  assert.match(activeHtml, /Seu perfil pode participar do marketplace/u);
+  assert.doesNotMatch(activeHtml, /não está participando de novas buscas/u);
+
+  const expiredSub: ProfessionalEntitlementSnapshot = {
+    ...activeSub,
+    state: "expired",
+    has_marketplace_access: false,
+    reasons: ["subscription_expired"],
+  };
+  const expiredHtml = renderDashboard("overview", "active", true, true, expiredSub);
+  assert.match(expiredHtml, /Assinatura expirada/u);
+  assert.match(expiredHtml, /Seu perfil e seus dados continuam disponíveis/u);
+  assert.match(expiredHtml, /Pagamento online será habilitado em uma próxima etapa\./u);
+  assert.match(expiredHtml, /Seu perfil está publicado, mas não está participando de novas buscas porque não há assinatura ativa\./u);
+
+  const noneSub: ProfessionalEntitlementSnapshot = {
+    ...activeSub,
+    state: "none",
+    plan_code: null,
+    starts_at: null,
+    ends_at: null,
+    has_marketplace_access: false,
+    reasons: ["subscription_required"],
+  };
+  const noneHtml = renderDashboard("overview", "active", true, true, noneSub);
+  assert.match(noneHtml, /Assinatura necessária/u);
+  assert.match(noneHtml, /Seu perfil está publicado, mas não está participando de novas buscas porque não há assinatura ativa\./u);
+
+  const exemptSub: ProfessionalEntitlementSnapshot = {
+    ...activeSub,
+    management_mode: "legacy_unmanaged",
+    subscription_required: false,
+    state: "legacy_exempt",
+    plan_code: null,
+    starts_at: null,
+    ends_at: null,
+    has_marketplace_access: true,
+    reasons: [],
+  };
+  const exemptHtml = renderDashboard("overview", "active", true, true, exemptSub);
+  assert.match(exemptHtml, /Perfil legado isento de assinatura/u);
+  assert.doesNotMatch(exemptHtml, /não está participando de novas buscas/u);
+});
+
+test("demo mode never displays subscription card or subscription warning", () => {
+  const activeSub: ProfessionalEntitlementSnapshot = {
+    policy_version: "entitlement-v1",
+    professional_id: professional("active").id,
+    management_mode: "account_managed",
+    subscription_required: true,
+    state: "none",
+    plan_code: null,
+    starts_at: null,
+    ends_at: null,
+    has_marketplace_access: false,
+    reasons: ["subscription_required"],
+  };
+  const demoHtml = renderDashboard("overview", "active", true, false, activeSub);
+  assert.doesNotMatch(demoHtml, /Assinatura/u);
+  assert.doesNotMatch(demoHtml, /não está participando de novas buscas/u);
+});
+

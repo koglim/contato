@@ -237,6 +237,22 @@ jobs:
           END $$;
           SQL
 
+      - name: Verify migration 025 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='025_add_professional_subscriptions')
+              OR to_regclass('subscription_plans') IS NULL
+              OR to_regclass('subscription_plan_entitlements') IS NULL
+              OR to_regclass('professional_subscriptions') IS NULL
+              OR to_regclass('professional_subscription_events') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM subscription_plans WHERE code='marketplace_standard_v1')
+              OR NOT EXISTS (SELECT 1 FROM subscription_plan_entitlements WHERE entitlement_key='marketplace_access')
+              OR to_regprocedure('protect_professional_subscription_events()') IS NULL
+            THEN RAISE EXCEPTION 'migration 025 incomplete'; END IF;
+          END $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 

@@ -32,6 +32,20 @@ test("self-service revalidates exact membership on every read and mutation", asy
     can_set_available_now: false, reasons: ["no_active_service" as const, "no_service_area" as const, "profile_draft" as const] };
   const eligibilityService = { get: async () => eligibility, publish: async () => { throw new Error("unused"); },
     unpublish: async () => { throw new Error("unused"); }, updateAvailability: async () => { throw new Error("unused"); } };
+  const subscriptionService = {
+    getEntitlementSnapshot: async (id: string) => ({
+      policy_version: "entitlement-v1" as const,
+      professional_id: id,
+      management_mode: "account_managed" as const,
+      subscription_required: true,
+      state: "active" as const,
+      plan_code: "marketplace_standard_v1",
+      starts_at: "2026-01-01T00:00:00.000Z",
+      ends_at: "2026-12-31T00:00:00.000Z",
+      has_marketplace_access: true,
+      reasons: [],
+    }),
+  };
   app.get("/internal/professionals/:id", async request => ({ id: (request.params as { id: string }).id, display_name: "A", slug: "a",
     bio: null, phone_e164: "+5566999999999", email: null, profile_image_url: null, status: "draft", is_verified: false,
     is_available_now: false, available_now_updated_at: null, created_at: now, updated_at: now }));
@@ -39,7 +53,8 @@ test("self-service revalidates exact membership on every read and mutation", asy
   app.get("/internal/professionals/:id/service-areas", async () => ({ items: [] }));
   app.get("/internal/catalog/services", async () => ({ items: [] }));
   app.patch("/internal/professionals/:id", async request => ({ ...(request.body as object), id: (request.params as { id: string }).id }));
-  await app.register(professionalAuthRoutes, { prefix: "/internal/professional-auth", internalApiKey: "key", service, accessService, eligibilityService });
+  await app.register(professionalAuthRoutes, { prefix: "/internal/professional-auth", internalApiKey: "key", service, accessService, eligibilityService, subscriptionService });
+
 
   const headers = { "x-internal-key": "key", authorization: "Bearer session" };
   const readA = await app.inject({ method: "GET", url: `/internal/professional-auth/profiles/${profileA}/dashboard`, headers });
