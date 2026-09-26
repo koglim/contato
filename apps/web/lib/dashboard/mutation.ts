@@ -4,9 +4,9 @@ type Dependencies = {
   authorize: () => Promise<void>;
   professionalId: () => string | Promise<string>;
   api: (path: string, init: RequestInit) => Promise<unknown>;
+  professionalBase?: (professionalId: string) => string;
 };
 
-// The HTTP handler uses this same boundary; validation is not just a UI rule.
 export async function handleDashboardMutation(request: Request, dependencies: Dependencies): Promise<Response> {
   try {
     await dependencies.authorize();
@@ -17,7 +17,7 @@ export async function handleDashboardMutation(request: Request, dependencies: De
     if (!parsed.success) return Response.json({ error: "invalid_request" }, { status: 400 });
     const { method, payload } = parsed.data;
     const owner = professionalResponseSchema.shape.id.parse(await dependencies.professionalId());
-    const base = `/internal/professionals/${owner}`;
+    const base = dependencies.professionalBase?.(owner) ?? `/internal/professionals/${owner}`;
     let path = base;
     if (payload.action === "availability") path += "/availability";
     if (payload.action === "service") path += `/services${"id" in payload ? `/${payload.id}` : ""}`;
@@ -30,6 +30,7 @@ export async function handleDashboardMutation(request: Request, dependencies: De
   } catch (error) {
     const code = error instanceof Error ? error.message : "request_failed";
     if (code === "dashboard_unauthorized") return Response.json({ error: "unauthorized" }, { status: 401 });
+    if (code === "professional_forbidden") return Response.json({ error: "forbidden" }, { status: 403 });
     const message = ({
       professional_not_active: "Seu cadastro precisa estar ativo para ficar disponível.",
       service_inactive: "Esse serviço não está mais disponível no catálogo.",

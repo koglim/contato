@@ -11,7 +11,11 @@ import type {
 } from "./channel-outbox.types.js";
 import type { ChannelOutboundQueueStatus, ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 import { OUTBOX_MAX_ATTEMPTS, OUTBOX_RETRY_BACKOFF_SECONDS } from "./channel-outbox.retry.js";
-import { CUSTOMER_REPLY_EXPIRY_REASON, CUSTOMER_REPLY_MAX_AGE_SECONDS } from "./channel-outbox.expiry.js";
+import {
+  AUTH_OUTBOUND_MIN_REMAINING_SECONDS,
+  CUSTOMER_REPLY_EXPIRY_REASON,
+  CUSTOMER_REPLY_MAX_AGE_SECONDS,
+} from "./channel-outbox.expiry.js";
 
 const retryBackoffSql = OUTBOX_RETRY_BACKOFF_SECONDS
   .map((seconds, index) => `WHEN ${index + 1} THEN ${seconds}`)
@@ -73,7 +77,9 @@ function expireCustomerRepliesSql(
 function expireAuthChallengesSql() {
   return `expired_auth_candidates AS (
     SELECT id FROM channel_outbound_messages WHERE purpose='professional_auth_challenge'
-      AND expires_at<=clock_timestamp() AND status<>'sent' AND administrative_closed_at IS NULL
+      AND expires_at<=clock_timestamp()+(${AUTH_OUTBOUND_MIN_REMAINING_SECONDS} * INTERVAL '1 second')
+      AND status IN ('pending','failed') AND delivery_hold_reason IS NULL
+      AND administrative_closed_at IS NULL
     FOR UPDATE SKIP LOCKED
   ), expired_auth AS (
     UPDATE channel_outbound_messages outbound SET status='failed',last_error_code='auth_challenge_expired',
@@ -330,7 +336,8 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
        WHERE id = $1
          AND attempt_count < $4 AND delivery_hold_reason IS NULL
          AND administrative_closed_at IS NULL
-         AND (expires_at IS NULL OR expires_at > clock_timestamp())
+         AND (purpose <> 'professional_auth_challenge'
+           OR expires_at > clock_timestamp()+(${AUTH_OUTBOUND_MIN_REMAINING_SECONDS} * INTERVAL '1 second'))
          AND (purpose <> 'customer_reply' OR created_at > clock_timestamp() - ($5 * INTERVAL '1 second'))
          AND ${recipientTurnSql}
          AND (
@@ -353,7 +360,8 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
            FROM channel_outbound_messages AS outbound
           WHERE attempt_count < $2 AND delivery_hold_reason IS NULL
             AND outbound.administrative_closed_at IS NULL
-            AND (outbound.expires_at IS NULL OR outbound.expires_at > clock_timestamp())
+            AND (outbound.purpose <> 'professional_auth_challenge'
+              OR outbound.expires_at > clock_timestamp()+(${AUTH_OUTBOUND_MIN_REMAINING_SECONDS} * INTERVAL '1 second'))
             AND (outbound.purpose <> 'customer_reply'
               OR outbound.created_at > clock_timestamp() - ($4 * INTERVAL '1 second'))
             AND ${recipientTurnSql}

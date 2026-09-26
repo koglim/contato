@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { dashboardCookieName, professionalAuthEnabled } from "../../../../lib/auth/dashboard";
 import { createDashboardSession, dashboardSessionDurationSeconds, hasMatchingDemoPassword } from "../../../../lib/auth/session";
+import { sameOriginError } from "../../../../lib/auth/same-origin";
 
 export async function POST(request: Request) {
+  const originError=sameOriginError(request);if(originError)return originError;
   const body = await request.json().catch(() => ({}));
   if(professionalAuthEnabled()){
     const base=process.env.CONTATOCERTO_API_URL,key=process.env.INTERNAL_API_KEY;if(!base||!key)return NextResponse.json({error:"unavailable"},{status:503});

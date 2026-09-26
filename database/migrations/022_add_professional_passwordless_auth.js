@@ -25,6 +25,14 @@ exports.up = pgm => {
     );
     CREATE INDEX professional_auth_challenges_identifier_created_idx
       ON professional_auth_challenges(account_identifier_id, created_at DESC);
+    CREATE UNIQUE INDEX professional_auth_challenges_one_active_idx
+      ON professional_auth_challenges(account_identifier_id)
+      WHERE consumed_at IS NULL AND invalidated_at IS NULL;
+    CREATE INDEX channel_outbound_messages_auth_claim_idx
+      ON channel_outbound_messages(expires_at, created_at, id)
+      WHERE purpose = 'professional_auth_challenge'
+        AND administrative_closed_at IS NULL
+        AND status IN ('pending','failed','processing');
 
     CREATE TABLE professional_sessions (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -51,6 +59,7 @@ exports.down = pgm => {
     END $$;
     DROP TABLE professional_auth_challenges;
     DROP TABLE professional_sessions;
+    DROP INDEX channel_outbound_messages_auth_claim_idx;
     ALTER TABLE channel_outbound_messages DROP CONSTRAINT channel_outbound_messages_auth_expiry_chk;
     ALTER TABLE channel_outbound_messages DROP COLUMN expires_at;
     ALTER TABLE channel_outbound_messages DROP CONSTRAINT channel_outbound_messages_purpose_context_chk;

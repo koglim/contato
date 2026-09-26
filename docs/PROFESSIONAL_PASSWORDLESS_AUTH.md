@@ -6,13 +6,17 @@ The browser talks only to the Next.js BFF. The BFF keeps `INTERNAL_API_KEY` serv
 
 ## Rollout
 
-`PROFESSIONAL_AUTH_ENABLED=false` is the default and preserves the demo password, signed demo cookie and `DASHBOARD_PROFESSIONAL_ID`. When true, the demo path is disabled and `PROFESSIONAL_AUTH_PEPPER` is mandatory in the API. No signup, profile claim or implicit membership creation exists in this version.
+`PROFESSIONAL_AUTH_ENABLED=false` is the default and preserves the demo password, signed demo cookie and `DASHBOARD_PROFESSIONAL_ID`. When true, the demo path is disabled and `PROFESSIONAL_AUTH_PEPPER` must contain at least 32 bytes in the API. Startup rejects missing, empty or short values. No signup, profile claim or implicit membership creation exists in this version.
 
 ## Challenge lifecycle
 
-Only a verified phone `account_identifier` for an active, already provisioned account can create a deliverable challenge. Public responses remain generic for unknown, blocked and rate-limited identifiers. Codes contain six CSPRNG digits, expire after five minutes and allow five attempts. A PostgreSQL advisory transaction lock serializes requests per phone, enforcing a 60-second cooldown and five challenges per hour.
+Only a verified phone `account_identifier` for an active, already provisioned account can create a deliverable challenge. Public responses remain generic for existing, unknown, blocked, unverified, cooldown and hourly-limited identifiers. Codes contain six CSPRNG digits, expire after five minutes and allow five attempts. A PostgreSQL advisory transaction lock serializes requests per phone, enforcing a 60-second cooldown and five challenges per hour.
 
-The challenge stores only `HMAC-SHA-256(pepper, challenge-id + ":" + otp)`. Comparison is constant-time. The durable Outbox payload is AES-256-GCM encrypted with a key derived from the API-only pepper and is decrypted only while producing the authenticated dispatcher claim. The OTP is never stored in plaintext or logged.
+The database UUID is an internal challenge ID and is never returned to the browser. The public `par1` reference is a randomized AES-256-GCM envelope containing a version byte and the internal UUID. Its nonce changes on every response, including cooldown responses for the same internal challenge. Invalid, corrupt and fake references produce the same `invalid_or_expired_code` contract.
+
+HKDF-SHA-256 derives independent versioned subkeys for `professional-auth:otp:v1`, `professional-auth:outbox:v1` and `professional-auth:reference:v1`. The challenge stores only an HMAC made with the OTP subkey, and comparison is constant-time. The durable Outbox payload is authenticated AES-256-GCM encrypted with the Outbox subkey and is decrypted only while producing an authorized dispatcher claim. This is defense in depth for direct column exposure; it does not replace database, disk or backup encryption. The OTP is never stored in plaintext or logged.
+
+Creating a new real challenge atomically invalidates every prior unconsumed challenge for the identifier. Pending or retryable unsent Outbox rows are terminalized with `auth_challenge_superseded` and an immutable transport audit event. Confirmed sent evidence is unchanged; an in-flight uncertain delivery keeps its reconciliation evidence, while the superseded OTP can no longer authenticate.
 
 ## Sessions and logout
 
@@ -20,15 +24,17 @@ Successful atomic challenge consumption creates one independent seven-day sessio
 
 ## Ownership and profiles
 
-The session resolves the account, then active `professional_memberships`. Zero profiles show a safe empty state, one opens directly and multiple profiles can be selected. The selected ID is a resource reference; the API rechecks the active membership. A blocked account or revoked membership denies the next request immediately.
+The session resolves the account, then active `professional_memberships`. Zero profiles return an authenticated `no_profiles` state, one opens directly and multiple profiles can be selected. The selected ID and cookie are resource references only. Every self-service API read and mutation revalidates the session, active account and exact active membership, so a blocked account or revoked membership denies the next request immediately.
+
+The authenticated BFF uses `/internal/professional-auth/profiles/:professionalId/...` for dashboard reads and mutations. Only this boundary may act for a session. It authorizes first and then delegates to the existing professionals, services, areas, availability and catalog domain routes; `INTERNAL_API_KEY` alone never establishes ownership.
 
 ## Outbox and n8n
 
-`professional_auth_challenge` is a distinct purpose with business key `professional-auth:<challenge-id>`. Its `expires_at` matches the challenge. Claims exclude expired rows and queue diagnostics terminalize them, so retries retain the same encrypted content and an expired OTP cannot be transported. Versioned n8n delivery contracts accept the purpose; no remote workflow is changed by this repository update.
+`professional_auth_challenge` is a distinct purpose with business key `professional-auth:<challenge-id>`. Its `expires_at` matches the challenge. A versioned 30-second safety margin prevents `claim(id)` and `claimNextPending()` from releasing plaintext when insufficient OTP lifetime remains. Pending and retryable rows become `failed` with `auth_challenge_expired` and an immutable audit event. A processing or held row is not falsely classified as unsent; its evidence remains available for confirmation or reconciliation, while it cannot receive a new claim. Retries retain the same encrypted OTP. Versioned n8n delivery contracts accept the purpose; no remote workflow is changed by this repository update.
 
 ## CSRF
 
-Cookies use HttpOnly, Secure in production, SameSite=Lax and Path `/`. State-changing BFF routes accept only POST/PATCH/DELETE and compare the request Origin with the BFF origin. This matches the same-origin browser topology without adding a second token framework.
+Cookies use HttpOnly, Secure in production, SameSite=Lax and Path `/`. When passwordless auth is enabled, every state-changing BFF route compares `Origin` with the BFF origin and fails closed when the header is missing or foreign. Demo mode keeps its previous behavior. This matches the same-origin browser topology without adding a second token framework.
 
 ## Rollback and future boundary
 

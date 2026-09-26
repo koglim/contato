@@ -65,6 +65,12 @@ jobs:
       - name: B2 readiness interpretation and composition (mocked)
         run: pnpm --filter @contatocerto/api eval:b2 --suite=readiness --summary --report=b2-readiness-report.json
 
+      - name: B2 regression v1 (mocked)
+        run: pnpm --filter @contatocerto/api eval:b2 --suite=regression --summary --report=b2-regression-report.json
+
+      - name: B2 latency v1 (local deterministic benchmark)
+        run: pnpm --filter @contatocerto/api eval:latency
+
       - name: Save B2 synthetic evaluation traces
         if: always()
         uses: actions/upload-artifact@v4
@@ -197,6 +203,8 @@ jobs:
             IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='022_add_professional_passwordless_auth')
               OR to_regclass('professional_auth_challenges') IS NULL
               OR to_regclass('professional_sessions') IS NULL
+              OR to_regclass('professional_auth_challenges_one_active_idx') IS NULL
+              OR to_regclass('channel_outbound_messages_auth_claim_idx') IS NULL
               OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_outbound_messages' AND column_name='expires_at')
             THEN RAISE EXCEPTION 'migration 022 incomplete'; END IF;
           END $$;
