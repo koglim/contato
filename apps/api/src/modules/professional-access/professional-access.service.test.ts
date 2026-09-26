@@ -5,7 +5,7 @@ import type { ProfessionalAccessReader, ProfessionalAccessSnapshot } from "./pro
 
 const input = { accountId: "00000000-0000-4000-8000-000000000001", professionalId: "00000000-0000-4000-8000-000000000002" };
 const active: ProfessionalAccessSnapshot = { accountStatus: "active", professionalExists: true,
-  membershipStatus: "active", hasVerifiedIdentifier: true };
+  membershipStatus: "active", membershipRole: "owner", hasVerifiedIdentifier: true };
 
 test("professional access requires account, membership and verified identity; blocked and revoked deny", async () => {
   for (const [state, expected] of [
@@ -18,7 +18,8 @@ test("professional access requires account, membership and verified identity; bl
     [{ ...active, hasVerifiedIdentifier: false }, "identity_unverified"],
   ] as const) {
     const repository: ProfessionalAccessReader = { async findSnapshot() { return state as ProfessionalAccessSnapshot; } };
-    assert.deepEqual(await new ProfessionalAccessService(repository).resolveProfessionalAccess(input), { status: expected });
+    const result = await new ProfessionalAccessService(repository).resolveProfessionalAccess(input);
+    assert.deepEqual(result, expected === "authorized" ? { status: expected, role: "owner" } : { status: expected });
   }
 });
 

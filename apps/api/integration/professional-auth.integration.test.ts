@@ -128,7 +128,7 @@ test("session stays authenticated with zero profiles while exact membership revo
   await query("INSERT INTO professional_sessions(account_id,token_hash,expires_at) VALUES($1,$2,NOW()+INTERVAL '7 days')",[accountId,hashSessionToken(token)]);
   const auth=new ProfessionalAuthService(new PostgresProfessionalAuthRepository(),pepper),access=new ProfessionalAccessService();
   assert.ok(await auth.authenticate(token));
-  assert.equal((await access.resolveProfessionalAccess({accountId,professionalId:profileA})).status,"authorized");
+  assert.deepEqual(await access.resolveProfessionalAccess({accountId,professionalId:profileA}),{status:"authorized",role:"owner"});
   assert.equal((await access.resolveProfessionalAccess({accountId,professionalId:profileB})).status,"not_member");
   assert.deepEqual((await new PostgresProfessionalAuthRepository().listProfiles(accountId)).map(item=>item.id),[profileA]);
   await query("UPDATE professional_memberships SET status='revoked' WHERE account_id=$1 AND professional_id=$2",[accountId,profileA]);

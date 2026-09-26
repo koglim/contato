@@ -210,6 +210,17 @@ jobs:
           END $$;
           SQL
 
+      - name: Verify migration 023 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='023_add_professional_onboarding_audit')
+              OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='professional_membership_events' AND column_name='actor_account_id')
+              OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='professional_membership_events' AND column_name='source')
+            THEN RAISE EXCEPTION 'migration 023 incomplete'; END IF;
+          END $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
 
@@ -324,6 +335,45 @@ jobs:
           echo "$rollback_output" | grep -q 'OUTBOUND_RETRY_ROLLBACK_BLOCKED'
           echo "$rollback_output" | grep -q 'P0016'
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DELETE FROM channel_outbound_messages WHERE id = '00000000-0000-0000-0000-000000000016'"
+
+      - name: Verify migration 023 protected rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_023_protected'
+          protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_023_protected'
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+          psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
+          INSERT INTO accounts(id) VALUES ('00000000-0000-0000-0000-000000000023');
+          INSERT INTO account_identifiers(account_id,kind,normalized_value,verified_at)
+          VALUES ('00000000-0000-0000-0000-000000000023','phone','+5566900000023',NOW());
+          INSERT INTO professionals(id,display_name,slug,phone_e164)
+          VALUES ('00000000-0000-0000-0001-000000000023','Rollback fixture','rollback-fixture-023','+5566900000024');
+          BEGIN;
+          SELECT set_config('contatocerto.membership_actor_account_id','00000000-0000-0000-0000-000000000023',true),
+                 set_config('contatocerto.membership_source','self_onboarding',true);
+          INSERT INTO professional_memberships(account_id,professional_id,role)
+          VALUES ('00000000-0000-0000-0000-000000000023','00000000-0000-0000-0001-000000000023','owner');
+          COMMIT;
+          SQL
+          set +e
+          rollback_output=$(DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_status=$?
+          set -e
+          echo "$rollback_output"
+          test "$rollback_status" -ne 0
+          echo "$rollback_output" | grep -q 'PROFESSIONAL_ONBOARDING_AUDIT_ROLLBACK_BLOCKED'
+          echo "$rollback_output" | grep -q 'P0023'
+          psql -v ON_ERROR_STOP=1 'postgresql://contatocerto:contatocerto-test@localhost:5432/postgres' -c 'DROP DATABASE contatocerto_023_protected'
+
+      - name: Roll back migration 023 with compatible data
+        run: |
+          node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='professional_membership_events' AND column_name IN ('actor_account_id','source'))
+              OR EXISTS (SELECT 1 FROM pgmigrations WHERE name='023_add_professional_onboarding_audit')
+            THEN RAISE EXCEPTION 'migration 023 remained'; END IF;
+          END $$;
+          SQL
 
       - name: Verify migration 022 protected rollback
         run: |
@@ -631,7 +681,7 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 022
+      - name: Reapply migrations 008 through 023
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
       - name: Test PostgreSQL integrations after reapply

@@ -1,6 +1,7 @@
 import "server-only";
 import type {
   ProfessionalResponse,
+  ProfessionalEligibility,
   ProfessionalServiceResponse,
   ServiceAreaResponse,
   ServiceCatalogItem,
@@ -15,9 +16,29 @@ export type ReadyDashboardData = {
   services: ProfessionalServiceResponse[];
   areas: ServiceAreaResponse[];
   catalog: ServiceCatalogItem[];
+  eligibility: ProfessionalEligibility;
   profiles?: DashboardProfile[];
 };
 export type DashboardData = ReadyDashboardData | { status: "no_profiles"; profiles: [] };
+
+function demoEligibility(professional: ProfessionalResponse, services: ProfessionalServiceResponse[], areas: ServiceAreaResponse[]): ProfessionalEligibility {
+  const identityVerified = true;
+  const profileComplete = professional.display_name.trim().length >= 2 && professional.slug.trim().length > 0 && /^\+[1-9]\d{7,14}$/u.test(professional.phone_e164);
+  const hasActiveService = services.some(item => item.is_active);
+  const hasServiceArea = areas.length > 0;
+  const ready = identityVerified && profileComplete && hasActiveService && hasServiceArea;
+  const active = professional.status === "active";
+  const reasons: ProfessionalEligibility["reasons"] = [];
+  if (!profileComplete) reasons.push("profile_incomplete");
+  if (!hasActiveService) reasons.push("no_active_service");
+  if (!hasServiceArea) reasons.push("no_service_area");
+  if (professional.status === "draft") reasons.push("profile_draft");
+  if (professional.status === "suspended") reasons.push("profile_suspended");
+  return { policy_version: "eligibility-v1", professional_id: professional.id, identity_verified: identityVerified,
+    profile_complete: profileComplete, has_active_service: hasActiveService, has_service_area: hasServiceArea,
+    profile_status: professional.status, ready_to_publish: ready, can_appear_in_matching: ready && active,
+    can_receive_opportunities: ready && active, can_set_available_now: ready && active, reasons };
+}
 
 function config() {
   const baseUrl = process.env.CONTATOCERTO_API_URL;
@@ -103,6 +124,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     services: services.items,
     areas: areas.items,
     catalog: catalog.items,
+    eligibility: demoEligibility(professional, services.items, areas.items),
     profiles: context.profiles,
   };
 }

@@ -18,6 +18,8 @@ export const dashboardMutationSchema = z.discriminatedUnion("method", [
   z.object({ method: z.literal("POST"), payload: z.discriminatedUnion("action", [
     z.object({ action: z.literal("service"), data: createProfessionalServiceSchema }).strict(),
     z.object({ action: z.literal("area"), data: createServiceAreaSchema }).strict(),
+    z.object({ action: z.literal("publish") }).strict(),
+    z.object({ action: z.literal("unpublish") }).strict(),
   ]) }).strict(),
   z.object({ method: z.literal("PATCH"), payload: z.discriminatedUnion("action", [
     z.object({ action: z.literal("profile"), data: updateSelfServiceProfileSchema }).strict(),

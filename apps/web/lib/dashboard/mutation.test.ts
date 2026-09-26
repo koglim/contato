@@ -84,6 +84,16 @@ test("existing availability, service and area operations keep their verbs and sc
   assert.equal(f.calls.at(-1)?.init.body, undefined);
 });
 
+test("publish and unpublish use dedicated lifecycle endpoints without a client-owned body", async () => {
+  const f = boundary();
+  for (const action of ["publish", "unpublish"] as const) {
+    assert.equal((await f.send(request({ action }, "POST"))).status, 200);
+    assert.equal(f.calls.at(-1)?.path, `/internal/professionals/${owner}/${action}`);
+    assert.equal(f.calls.at(-1)?.init.method, "POST");
+    assert.equal(f.calls.at(-1)?.init.body, undefined);
+  }
+});
+
 test("upstream failures never leak internal URL, credentials or arbitrary errors", async () => {
   const response = await handleDashboardMutation(request({ action: "profile", data: { bio: "Eletricista" } }), {
     authorize: async () => {}, professionalId: () => owner,

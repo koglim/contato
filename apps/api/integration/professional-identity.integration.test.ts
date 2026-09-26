@@ -52,9 +52,9 @@ test("professional access requires verified identity and the exact active member
     assert.deepEqual(await access.resolveProfessionalAccess({ accountId, professionalId: randomUUID() }), { status: "not_found" });
 
     await query("UPDATE account_identifiers SET verified_at=NOW() WHERE id=$1", [identifier.id]);
-    assert.deepEqual(await access.resolveProfessionalAccess(input), { status: "authorized" });
+    assert.deepEqual(await access.resolveProfessionalAccess(input), { status: "authorized", role: "owner" });
     await query("UPDATE professional_memberships SET role='admin' WHERE account_id=$1 AND professional_id=$2", [accountId, professionalId]);
-    assert.deepEqual(await access.resolveProfessionalAccess(input), { status: "authorized" });
+    assert.deepEqual(await access.resolveProfessionalAccess(input), { status: "authorized", role: "admin" });
     await query("UPDATE accounts SET status='blocked' WHERE id=$1", [accountId]);
     assert.deepEqual(await access.resolveProfessionalAccess(input), { status: "account_blocked" });
     await query("UPDATE accounts SET status='active' WHERE id=$1", [accountId]);
