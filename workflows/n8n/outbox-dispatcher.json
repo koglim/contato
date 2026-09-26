@@ -33,7 +33,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "function httpResponse(response) {\r\n  if (typeof response?.body !== \"string\") return response;\r\n  if (!response.body.trim()) return { ...response, body: null };\r\n  try { return { ...response, body: JSON.parse(response.body) }; }\r\n  catch { return { ...response, body: null }; }\r\n}\nconst items = $input.all();\nif (items.length !== 1) throw new Error('dispatcher_expects_one_budget');\nconst input = items[0].json;\nconst started_at = input.started_at ?? Date.now();\nconst count = input.count ?? 0;\nif (count >= 10 || Date.now() - started_at >= 45000) return [];\nreturn [{ json: { started_at, count } }];"
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst items = $input.all();\nif (items.length !== 1) throw new Error('dispatcher_expects_one_budget');\nconst input = items[0].json;\nconst started_at = input.started_at ?? Date.now();\nconst count = input.count ?? 0;\nif (count >= 10 || Date.now() - started_at >= 45000) return [];\nreturn [{ json: { started_at, count } }];"
       }
     },
     {
@@ -108,7 +108,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "function httpResponse(response) {\r\n  if (typeof response?.body !== \"string\") return response;\r\n  if (!response.body.trim()) return { ...response, body: null };\r\n  try { return { ...response, body: JSON.parse(response.body) }; }\r\n  catch { return { ...response, body: null }; }\r\n}\nconst items = $input.all();\nif (items.length !== 1) throw new Error('dispatcher_expects_one_result');\nconst result = items[0].json;\nif (result.action !== 'complete' || result.needs_reconciliation) return [];\nconst budget = $('Budget').item.json;\nreturn [{ json: { started_at: budget.started_at, count: budget.count + 1 } }];"
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nconst items = $input.all();\nif (items.length !== 1) throw new Error('dispatcher_expects_one_result');\nconst result = items[0].json;\nif (result.action !== 'complete' || result.needs_reconciliation) return [];\nconst budget = $('Budget').item.json;\nreturn [{ json: { started_at: budget.started_at, count: budget.count + 1 } }];"
       }
     }
   ],
