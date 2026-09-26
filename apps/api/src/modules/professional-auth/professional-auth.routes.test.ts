@@ -77,3 +77,62 @@ test("self-service revalidates exact membership on every read and mutation", asy
   assert.equal(checks.filter(id => id === profileB).length, 1);
   await app.close();
 });
+
+test("claim routes handle list and claim conflict mapping", async () => {
+  const app = Fastify();
+  let claimBehavior: "success" | "conflict" | "forbidden" | "not_found" = "success";
+  const service = {
+    requestChallenge: async () => ({ accepted: true, challenge_reference: "", expires_in_seconds: 300 }),
+    verify: async () => ({ ok: false as const }),
+    authenticate: async (token: string | undefined) => token === "session"
+      ? { sessionId: "session-id", accountId: "account-a", expiresAt: new Date(Date.now() + 60_000) }
+      : null,
+    revoke: async () => true,
+    listClaimableProfiles: async () => [
+      { id: profileA, display_name: "Profile A", slug: "profile-a", status: "active" as const },
+    ],
+    claimProfile: async (_accountId: string, professionalId: string) => {
+      if (claimBehavior === "conflict") throw new Error("claim_conflict");
+      if (claimBehavior === "forbidden") throw new Error("claim_forbidden");
+      if (claimBehavior === "not_found") throw new Error("professional_not_found");
+      return {
+        claimed: true as const,
+        professional: { id: professionalId, display_name: "Profile A", slug: "profile-a", status: "active" as const },
+      };
+    },
+  };
+  await app.register(professionalAuthRoutes, { prefix: "/internal/professional-auth", internalApiKey: "key", service });
+
+  const headers = { "x-internal-key": "key", authorization: "Bearer session" };
+
+  const listRes = await app.inject({ method: "GET", url: "/internal/professional-auth/claimable-profiles", headers });
+  assert.equal(listRes.statusCode, 200);
+  assert.deepEqual(listRes.json(), {
+    items: [{ id: profileA, display_name: "Profile A", slug: "profile-a", status: "active" }],
+  });
+
+  claimBehavior = "success";
+  const claimRes = await app.inject({ method: "POST", url: `/internal/professional-auth/profiles/${profileA}/claim`, headers });
+  assert.equal(claimRes.statusCode, 200);
+  assert.deepEqual(claimRes.json(), {
+    claimed: true,
+    professional: { id: profileA, display_name: "Profile A", slug: "profile-a", status: "active" },
+  });
+
+  claimBehavior = "conflict";
+  const conflictRes = await app.inject({ method: "POST", url: `/internal/professional-auth/profiles/${profileA}/claim`, headers });
+  assert.equal(conflictRes.statusCode, 409);
+  assert.deepEqual(conflictRes.json(), { error: "claim_conflict" });
+
+  claimBehavior = "forbidden";
+  const forbiddenRes = await app.inject({ method: "POST", url: `/internal/professional-auth/profiles/${profileA}/claim`, headers });
+  assert.equal(forbiddenRes.statusCode, 403);
+  assert.deepEqual(forbiddenRes.json(), { error: "forbidden" });
+
+  claimBehavior = "not_found";
+  const notFoundRes = await app.inject({ method: "POST", url: `/internal/professional-auth/profiles/${profileA}/claim`, headers });
+  assert.equal(notFoundRes.statusCode, 404);
+  assert.deepEqual(notFoundRes.json(), { error: "professional_not_found" });
+
+  await app.close();
+});

@@ -9,6 +9,6 @@ export type DashboardSection = "overview" | "profile" | "services" | "areas" | "
 export async function DashboardPage({ section }: { section: DashboardSection }) {
   const selfServiceLifecycleEnabled = professionalAuthEnabled();
   const data = await getDashboardData();
-  if(data.status==="no_profiles")return <ProfessionalOnboarding />;
+  if(data.status==="no_profiles") return <ProfessionalOnboarding claimableProfiles={data.claimableProfiles} />;
   return <>{data.profiles&&data.profiles.length>1?<ProfileSelector profiles={data.profiles} current={data.professional.id}/>:null}<DashboardContent section={section} data={data} selfServiceLifecycleEnabled={selfServiceLifecycleEnabled} /></>;
 }

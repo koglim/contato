@@ -44,3 +44,7 @@ All passwordless state changes, including challenge/verify, logout, profile sele
 ## Onboarding and publication
 
 Authenticated accounts with no profiles receive an explicit creation form. After creation, the overview uses the server-provided `eligibility-v1` snapshot for its checklist, contextual actions, publication lifecycle, and availability gate. See [Professional onboarding and eligibility v1](PROFESSIONAL_ONBOARDING_ELIGIBILITY.md).
+
+## Legacy profile claim
+
+When an authenticated account has verified a phone number that matches existing `legacy_unmanaged` profiles with no active memberships, the dashboard overview surfaces an "Encontramos perfil existente" section listing these profiles with an "Este perfil é meu" claim button. Submitting calls `POST /api/dashboard/claim` through the same-origin protected BFF, which transitions the profile to `account_managed`, creates an owner membership, sets the profile-selection cookie, and refreshes the dashboard view.

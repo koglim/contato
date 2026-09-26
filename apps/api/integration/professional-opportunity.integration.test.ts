@@ -137,7 +137,7 @@ test("decline reopens without another active search; events, replies and replay 
     const repeat = await f.send(`aceito ${f.code}`);
     assert.deepEqual(repeat.outbound, first.outbound);
     assert.equal(await f.countEvents(), 1);
-    const rows = (await query("SELECT purpose FROM channel_outbound_messages WHERE opportunity_event_id IN (SELECT id FROM opportunity_response_events WHERE contact_id=$1) ORDER BY purpose", [f.contactId])).rows;
+    const rows = (await query("SELECT purpose FROM channel_outbound_messages WHERE opportunity_event_id IN (SELECT id FROM opportunity_response_events WHERE contact_id=$1) ORDER BY purpose::text", [f.contactId])).rows;
     assert.deepEqual(rows.map((r) => r.purpose), ["customer_contact_update", "professional_reply"]);
     assert.ok(!JSON.stringify(first.result).includes(f.customerPhone));
   } finally { await f.cleanup(); }

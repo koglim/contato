@@ -12,6 +12,7 @@ import { PostgresProfessionalAuthRepository } from "../src/modules/professional-
 import { ProfessionalAuthService } from "../src/modules/professional-auth/professional-auth.service.js";
 import { ProfessionalAccessService } from "../src/modules/professional-access/professional-access.service.js";
 import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel-outbox/channel-outbox.repository.js";
+import { PostgresMatchingRepository } from "../src/modules/matching/matching.repository.js";
 
 after(closeDatabaseConnection);
 const pepper="integration-pepper-with-at-least-thirty-two-bytes";
@@ -34,19 +35,44 @@ test("concurrent challenge and verification create one outbound and exactly one 
  }finally{await query("DELETE FROM professional_sessions WHERE account_id=$1",[accountId]);await query("DELETE FROM professional_auth_challenges WHERE account_identifier_id=$1",[identifierId]);if(outboundIds.length)await query("DELETE FROM channel_outbound_messages WHERE id=ANY($1::uuid[])",[outboundIds]);await query("DELETE FROM account_identifiers WHERE id=$1",[identifierId]);await query("DELETE FROM accounts WHERE id=$1",[accountId]);}
 });
 
-test("unknown, blocked and unverified phones keep indistinguishable randomized references without durable work",async()=>{
- const service=new ProfessionalAuthService(new PostgresProfessionalAuthRepository(),pepper);
- const unknown=await service.requestChallenge("+5565000000001"),unknownAgain=await service.requestChallenge("+5565000000001");
- assert.equal(unknown.accepted,true);assert.match(unknown.challenge_reference,PROFESSIONAL_AUTH_REFERENCE_PATTERN);assert.notEqual(unknown.challenge_reference,unknownAgain.challenge_reference);
- const blockedAccount=randomUUID(),blockedIdentifier=randomUUID(),blockedPhone="+5565000000002";
- const unverifiedAccount=randomUUID(),unverifiedIdentifier=randomUUID(),unverifiedPhone="+5565000000003";
- await query("INSERT INTO accounts(id,status) VALUES($1,'blocked'),($2,'active')",[blockedAccount,unverifiedAccount]);
- await query("INSERT INTO account_identifiers(id,account_id,kind,normalized_value,verified_at) VALUES($1,$2,'phone',$3,NOW()),($4,$5,'phone',$6,NULL)",[blockedIdentifier,blockedAccount,blockedPhone,unverifiedIdentifier,unverifiedAccount,unverifiedPhone]);
- try{
-  const blocked=await service.requestChallenge(blockedPhone),unverified=await service.requestChallenge(unverifiedPhone);
-  for(const response of [unknown,unknownAgain,blocked,unverified]){assert.deepEqual(Object.keys(response).sort(),["accepted","challenge_reference","expires_in_seconds"]);assert.match(response.challenge_reference,PROFESSIONAL_AUTH_REFERENCE_PATTERN);}
-  assert.equal((await query<{count:number}>("SELECT count(*)::int count FROM professional_auth_challenges WHERE account_identifier_id=ANY($1::uuid[])",[[blockedIdentifier,unverifiedIdentifier]])).rows[0]!.count,0);
- }finally{await query("DELETE FROM account_identifiers WHERE id=ANY($1::uuid[])",[[blockedIdentifier,unverifiedIdentifier]]);await query("DELETE FROM accounts WHERE id=ANY($1::uuid[])",[[blockedAccount,unverifiedAccount]]);}
+test("anti-enumeration: new, existing verified, existing unverified and blocked keep indistinguishable shape while blocked prevents durable work", async () => {
+  await rolledBack(async () => {
+    const service = new ProfessionalAuthService(new PostgresProfessionalAuthRepository(), pepper);
+    const verifiedAccount = randomUUID(), verifiedIdentifier = randomUUID(), verifiedPhone = `+5565${String(Date.now()).slice(-9)}`;
+    const unverifiedAccount = randomUUID(), unverifiedIdentifier = randomUUID(), unverifiedPhone = `+5564${String(Date.now()).slice(-9)}`;
+    const blockedAccount = randomUUID(), blockedIdentifier = randomUUID(), blockedPhone = `+5563${String(Date.now()).slice(-9)}`;
+    const newPhone = `+5562${String(Date.now()).slice(-9)}`;
+
+    await query("INSERT INTO accounts(id,status) VALUES($1,'active'),($2,'active'),($3,'blocked')", [verifiedAccount, unverifiedAccount, blockedAccount]);
+    await query("INSERT INTO account_identifiers(id,account_id,kind,normalized_value,verified_at) VALUES($1,$2,'phone',$3,NOW()),($4,$5,'phone',$6,NULL),($7,$8,'phone',$9,NOW())", [
+      verifiedIdentifier, verifiedAccount, verifiedPhone,
+      unverifiedIdentifier, unverifiedAccount, unverifiedPhone,
+      blockedIdentifier, blockedAccount, blockedPhone,
+    ]);
+
+    const verifiedRes = await service.requestChallenge(verifiedPhone);
+    const unverifiedRes = await service.requestChallenge(unverifiedPhone);
+    const blockedRes = await service.requestChallenge(blockedPhone);
+    const newRes = await service.requestChallenge(newPhone);
+
+    for (const res of [verifiedRes, unverifiedRes, blockedRes, newRes]) {
+      assert.deepEqual(Object.keys(res).sort(), ["accepted", "challenge_reference", "expires_in_seconds"]);
+      assert.equal(res.accepted, true);
+      assert.equal(res.expires_in_seconds, 300);
+      assert.match(res.challenge_reference, PROFESSIONAL_AUTH_REFERENCE_PATTERN);
+    }
+
+    assert.equal((await query<{ count: number }>("SELECT count(*)::int count FROM professional_auth_challenges WHERE account_identifier_id = $1", [blockedIdentifier])).rows[0]!.count, 0);
+    assert.equal((await query<{ count: number }>("SELECT count(*)::int count FROM accounts a JOIN account_identifiers i ON i.account_id = a.id WHERE i.normalized_value = $1", [blockedPhone])).rows[0]!.count, 1);
+
+    const newAccountRows = (await query<{ id: string; verified_at: Date | null }>("SELECT a.id, i.verified_at FROM accounts a JOIN account_identifiers i ON i.account_id = a.id WHERE i.normalized_value = $1", [newPhone])).rows;
+    assert.equal(newAccountRows.length, 1);
+    assert.equal(newAccountRows[0]!.verified_at, null);
+
+    const unverifiedAccountRows = (await query<{ id: string }>("SELECT a.id FROM accounts a JOIN account_identifiers i ON i.account_id = a.id WHERE i.normalized_value = $1", [unverifiedPhone])).rows;
+    assert.equal(unverifiedAccountRows.length, 1);
+    assert.equal((await query<{ count: number }>("SELECT count(*)::int count FROM professional_auth_challenges WHERE account_identifier_id = $1", [unverifiedIdentifier])).rows[0]!.count, 1);
+  });
 });
 
 test("a new challenge invalidates the old OTP and terminalizes its unsent outbound with audit",async()=>{
@@ -174,4 +200,476 @@ test("30-second delivery margin terminalizes unsent auth outbound but preserves 
   await service.requestChallenge(phone);
   assert.deepEqual((await query<{status:string;provider_message_id:string}>("SELECT status,provider_message_id FROM channel_outbound_messages WHERE id=$1",[sentId])).rows[0],{status:"sent",provider_message_id:"provider-proof"});
  });
+});
+
+test("signup flow: provisional account, unverified identifier, challenge creation, wrong OTP keeps unverified, correct OTP verifies and creates session", async () => {
+  await rolledBack(async () => {
+    const service = new ProfessionalAuthService(new PostgresProfessionalAuthRepository(), pepper);
+    const newPhone = `+5568${String(Date.now()).slice(-9)}`;
+
+    const challenge = await service.requestChallenge(newPhone);
+    assert.equal(challenge.accepted, true);
+
+    const identifierRows = (await query<{ id: string; account_id: string; verified_at: Date | null }>(
+      "SELECT id, account_id, verified_at FROM account_identifiers WHERE normalized_value = $1",
+      [newPhone],
+    )).rows;
+    assert.equal(identifierRows.length, 1);
+    const identifier = identifierRows[0]!;
+    assert.equal(identifier.verified_at, null);
+
+    const accountRows = (await query<{ id: string; status: string }>(
+      "SELECT id, status FROM accounts WHERE id = $1",
+      [identifier.account_id],
+    )).rows;
+    assert.equal(accountRows.length, 1);
+    assert.equal(accountRows[0]!.status, "active");
+
+    const outboundRows = (await query<{ id: string; text_content: string }>(
+      "SELECT o.id, o.text_content FROM channel_outbound_messages o JOIN professional_auth_challenges c ON c.outbound_id = o.id WHERE c.account_identifier_id = $1",
+      [identifier.id],
+    )).rows;
+    assert.equal(outboundRows.length, 1);
+
+    const invalidResult = await service.verify(challenge.challenge_reference, "000000");
+    assert.equal(invalidResult.ok, false);
+    const afterInvalidIdentifier = (await query<{ verified_at: Date | null }>(
+      "SELECT verified_at FROM account_identifiers WHERE id = $1",
+      [identifier.id],
+    )).rows[0]!;
+    assert.equal(afterInvalidIdentifier.verified_at, null);
+
+    const message = decryptAuthMessage(pepper, outboundRows[0]!.text_content);
+    const code = /\b(\d{6})\b/u.exec(message)?.[1];
+    assert.ok(code);
+
+    const validResult = await service.verify(challenge.challenge_reference, code);
+    assert.equal(validResult.ok, true);
+    if (!validResult.ok) return;
+
+    const afterValidIdentifier = (await query<{ verified_at: Date | null }>(
+      "SELECT verified_at FROM account_identifiers WHERE id = $1",
+      [identifier.id],
+    )).rows[0]!;
+    assert.ok(afterValidIdentifier.verified_at);
+
+    const session = await service.authenticate(validResult.session_token);
+    assert.ok(session);
+    assert.equal(session.accountId, identifier.account_id);
+  });
+});
+
+test("concurrent signup for the same new phone results in exactly 1 account and 1 identifier", async () => {
+  const service = new ProfessionalAuthService(new PostgresProfessionalAuthRepository(), pepper);
+  const concurrentPhone = `+5567${String(Date.now()).slice(-9)}`;
+
+  try {
+    const [res1, res2] = await Promise.all([
+      service.requestChallenge(concurrentPhone),
+      service.requestChallenge(concurrentPhone),
+    ]);
+
+    assert.equal(res1.accepted, true);
+    assert.equal(res2.accepted, true);
+
+    const accounts = (await query<{ id: string }>(
+      "SELECT a.id FROM accounts a JOIN account_identifiers i ON i.account_id = a.id WHERE i.normalized_value = $1",
+      [concurrentPhone],
+    )).rows;
+    assert.equal(accounts.length, 1);
+
+    const identifiers = (await query<{ id: string }>(
+      "SELECT id FROM account_identifiers WHERE normalized_value = $1",
+      [concurrentPhone],
+    )).rows;
+    assert.equal(identifiers.length, 1);
+  } finally {
+    const ident = (await query<{ id: string; account_id: string }>(
+      "SELECT id, account_id FROM account_identifiers WHERE normalized_value = $1",
+      [concurrentPhone],
+    )).rows[0];
+    if (ident) {
+      await query("DELETE FROM professional_auth_challenges WHERE account_identifier_id = $1", [ident.id]);
+      await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 = $1", [concurrentPhone]);
+      await query("DELETE FROM account_identifiers WHERE id = $1", [ident.id]);
+      await query("DELETE FROM accounts WHERE id = $1", [ident.account_id]);
+    }
+  }
+});
+
+test("claim discovery: listClaimableProfiles finds legacy unmanaged profiles matching verified phone and excludes invalid candidates", async () => {
+  await rolledBack(async () => {
+    const service = new ProfessionalAuthService(new PostgresProfessionalAuthRepository(), pepper);
+    const accountId = randomUUID();
+    const verifiedPhone = `+5566${String(Date.now()).slice(-9)}`;
+    const unverifiedPhone = `+5565${String(Date.now()).slice(-9)}`;
+
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [accountId]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', $2, NOW()), ($1, 'phone', $3, NULL)", [
+      accountId,
+      verifiedPhone,
+      unverifiedPhone,
+    ]);
+
+    const prof1 = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof 1', $2, $3, 'active', 'legacy_unmanaged')", [
+      prof1,
+      `claimable-1-${prof1}`,
+      verifiedPhone,
+    ]);
+
+    const prof2 = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof 2', $2, $3, 'active', 'legacy_unmanaged')", [
+      prof2,
+      `claimable-2-${prof2}`,
+      unverifiedPhone,
+    ]);
+
+    const prof3 = randomUUID();
+    const otherAccount = randomUUID();
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [otherAccount]);
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof 3', $2, $3, 'active', 'legacy_unmanaged')", [
+      prof3,
+      `claimable-3-${prof3}`,
+      verifiedPhone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'active')", [
+      otherAccount,
+      prof3,
+    ]);
+
+    const prof4 = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof 4', $2, $3, 'active', 'account_managed')", [
+      prof4,
+      `claimable-4-${prof4}`,
+      verifiedPhone,
+    ]);
+
+    const prof5 = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof 5', $2, $3, 'active', 'legacy_unmanaged')", [
+      prof5,
+      `claimable-5-${prof5}`,
+      verifiedPhone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'revoked')", [
+      accountId,
+      prof5,
+    ]);
+
+    const prof6 = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof 6', $2, $3, 'active', 'legacy_unmanaged')", [
+      prof6,
+      `claimable-6-${prof6}`,
+      verifiedPhone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'revoked')", [
+      otherAccount,
+      prof6,
+    ]);
+
+    const claimable = await service.listClaimableProfiles(accountId);
+    assert.equal(claimable.length, 1);
+    assert.equal(claimable[0]!.id, prof1);
+    assert.equal(claimable[0]!.display_name, "Prof 1");
+  });
+});
+
+test("claim transaction: claimProfile updates management_mode atomically, creates owner membership with legacy_claim audit, and handles idempotency and conflicts", async () => {
+  await rolledBack(async () => {
+    const repository = new PostgresProfessionalAuthRepository();
+    const accountId = randomUUID();
+    const phone = `+5564${String(Date.now()).slice(-9)}`;
+
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [accountId]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', $2, NOW())", [
+      accountId,
+      phone,
+    ]);
+
+    const profId = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof Legacy', $2, $3, 'active', 'legacy_unmanaged')", [
+      profId,
+      `legacy-${profId}`,
+      phone,
+    ]);
+
+    const result = await repository.claimProfile(accountId, profId);
+    assert.equal(result.claimed, true);
+    assert.equal(result.professional.id, profId);
+
+    const updatedProf = (await query<{ management_mode: string }>("SELECT management_mode FROM professionals WHERE id = $1", [profId])).rows[0]!;
+    assert.equal(updatedProf.management_mode, "account_managed");
+
+    const membership = (await query<{ role: string; status: string }>(
+      "SELECT role, status FROM professional_memberships WHERE account_id = $1 AND professional_id = $2",
+      [accountId, profId],
+    )).rows[0]!;
+    assert.deepEqual(membership, { role: "owner", status: "active" });
+
+    const event = (await query<{ action: string; new_role: string; new_status: string; actor_account_id: string; source: string }>(
+      "SELECT action, new_role, new_status, actor_account_id, source FROM professional_membership_events WHERE account_id = $1 AND professional_id = $2",
+      [accountId, profId],
+    )).rows[0]!;
+    assert.deepEqual(event, {
+      action: "created",
+      new_role: "owner",
+      new_status: "active",
+      actor_account_id: accountId,
+      source: "legacy_claim",
+    });
+
+    const secondClaim = await repository.claimProfile(accountId, profId);
+    assert.equal(secondClaim.claimed, true);
+    assert.equal(secondClaim.professional.id, profId);
+    const membershipCount = (await query<{ count: number }>(
+      "SELECT count(*)::int count FROM professional_memberships WHERE professional_id = $1",
+      [profId],
+    )).rows[0]!.count;
+    assert.equal(membershipCount, 1);
+
+    const competitorId = randomUUID();
+    const competitorPhone = `+5563${String(Date.now()).slice(-9)}`;
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [competitorId]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', $2, NOW())", [
+      competitorId,
+      competitorPhone,
+    ]);
+    await assert.rejects(
+      repository.claimProfile(competitorId, profId),
+      /claim_conflict/u,
+    );
+
+    await assert.rejects(
+      repository.claimProfile(accountId, randomUUID()),
+      /professional_not_found/u,
+    );
+  });
+});
+
+test("legacy claim rejection: legacy_unmanaged profile with revoked membership from same account is excluded from claimable list and direct claim throws claim_conflict without mutating profile or events", async () => {
+  await rolledBack(async () => {
+    const repository = new PostgresProfessionalAuthRepository();
+    const accountId = randomUUID();
+    const phone = `+5564${String(Date.now()).slice(-9)}`;
+
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [accountId]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', $2, NOW())", [
+      accountId,
+      phone,
+    ]);
+
+    const profId = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof Revoked Same', $2, $3, 'active', 'legacy_unmanaged')", [
+      profId,
+      `revoked-same-${profId}`,
+      phone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'revoked')", [
+      accountId,
+      profId,
+    ]);
+
+    // Not claimable via discovery
+    const claimable = await repository.listClaimableProfiles(accountId);
+    assert.equal(claimable.some(p => p.id === profId), false);
+
+    // Direct claim rejected with claim_conflict (no 500 error, no PK violation)
+    await assert.rejects(
+      repository.claimProfile(accountId, profId),
+      /claim_conflict/u,
+    );
+
+    // Assert management_mode stays legacy_unmanaged
+    const profRow = (await query<{ management_mode: string }>("SELECT management_mode FROM professionals WHERE id = $1", [profId])).rows[0]!;
+    assert.equal(profRow.management_mode, "legacy_unmanaged");
+
+    // Assert membership remains revoked
+    const memberships = (await query<{ account_id: string; role: string; status: string }>(
+      "SELECT account_id, role, status FROM professional_memberships WHERE professional_id = $1",
+      [profId],
+    )).rows;
+    assert.equal(memberships.length, 1);
+    assert.deepEqual(memberships[0], { account_id: accountId, role: "owner", status: "revoked" });
+
+    // Assert zero legacy_claim events created
+    const events = (await query<{ count: number }>(
+      "SELECT count(*)::int count FROM professional_membership_events WHERE professional_id = $1 AND source = 'legacy_claim'",
+      [profId],
+    )).rows[0]!.count;
+    assert.equal(events, 0);
+  });
+});
+
+test("legacy claim rejection: legacy_unmanaged profile with revoked membership from another account is excluded from claimable list and direct claim throws claim_conflict without mutations", async () => {
+  await rolledBack(async () => {
+    const repository = new PostgresProfessionalAuthRepository();
+    const accountA = randomUUID();
+    const accountB = randomUUID();
+    const phone = `+5564${String(Date.now()).slice(-9)}`;
+
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active'), ($2, 'active')", [accountA, accountB]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', $2, NOW())", [
+      accountA,
+      phone,
+    ]);
+
+    const profId = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Prof Revoked Other', $2, $3, 'active', 'legacy_unmanaged')", [
+      profId,
+      `revoked-other-${profId}`,
+      phone,
+    ]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'revoked')", [
+      accountB,
+      profId,
+    ]);
+
+    // Not claimable via discovery
+    const claimable = await repository.listClaimableProfiles(accountA);
+    assert.equal(claimable.some(p => p.id === profId), false);
+
+    // Direct claim rejected with claim_conflict
+    await assert.rejects(
+      repository.claimProfile(accountA, profId),
+      /claim_conflict/u,
+    );
+
+    // Assert management_mode stays legacy_unmanaged
+    const profRow = (await query<{ management_mode: string }>("SELECT management_mode FROM professionals WHERE id = $1", [profId])).rows[0]!;
+    assert.equal(profRow.management_mode, "legacy_unmanaged");
+
+    // Assert Account B membership remains revoked and no membership for Account A
+    const memberships = (await query<{ account_id: string; role: string; status: string }>(
+      "SELECT account_id, role, status FROM professional_memberships WHERE professional_id = $1",
+      [profId],
+    )).rows;
+    assert.equal(memberships.length, 1);
+    assert.deepEqual(memberships[0], { account_id: accountB, role: "owner", status: "revoked" });
+
+    // Assert zero legacy_claim events created
+    const events = (await query<{ count: number }>(
+      "SELECT count(*)::int count FROM professional_membership_events WHERE professional_id = $1 AND source = 'legacy_claim'",
+      [profId],
+    )).rows[0]!.count;
+    assert.equal(events, 0);
+  });
+});
+
+test("selective matching guard: legacy_unmanaged with zero memberships matched; account_managed requires active membership and verified identity; claimed legacy transitions cleanly", async () => {
+  await rolledBack(async () => {
+    const matching = new PostgresMatchingRepository();
+    const categoryId = randomUUID(), serviceId = randomUUID();
+    await query("INSERT INTO service_categories(id, name, slug) VALUES($1, 'Guard category', $2)", [categoryId, `cat-${categoryId}`]);
+    await query("INSERT INTO services(id, category_id, name, slug) VALUES($1, $2, 'Guard service', $3)", [serviceId, categoryId, `srv-${serviceId}`]);
+
+    const search = () => matching.search({
+      raw_text: "serviço guard",
+      service_id: serviceId,
+      latitude: -11.8,
+      longitude: -55.5,
+      city: "Sinop",
+      state: "MT",
+      limit: 10,
+    });
+
+    const legacyProfId = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Legacy Unmanaged', $2, '+5566999990001', 'active', 'legacy_unmanaged')", [
+      legacyProfId,
+      `slug-leg-${legacyProfId}`,
+    ]);
+    await query("INSERT INTO professional_services(professional_id, service_id) VALUES($1, $2)", [legacyProfId, serviceId]);
+    await query("INSERT INTO professional_service_areas(professional_id, city, state, country_code, center, radius_meters, is_primary) VALUES($1, 'Sinop', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.5, -11.8), 4326)::geography, 50000, TRUE)", [legacyProfId]);
+
+    const res1 = await search();
+    assert.equal(res1.kind, "success");
+    if (res1.kind === "success") {
+      assert.ok(res1.response.matches.some(m => m.professional.id === legacyProfId));
+    }
+
+    const managedProfId = randomUUID();
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Managed Profile', $2, '+5566999990002', 'active', 'account_managed')", [
+      managedProfId,
+      `slug-man-${managedProfId}`,
+    ]);
+    await query("INSERT INTO professional_services(professional_id, service_id) VALUES($1, $2)", [managedProfId, serviceId]);
+    await query("INSERT INTO professional_service_areas(professional_id, city, state, country_code, center, radius_meters, is_primary) VALUES($1, 'Sinop', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.5, -11.8), 4326)::geography, 50000, TRUE)", [managedProfId]);
+
+    const res2 = await search();
+    assert.equal(res2.kind, "success");
+    if (res2.kind === "success") {
+      assert.equal(res2.response.matches.some(m => m.professional.id === managedProfId), false);
+    }
+
+    const accountId = randomUUID();
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [accountId]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', '+5566999990002', NOW())", [accountId]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'active')", [accountId, managedProfId]);
+
+    const res3 = await search();
+    assert.equal(res3.kind, "success");
+    if (res3.kind === "success") {
+      assert.ok(res3.response.matches.some(m => m.professional.id === managedProfId));
+    }
+
+    await query("UPDATE accounts SET status = 'blocked' WHERE id = $1", [accountId]);
+    const res4 = await search();
+    assert.equal(res4.kind, "success");
+    if (res4.kind === "success") {
+      assert.equal(res4.response.matches.some(m => m.professional.id === managedProfId), false);
+    }
+
+    const account2Id = randomUUID();
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [account2Id]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', '+5566999990003', NOW())", [account2Id]);
+    await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'admin', 'active')", [account2Id, managedProfId]);
+
+    const res5 = await search();
+    assert.equal(res5.kind, "success");
+    if (res5.kind === "success") {
+      assert.ok(res5.response.matches.some(m => m.professional.id === managedProfId));
+    }
+
+    await query("UPDATE professional_memberships SET status = 'revoked' WHERE account_id = $1 AND professional_id = $2", [account2Id, managedProfId]);
+    const res6 = await search();
+    assert.equal(res6.kind, "success");
+    if (res6.kind === "success") {
+      assert.equal(res6.response.matches.some(m => m.professional.id === managedProfId), false);
+    }
+
+    const claimedProfId = randomUUID();
+    const claimPhone = `+5566${String(Date.now()).slice(-9)}`;
+    await query("INSERT INTO professionals(id, display_name, slug, phone_e164, status, management_mode) VALUES($1, 'Claim Transition', $2, $3, 'active', 'legacy_unmanaged')", [
+      claimedProfId,
+      `slug-claim-${claimedProfId}`,
+      claimPhone,
+    ]);
+    await query("INSERT INTO professional_services(professional_id, service_id) VALUES($1, $2)", [claimedProfId, serviceId]);
+    await query("INSERT INTO professional_service_areas(professional_id, city, state, country_code, center, radius_meters, is_primary) VALUES($1, 'Sinop', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.5, -11.8), 4326)::geography, 50000, TRUE)", [claimedProfId]);
+
+    const res7 = await search();
+    assert.equal(res7.kind, "success");
+    if (res7.kind === "success") {
+      assert.ok(res7.response.matches.some(m => m.professional.id === claimedProfId));
+    }
+
+    const claimAccount = randomUUID();
+    await query("INSERT INTO accounts(id, status) VALUES($1, 'active')", [claimAccount]);
+    await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', $2, NOW())", [claimAccount, claimPhone]);
+    const repo = new PostgresProfessionalAuthRepository();
+    const claimRes = await repo.claimProfile(claimAccount, claimedProfId);
+    assert.equal(claimRes.claimed, true);
+
+    const res8 = await search();
+    assert.equal(res8.kind, "success");
+    if (res8.kind === "success") {
+      assert.ok(res8.response.matches.some(m => m.professional.id === claimedProfId));
+    }
+
+    await query("UPDATE professional_memberships SET status = 'revoked' WHERE account_id = $1 AND professional_id = $2", [claimAccount, claimedProfId]);
+    const res9 = await search();
+    assert.equal(res9.kind, "success");
+    if (res9.kind === "success") {
+      assert.equal(res9.response.matches.some(m => m.professional.id === claimedProfId), false);
+    }
+  });
 });

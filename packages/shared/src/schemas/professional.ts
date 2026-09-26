@@ -4,6 +4,7 @@ const e164PhoneSchema = z.string().regex(/^\+[1-9]\d{7,14}$/, "phone_e164 must b
 const optionalTextSchema = z.string().trim().min(1, "Must not be empty");
 
 export const professionalStatusSchema = z.enum(["draft", "active", "suspended"]);
+export const professionalManagementModeSchema = z.enum(["legacy_unmanaged", "account_managed"]);
 
 export const createProfessionalSchema = z
   .object({
@@ -36,6 +37,7 @@ export const professionalResponseSchema = z.object({
   email: z.string().nullable(),
   profile_image_url: z.string().nullable(),
   status: professionalStatusSchema,
+  management_mode: professionalManagementModeSchema.default("legacy_unmanaged"),
   is_verified: z.boolean(),
   is_available_now: z.boolean(),
   available_now_updated_at: z.string().datetime({ offset: true }).nullable(),

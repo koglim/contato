@@ -1,12 +1,13 @@
 import type { ProfessionalAvailabilityResponse, ProfessionalEligibility, ProfessionalResponse } from "@contatocerto/shared";
-import { withTransaction,type DatabaseClient } from "../../database/connection.js";
+import { withTransaction, type DatabaseClient } from "../../database/connection.js";
+import { eligibleManagedIdentitySql } from "./eligible-managed-identity.js";
 type EligibilityRow={professional_id:string;profile_status:"draft"|"active"|"suspended";identity_verified:boolean;profile_complete:boolean;has_active_service:boolean;has_service_area:boolean};
 type ProfessionalRow=Omit<ProfessionalResponse,"available_now_updated_at"|"created_at"|"updated_at">&{available_now_updated_at:Date|null;created_at:Date;updated_at:Date};
-const professionalColumns=`id,display_name,slug,bio,phone_e164,email,profile_image_url,status,is_verified,is_available_now,available_now_updated_at,created_at,updated_at`;
+const professionalColumns=`id,display_name,slug,bio,phone_e164,email,profile_image_url,status,management_mode,is_verified,is_available_now,available_now_updated_at,created_at,updated_at`;
 function professional(row:ProfessionalRow):ProfessionalResponse{return {...row,available_now_updated_at:row.available_now_updated_at?.toISOString()??null,created_at:row.created_at.toISOString(),updated_at:row.updated_at.toISOString()};}
 export function toProfessionalEligibility(row:EligibilityRow):ProfessionalEligibility{const ready=row.identity_verified&&row.profile_complete&&row.has_active_service&&row.has_service_area,active=row.profile_status==="active",reasons:ProfessionalEligibility["reasons"]=[];if(!row.identity_verified)reasons.push("identity_unverified");if(!row.profile_complete)reasons.push("profile_incomplete");if(!row.has_active_service)reasons.push("no_active_service");if(!row.has_service_area)reasons.push("no_service_area");if(row.profile_status==="draft")reasons.push("profile_draft");if(row.profile_status==="suspended")reasons.push("profile_suspended");return {policy_version:"eligibility-v1",professional_id:row.professional_id,identity_verified:row.identity_verified,profile_complete:row.profile_complete,has_active_service:row.has_active_service,has_service_area:row.has_service_area,profile_status:row.profile_status,ready_to_publish:ready,can_appear_in_matching:ready&&active,can_receive_opportunities:ready&&active,can_set_available_now:ready&&active,reasons};}
 async function read(client:DatabaseClient,id:string){const result=await client.query<EligibilityRow>(`SELECT p.id professional_id,p.status profile_status,
- EXISTS(SELECT 1 FROM professional_memberships m JOIN accounts a ON a.id=m.account_id JOIN account_identifiers i ON i.account_id=a.id AND i.verified_at IS NOT NULL WHERE m.professional_id=p.id AND m.status='active' AND a.status='active') identity_verified,
+ ${eligibleManagedIdentitySql("p")} identity_verified,
  (length(trim(p.display_name))>=2 AND length(trim(p.slug))>0 AND p.phone_e164~'^[+][1-9][0-9]{7,14}$') profile_complete,
  EXISTS(SELECT 1 FROM professional_services ps JOIN services s ON s.id=ps.service_id WHERE ps.professional_id=p.id AND ps.is_active=TRUE AND s.is_active=TRUE) has_active_service,
  EXISTS(SELECT 1 FROM professional_service_areas area WHERE area.professional_id=p.id) has_service_area

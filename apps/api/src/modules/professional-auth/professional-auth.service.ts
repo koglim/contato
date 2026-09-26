@@ -67,4 +67,12 @@ export class ProfessionalAuthService {
   revoke(token: string | undefined) {
     return token ? this.repository.revokeSession(hashSessionToken(token)) : Promise.resolve(false);
   }
+
+  listClaimableProfiles(accountId: string) {
+    return this.repository.listClaimableProfiles(accountId);
+  }
+
+  claimProfile(accountId: string, professionalId: string) {
+    return this.repository.claimProfile(accountId, professionalId);
+  }
 }

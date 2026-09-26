@@ -5,6 +5,7 @@ export {
   listProfessionalsQuerySchema,
   professionalResponseSchema,
   professionalStatusSchema,
+  professionalManagementModeSchema,
   updateProfessionalSchema,
 } from "./schemas/professional.js";
 export {
@@ -75,6 +76,7 @@ export type {
   ListProfessionalsQuery,
   ProfessionalResponse,
   ProfessionalStatus,
+  ProfessionalManagementMode,
   UpdateProfessionalInput,
 } from "./types/professional.js";
 export type {
@@ -149,3 +151,15 @@ export { createSelfServiceProfessionalSchema, professionalDashboardAggregateSche
 export type { CreateSelfServiceProfessionalInput, ProfessionalDashboardAggregate,
   ProfessionalEligibility, ProfessionalEligibilityReason,
   ProfessionalLifecycleResponse } from "./types/professional-onboarding.js";
+export {
+  claimableProfessionalSchema,
+  claimableProfessionalsResponseSchema,
+  claimProfessionalInputSchema,
+  claimProfessionalResponseSchema,
+} from "./schemas/professional-claim.js";
+export type {
+  ClaimableProfessional,
+  ClaimableProfessionalsResponse,
+  ClaimProfessionalInput,
+  ClaimProfessionalResponse,
+} from "./types/professional-claim.js";

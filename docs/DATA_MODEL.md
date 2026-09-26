@@ -140,3 +140,9 @@ The partial unique index `professional_auth_challenges_one_active_idx` enforces 
 ## Professional onboarding audit and eligibility
 
 Migration 023 extends append-only `professional_membership_events` with transaction-scoped provenance. The complete invariants and the derived `eligibility-v1` policy are documented in [Professional onboarding and eligibility v1](PROFESSIONAL_ONBOARDING_ELIGIBILITY.md).
+
+## Professional management mode and legacy claim
+
+Migration 024 adds `management_mode` to `professionals` (`legacy_unmanaged` default, `account_managed` for claimed or self-onboarded profiles). It backfills profiles created via `self_onboarding` to `account_managed`, and extends `professional_membership_events.source` to support `'legacy_claim'` with mandatory `actor_account_id`. Rollback is blocked (`P0024 / PROFESSIONAL_MANAGEMENT_MODE_ROLLBACK_BLOCKED`) if any `account_managed` profiles or `legacy_claim` events exist.
+
+The matching engine enforces a selective matching guard: `legacy_unmanaged` profiles remain matchable without requiring memberships, while `account_managed` profiles strictly require an active owner/admin membership, active account, and verified phone. See [PROFESSIONAL_SIGNUP_LEGACY_CLAIM.md](PROFESSIONAL_SIGNUP_LEGACY_CLAIM.md).
