@@ -308,7 +308,7 @@ jobs:
             ('00000000-0000-0000-0000-000000000016', 'professional_contact_notification', 'test', '+5566900000016', 'retry rollback fixture', NOW() + INTERVAL '1 minute');
           SQL
           set +e
-          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 6 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 7 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
           rollback_status=$?
           set -e
           echo "$rollback_output"
