@@ -68,6 +68,55 @@ test("a new challenge invalidates the old OTP and terminalizes its unsent outbou
  });
 });
 
+test("a superseded processing auth delivery cannot be reclaimed after lease expiry while its original token can confirm",async()=>{
+ await rolledBack(async()=>{
+  const accountId=randomUUID(),identifierId=randomUUID(),phone=`+5559${String(Date.now()).slice(-9)}`;
+  await query("INSERT INTO accounts(id) VALUES($1)",[accountId]);
+  await query("INSERT INTO account_identifiers(id,account_id,kind,normalized_value,verified_at) VALUES($1,$2,'phone',$3,NOW())",[identifierId,accountId,phone]);
+  const service=new ProfessionalAuthService(new PostgresProfessionalAuthRepository(),pepper);
+  const outbox=new PostgresChannelOutboundMessageRepository();
+  const first=await service.requestChallenge(phone),firstId=resolvePublicChallengeReference(pepper,first.challenge_reference);
+  const firstOutbound=(await query<{outbound_id:string}>("SELECT outbound_id FROM professional_auth_challenges WHERE id=$1",[firstId])).rows[0]!.outbound_id;
+  const originalToken=randomUUID(),claimed=await outbox.claim(firstOutbound,originalToken,60);
+  assert.equal(claimed?.status,"processing");assert.equal(claimed?.processingToken,originalToken);assert.equal(claimed?.attemptCount,1);
+  await query("UPDATE professional_auth_challenges SET created_at=NOW()-INTERVAL '61 seconds' WHERE id=$1",[firstId]);
+  const second=await service.requestChallenge(phone),secondId=resolvePublicChallengeReference(pepper,second.challenge_reference);
+  const secondOutbound=(await query<{outbound_id:string}>("SELECT outbound_id FROM professional_auth_challenges WHERE id=$1",[secondId])).rows[0]!.outbound_id;
+  assert.ok((await query<{invalidated_at:Date|null}>("SELECT invalidated_at FROM professional_auth_challenges WHERE id=$1",[firstId])).rows[0]!.invalidated_at);
+  assert.deepEqual((await query<{invalidated_at:Date|null;consumed_at:Date|null}>("SELECT invalidated_at,consumed_at FROM professional_auth_challenges WHERE id=$1",[secondId])).rows[0],{invalidated_at:null,consumed_at:null});
+  const preserved=(await query<{status:string;processing_token:string;attempt_count:number}>("SELECT status,processing_token,attempt_count FROM channel_outbound_messages WHERE id=$1",[firstOutbound])).rows[0]!;
+  assert.deepEqual(preserved,{status:"processing",processing_token:originalToken,attempt_count:1});
+  await query("UPDATE channel_outbound_messages SET processing_started_at=NOW()-INTERVAL '2 minutes' WHERE id=$1",[firstOutbound]);
+  assert.equal(await outbox.claim(firstOutbound,randomUUID(),60),null);
+  const next=await outbox.claimNextPending(randomUUID(),60);assert.equal(next?.id,secondOutbound);assert.notEqual(next?.id,firstOutbound);
+  const afterReclaimAttempts=(await query<{processing_token:string;attempt_count:number}>("SELECT processing_token,attempt_count FROM channel_outbound_messages WHERE id=$1",[firstOutbound])).rows[0]!;
+  assert.deepEqual(afterReclaimAttempts,{processing_token:originalToken,attempt_count:1});
+  assert.equal(await outbox.holdDelivery(firstOutbound,{processing_token:originalToken,reason:"confirmation_pending",provider_message_id:"superseded-provider-proof"}),true);
+  assert.equal(await outbox.markSent(firstOutbound,{processing_token:originalToken,provider_message_id:"superseded-provider-proof"}),true);
+  assert.deepEqual((await query<{status:string;provider_message_id:string}>("SELECT status,provider_message_id FROM channel_outbound_messages WHERE id=$1",[firstOutbound])).rows[0],{status:"sent",provider_message_id:"superseded-provider-proof"});
+ });
+});
+
+test("a consumed auth challenge cannot grant a new claim after lease expiry",async()=>{
+ await rolledBack(async()=>{
+  const accountId=randomUUID(),identifierId=randomUUID(),phone=`+5558${String(Date.now()).slice(-9)}`;
+  await query("INSERT INTO accounts(id) VALUES($1)",[accountId]);
+  await query("INSERT INTO account_identifiers(id,account_id,kind,normalized_value,verified_at) VALUES($1,$2,'phone',$3,NOW())",[identifierId,accountId,phone]);
+  const service=new ProfessionalAuthService(new PostgresProfessionalAuthRepository(),pepper),outbox=new PostgresChannelOutboundMessageRepository();
+  const challenge=await service.requestChallenge(phone),challengeId=resolvePublicChallengeReference(pepper,challenge.challenge_reference);
+  const outbound=(await query<{outbound_id:string;text_content:string}>("SELECT c.outbound_id,o.text_content FROM professional_auth_challenges c JOIN channel_outbound_messages o ON o.id=c.outbound_id WHERE c.id=$1",[challengeId])).rows[0]!;
+  const code=/\b(\d{6})\b/u.exec(decryptAuthMessage(pepper,outbound.text_content))?.[1];assert.ok(code);
+  const originalToken=randomUUID(),claimed=await outbox.claim(outbound.outbound_id,originalToken,60);assert.equal(claimed?.attemptCount,1);
+  assert.equal((await service.verify(challenge.challenge_reference,code)).ok,true);
+  assert.ok((await query<{consumed_at:Date|null}>("SELECT consumed_at FROM professional_auth_challenges WHERE id=$1",[challengeId])).rows[0]!.consumed_at);
+  await query("UPDATE channel_outbound_messages SET processing_started_at=NOW()-INTERVAL '2 minutes' WHERE id=$1",[outbound.outbound_id]);
+  assert.equal(await outbox.claim(outbound.outbound_id,randomUUID(),60),null);
+  assert.equal(await outbox.claimNextPending(randomUUID(),60),null);
+  assert.deepEqual((await query<{processing_token:string;attempt_count:number}>("SELECT processing_token,attempt_count FROM channel_outbound_messages WHERE id=$1",[outbound.outbound_id])).rows[0],{processing_token:originalToken,attempt_count:1});
+  assert.equal(await outbox.markSent(outbound.outbound_id,{processing_token:originalToken,provider_message_id:"consumed-provider-proof"}),true);
+ });
+});
+
 test("session stays authenticated with zero profiles while exact membership revocation is immediate",async()=>{
  await rolledBack(async()=>{
   const accountId=randomUUID(),identifierId=randomUUID(),profileA=randomUUID(),profileB=randomUUID();

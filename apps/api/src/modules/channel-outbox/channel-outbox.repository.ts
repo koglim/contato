@@ -93,6 +93,14 @@ function expireAuthChallengesSql() {
   )`;
 }
 
+const claimableAuthChallengeSql = `(outbound.purpose <> 'professional_auth_challenge' OR EXISTS (
+  SELECT 1
+    FROM professional_auth_challenges AS challenge
+   WHERE challenge.outbound_id = outbound.id
+     AND challenge.invalidated_at IS NULL
+     AND challenge.consumed_at IS NULL
+))`;
+
 // Independent business notifications are FIFO. Inline replies retain their
 // compatibility path (including a new delivered consent prompt replacing an
 // unsent prompt); they must not be blocked by an older inline reply.
@@ -338,6 +346,7 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
          AND administrative_closed_at IS NULL
          AND (purpose <> 'professional_auth_challenge'
            OR expires_at > clock_timestamp()+(${AUTH_OUTBOUND_MIN_REMAINING_SECONDS} * INTERVAL '1 second'))
+         AND ${claimableAuthChallengeSql}
          AND (purpose <> 'customer_reply' OR created_at > clock_timestamp() - ($5 * INTERVAL '1 second'))
          AND ${recipientTurnSql}
          AND (
@@ -362,6 +371,7 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
             AND outbound.administrative_closed_at IS NULL
             AND (outbound.purpose <> 'professional_auth_challenge'
               OR outbound.expires_at > clock_timestamp()+(${AUTH_OUTBOUND_MIN_REMAINING_SECONDS} * INTERVAL '1 second'))
+            AND ${claimableAuthChallengeSql}
             AND (outbound.purpose <> 'customer_reply'
               OR outbound.created_at > clock_timestamp() - ($4 * INTERVAL '1 second'))
             AND ${recipientTurnSql}
