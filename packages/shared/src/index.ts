@@ -191,4 +191,23 @@ export type {
   ProfessionalSubscriptionEventSource,
   ProfessionalSubscriptionEvent,
 } from "./types/professional-subscription.js";
+export {
+  contactCompletionStateSchema,
+  contactCompletionActorRoleSchema,
+  contactCompletionActionSchema,
+  contactCompletionPublicCodeSchema,
+  contactCompletionCommandSchema,
+  contactCompletionRecordSchema,
+  contactCompletionEventRecordSchema,
+  contactCompletionMessageSchema,
+} from "./schemas/contact-completion.js";
+export type {
+  ContactCompletionState,
+  ContactCompletionActorRole,
+  ContactCompletionAction,
+  ContactCompletionCommand,
+  ContactCompletionRecord,
+  ContactCompletionEventRecord,
+  ContactCompletionMessage,
+} from "./schemas/contact-completion.js";
 
