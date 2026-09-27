@@ -282,10 +282,10 @@ jobs:
           INSERT INTO customers (id, phone_e164) VALUES ('00000000-0000-0000-0026-000000000001', '+5566900000026');
           INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ('00000000-0000-0000-0026-000000000002', '00000000-0000-0000-0026-000000000001', 'eletricista', 'selected');
           INSERT INTO professionals (id, display_name, slug, phone_e164) VALUES ('00000000-0000-0000-0026-000000000003', 'Fixture 026', 'fixture-026', '+5566900000027');
-          INSERT INTO contacts (id, search_request_id, professional_id, status, public_code, bilateral_snapshot)
-          VALUES ('00000000-0000-0000-0026-000000000004', '00000000-0000-0000-0026-000000000002', '00000000-0000-0000-0026-000000000003', 'accepted', 'CC-026TEST1', '{"schema_version":1,"contact_id":"00000000-0000-0000-0026-000000000004","public_code":"CC-026TEST1","search_request_id":"00000000-0000-0000-0026-000000000002","category_id":"servicos-gerais","category_name":"Serviços Gerais","service_label":"Eletricista","channel":"whatsapp","status":"accepted","accepted_at":"2026-01-01T00:00:00Z","customer_phone_e164":"+5566900000026","professional_id":"00000000-0000-0000-0026-000000000003","professional_name":"Fixture 026","professional_phone_e164":"+5566900000027"}');
+          INSERT INTO contacts (id, search_request_id, professional_id, status)
+          VALUES ('00000000-0000-0000-0026-000000000004', '00000000-0000-0000-0026-000000000002', '00000000-0000-0000-0026-000000000003', 'accepted');
           INSERT INTO contact_completions (id, contact_id, state, declared_by, declared_at)
-          VALUES ('00000000-0000-0000-0026-000000000005', '00000000-0000-0000-0026-000000000004', 'declared', 'customer', NOW());
+          VALUES ('00000000-0000-0000-0026-000000000005', '00000000-0000-0000-0026-000000000004', 'pending_confirmation', 'customer', NOW());
           SQL
           set +e
           rollback_output=$(DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
