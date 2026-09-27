@@ -163,3 +163,32 @@ export type {
   ClaimProfessionalInput,
   ClaimProfessionalResponse,
 } from "./types/professional-claim.js";
+export {
+  subscriptionPlanCodeSchema,
+  subscriptionPlanEntitlementKeySchema,
+  subscriptionPlanSchema,
+  professionalEntitlementStateSchema,
+  professionalEntitlementReasonSchema,
+  professionalEntitlementSnapshotSchema,
+  grantProfessionalSubscriptionSchema,
+  extendProfessionalSubscriptionSchema,
+  reactivateProfessionalSubscriptionSchema,
+  professionalSubscriptionEventActionSchema,
+  professionalSubscriptionEventSourceSchema,
+  professionalSubscriptionEventSchema,
+} from "./schemas/professional-subscription.js";
+export type {
+  SubscriptionPlanCode,
+  SubscriptionPlanEntitlementKey,
+  SubscriptionPlan,
+  ProfessionalEntitlementState,
+  ProfessionalEntitlementReason,
+  ProfessionalEntitlementSnapshot,
+  GrantProfessionalSubscriptionInput,
+  ExtendProfessionalSubscriptionInput,
+  ReactivateProfessionalSubscriptionInput,
+  ProfessionalSubscriptionEventAction,
+  ProfessionalSubscriptionEventSource,
+  ProfessionalSubscriptionEvent,
+} from "./types/professional-subscription.js";
+

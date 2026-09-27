@@ -15,13 +15,16 @@ import {
 } from "@contatocerto/shared";
 import { ProfessionalOnboardingService } from "../professional-onboarding/professional-onboarding.service.js";
 import { ProfessionalEligibilityService } from "../professional-eligibility/professional-eligibility.service.js";
+import { ProfessionalSubscriptionService } from "../professional-subscription/professional-subscription.service.js";
 
 type AuthService = Pick<ProfessionalAuthService, "requestChallenge" | "verify" | "authenticate" | "revoke" | "listClaimableProfiles" | "claimProfile">;
 type AccessService = Pick<ProfessionalAccessService, "resolveProfessionalAccess">;
 type OnboardingService = Pick<ProfessionalOnboardingService,"createProfile">;
 type EligibilityService = Pick<ProfessionalEligibilityService,"get"|"publish"|"unpublish"|"updateAvailability">;
+type SubscriptionService = Pick<ProfessionalSubscriptionService, "getEntitlementSnapshot">;
 type Options = { internalApiKey?: string; service?: AuthService; accessService?: AccessService;
-  onboardingService?: OnboardingService; eligibilityService?: EligibilityService };
+  onboardingService?: OnboardingService; eligibilityService?: EligibilityService; subscriptionService?: SubscriptionService };
+
 const profileParams = z.object({ professionalId: z.string().uuid() });
 const nestedParams = profileParams.extend({ resourceId: z.string().uuid() });
 
@@ -75,10 +78,12 @@ export const professionalAuthRoutes: FastifyPluginAsync<Options> = async (app, o
   const accessService = options.accessService ?? new ProfessionalAccessService();
   const onboardingService = options.onboardingService ?? new ProfessionalOnboardingService();
   const eligibilityService = options.eligibilityService ?? new ProfessionalEligibilityService();
+  const subscriptionService = options.subscriptionService ?? new ProfessionalSubscriptionService();
   const domainError = (reply:FastifyReply,error:unknown) => {const code=error instanceof Error?error.message:"internal_error";
     const statuses:Record<string,number>={professional_not_found:404,professional_forbidden:403,identity_unverified:403,
       professional_not_ready:409,professional_suspended:409,professional_not_active:409,professional_not_draft:409,
       professional_slug_conflict:409};const status=statuses[code]??500;return reply.code(status).send({error:status===500?"internal_error":code});};
+
 
   app.post("/challenge", { preHandler: guard }, async (request, reply) => {
     const body = requestProfessionalAuthChallengeSchema.safeParse(request.body);
@@ -170,8 +175,20 @@ export const professionalAuthRoutes: FastifyPluginAsync<Options> = async (app, o
       areas: (areas.json() as { items: unknown[] }).items,
       catalog: (catalog.json() as { items: unknown[] }).items,
       eligibility: await eligibilityService.get(id),
+      entitlement: await subscriptionService.getEntitlementSnapshot(id),
     };
     return professionalDashboardAggregateSchema.parse(aggregate);
+  });
+
+  app.get("/profiles/:professionalId/entitlement", { preHandler: guard }, async (request, reply) => {
+    const params = profileParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!await requireOwnership(request, reply, service, accessService, params.data.professionalId)) return;
+    try {
+      return await subscriptionService.getEntitlementSnapshot(params.data.professionalId);
+    } catch (error) {
+      return domainError(reply, error);
+    }
   });
 
   app.get("/profiles/:professionalId/eligibility", { preHandler: guard }, async (request, reply) => {

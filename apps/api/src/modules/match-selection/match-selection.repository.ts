@@ -208,6 +208,7 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
     private readonly execute: SelectionMatchQuery = query,
     private readonly transaction: SelectionMatchTransaction = withTransaction,
     private readonly generateCode: () => string = createOpportunityCode,
+    private readonly onBeforeBilateralContact?: (client: DatabaseClient, professionalId: string) => Promise<void>,
   ) {}
 
   async getPendingConfirmation(customerId: string, conversationId: string) {
@@ -429,6 +430,44 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         || searchRequestRow.status !== "matched"
       ) return { kind: "search_request_not_selectable" };
 
+      // 1. Structural lookup: find candidate match and professional for the requested position.
+      // This structural read is not the authority on eligibility.
+      const candidateMatch = await client.query<{ match_id: string; professional_id: string }>(
+        `SELECT id AS match_id, professional_id
+           FROM matches
+          WHERE search_request_id = $1
+            AND rank_position = $2
+            AND shown_at IS NOT NULL
+            AND selected_at IS NULL`,
+        [input.searchRequestId, input.position],
+      );
+      const candidate = candidateMatch.rows[0];
+      if (!candidate) return { kind: "match_not_available" };
+
+      // 2. Lock the professional authority row to serialize selection against any concurrent
+      // subscription mutations (revoke, grant, extend, reactivate).
+      //
+      // LOCK ORDERING:
+      // SUBSCRIPTION MUTATION: professionals -> professional_subscriptions
+      // SELECTION: search_conversations -> search_requests -> professionals -> matches -> contacts / outbox
+      //
+      // Neither subscription mutations nor selections ever lock in the reverse order.
+      // Subscription mutations never attempt to acquire search_conversations, search_requests,
+      // or matches; therefore no inverse deadlock cycle exists.
+      // Any future writer of commercial entitlement/billing MUST acquire professionals.id FOR UPDATE first.
+      const professionalLock = await client.query<{ id: string }>(
+        `SELECT id
+           FROM professionals
+          WHERE id = $1
+          FOR UPDATE`,
+        [candidate.professional_id],
+      );
+      if (!professionalLock.rows[0]) return { kind: "match_not_available" };
+
+      // 3. ONLY AFTER the professional authority lock is acquired, execute a FRESH query
+      // revalidating resumedMatchEligibilitySql (professional active, service active, area,
+      // management_mode, managed identity, marketplace entitlement, subscription time window,
+      // and revoked_at IS NULL) and locking the match row.
       const match = await client.query<SelectableMatchRow>(
         `SELECT matches.id AS match_id,
                 matches.professional_id,
@@ -439,16 +478,19 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
            JOIN professionals ON professionals.id = matches.professional_id
            JOIN search_requests ON search_requests.id = matches.search_request_id
            JOIN services ON services.id = search_requests.service_id
-          WHERE matches.search_request_id = $1
-            AND matches.rank_position = $2
-            AND matches.shown_at IS NOT NULL
+          WHERE matches.id = $1
+            AND matches.search_request_id = $2
             AND matches.selected_at IS NULL
             AND ${resumedMatchEligibilitySql}
           FOR UPDATE OF matches`,
-        [input.searchRequestId, input.position],
+        [candidate.match_id, input.searchRequestId],
       );
       const matchRow = match.rows[0];
       if (!matchRow) return { kind: "match_not_available" };
+
+      if (this.onBeforeBilateralContact) {
+        await this.onBeforeBilateralContact(client, matchRow.professional_id);
+      }
 
       const bilateral = await prepareBilateralSelection(client, input, matchRow, conversationRow.bilateral_pending);
       if (bilateral.kind !== "ready") return bilateral;

@@ -77,12 +77,16 @@ import { ChannelMediaService } from './modules/channel-media/channel-media.servi
 import { OutboundDispositionService } from './modules/channel-outbox/outbound-disposition.service.js';
 import { professionalAuthRoutes } from "./modules/professional-auth/professional-auth.routes.js";
 import type { ProfessionalAuthService } from "./modules/professional-auth/professional-auth.service.js";
+import { professionalSubscriptionsRoutes } from "./modules/professional-subscription/professional-subscription.routes.js";
+import type { ProfessionalSubscriptionService } from "./modules/professional-subscription/professional-subscription.service.js";
 
 type AppDependencies = {
   contextualConversation?: ContextualInboxHandler;
   logStream?: LogStream;
   checkDatabase?: () => Promise<void>;
+  professionalSubscriptionService?: ProfessionalSubscriptionService;
   professionalsRepository?: ProfessionalsRepository;
+
   catalogRepository?: CatalogRepository;
   professionalServicesRepository?: ProfessionalServicesRepository;
   serviceAreasRepository?: ServiceAreasRepository;
@@ -173,6 +177,7 @@ export function buildApp({
   channelOutboundConfig,
   professionalOpportunityService,
   professionalAuthService,
+  professionalSubscriptionService,
   logStream,
   contextualConversation,
 }: AppDependencies = {}) {
@@ -348,5 +353,12 @@ export function buildApp({
     app.register(professionalAuthRoutes, { prefix: "/internal/professional-auth", internalApiKey, service: professionalAuthService });
   }
 
+  app.register(professionalSubscriptionsRoutes, {
+    prefix: "/internal/professional-subscriptions",
+    internalApiKey,
+    service: professionalSubscriptionService,
+  });
+
   return app;
 }
+

@@ -7,7 +7,7 @@
 `professional_memberships` autoriza uma conta para um perfil profissional.
 Contato do perfil não é credencial nem prova de ownership. A migration não
 faz backfill. `professional_membership_events` audita mudanças sem PII e o down
-`P0021` protege dados existentes. O dashboard atual não usa essa fundação ainda.
+`P0021` protege dados existentes. O dashboard e a API autenticada utilizam essa fundação.
 Ver [PROFESSIONAL_IDENTITY_FOUNDATION.md](PROFESSIONAL_IDENTITY_FOUNDATION.md).
 
 ## Evolução 017 — recibo e retenção de entrega

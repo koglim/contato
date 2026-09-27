@@ -3,6 +3,7 @@ import type {
   ClaimableProfessional,
   ProfessionalResponse,
   ProfessionalEligibility,
+  ProfessionalEntitlementSnapshot,
   ProfessionalServiceResponse,
   ServiceAreaResponse,
   ServiceCatalogItem,
@@ -18,6 +19,7 @@ export type ReadyDashboardData = {
   areas: ServiceAreaResponse[];
   catalog: ServiceCatalogItem[];
   eligibility: ProfessionalEligibility;
+  entitlement?: ProfessionalEntitlementSnapshot;
   profiles?: DashboardProfile[];
 };
 export type DashboardData = ReadyDashboardData | { status: "no_profiles"; profiles: []; claimableProfiles?: ClaimableProfessional[] };

@@ -13,6 +13,7 @@ import { ProfessionalAuthService } from "../src/modules/professional-auth/profes
 import { ProfessionalAccessService } from "../src/modules/professional-access/professional-access.service.js";
 import { PostgresChannelOutboundMessageRepository } from "../src/modules/channel-outbox/channel-outbox.repository.js";
 import { PostgresMatchingRepository } from "../src/modules/matching/matching.repository.js";
+import { PostgresProfessionalSubscriptionRepository } from "../src/modules/professional-subscription/professional-subscription.repository.js";
 
 after(closeDatabaseConnection);
 const pepper="integration-pepper-with-at-least-thirty-two-bytes";
@@ -605,6 +606,14 @@ test("selective matching guard: legacy_unmanaged with zero memberships matched; 
     await query("INSERT INTO account_identifiers(account_id, kind, normalized_value, verified_at) VALUES($1, 'phone', '+5566999990002', NOW())", [accountId]);
     await query("INSERT INTO professional_memberships(account_id, professional_id, role, status) VALUES($1, $2, 'owner', 'active')", [accountId, managedProfId]);
 
+    // PR #14: account_managed also requires an active marketplace subscription
+    const subRepo = new PostgresProfessionalSubscriptionRepository();
+    await subRepo.grant(managedProfId, {
+      plan_code: "marketplace_standard_v1",
+      starts_at: new Date(Date.now() - 3600000).toISOString(),
+      ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+    });
+
     const res3 = await search();
     assert.equal(res3.kind, "success");
     if (res3.kind === "success") {
@@ -658,6 +667,13 @@ test("selective matching guard: legacy_unmanaged with zero memberships matched; 
     const repo = new PostgresProfessionalAuthRepository();
     const claimRes = await repo.claimProfile(claimAccount, claimedProfId);
     assert.equal(claimRes.claimed, true);
+
+    // PR #14: after claim, professional transitions to account_managed and requires an active subscription
+    await subRepo.grant(claimedProfId, {
+      plan_code: "marketplace_standard_v1",
+      starts_at: new Date(Date.now() - 3600000).toISOString(),
+      ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+    });
 
     const res8 = await search();
     assert.equal(res8.kind, "success");

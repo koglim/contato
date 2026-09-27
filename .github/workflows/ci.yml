@@ -237,8 +237,65 @@ jobs:
           END $$;
           SQL
 
+      - name: Verify migration 025 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='025_add_professional_subscriptions')
+              OR to_regclass('subscription_plans') IS NULL
+              OR to_regclass('subscription_plan_entitlements') IS NULL
+              OR to_regclass('professional_subscriptions') IS NULL
+              OR to_regclass('professional_subscription_events') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM subscription_plans WHERE code='marketplace_standard_v1')
+              OR NOT EXISTS (SELECT 1 FROM subscription_plan_entitlements WHERE entitlement_key='marketplace_access')
+              OR to_regprocedure('protect_professional_subscription_events()') IS NULL
+            THEN RAISE EXCEPTION 'migration 025 incomplete'; END IF;
+          END $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
+
+      - name: Verify migration 025 protected rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_025_protected'
+          protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_025_protected'
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+          psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
+          SELECT id INTO TEMP plan_tmp FROM subscription_plans WHERE code = 'marketplace_standard_v1';
+          INSERT INTO professionals (id, display_name, slug, phone_e164)
+          VALUES ('00000000-0000-0000-0025-000000000001', 'Sub Rollback Fixture', 'sub-rollback-fixture-025', '+5566900000025');
+          INSERT INTO professional_subscriptions (id, professional_id, plan_id, starts_at, ends_at)
+          SELECT '00000000-0000-0000-0025-000000000002',
+                 '00000000-0000-0000-0025-000000000001',
+                 id,
+                 NOW() - INTERVAL '1 hour',
+                 NOW() + INTERVAL '30 days'
+          FROM subscription_plans WHERE code = 'marketplace_standard_v1';
+          SQL
+          set +e
+          rollback_output=$(DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_status=$?
+          set -e
+          echo "$rollback_output"
+          test "$rollback_status" -ne 0
+          echo "$rollback_output" | grep -q 'PROFESSIONAL_SUBSCRIPTION_ROLLBACK_BLOCKED'
+          echo "$rollback_output" | grep -q 'P0025'
+          psql -v ON_ERROR_STOP=1 'postgresql://contatocerto:contatocerto-test@localhost:5432/postgres' -c 'DROP DATABASE contatocerto_025_protected'
+
+      - name: Roll back migration 025 with compatible data
+        run: |
+          node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF to_regclass('subscription_plans') IS NOT NULL
+              OR to_regclass('subscription_plan_entitlements') IS NOT NULL
+              OR to_regclass('professional_subscriptions') IS NOT NULL
+              OR to_regclass('professional_subscription_events') IS NOT NULL
+              OR EXISTS (SELECT 1 FROM pgmigrations WHERE name='025_add_professional_subscriptions')
+            THEN RAISE EXCEPTION 'migration 025 remained after compatible rollback'; END IF;
+          END $$;
+          SQL
 
       - name: Verify migration 013
         run: |
@@ -343,7 +400,7 @@ jobs:
             ('00000000-0000-0000-0000-000000000016', 'professional_contact_notification', 'test', '+5566900000016', 'retry rollback fixture', NOW() + INTERVAL '1 minute');
           SQL
           set +e
-          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 9 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_output=$(node node_modules/node-pg-migrate/bin/node-pg-migrate.js down 10 --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
           rollback_status=$?
           set -e
           echo "$rollback_output"
@@ -357,6 +414,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_024_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_024_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+          # Roll back migration 025 first so the protected test targets 024
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
           INSERT INTO accounts(id) VALUES ('00000000-0000-0000-0000-000000000024');
           INSERT INTO account_identifiers(account_id,kind,normalized_value,verified_at)
@@ -390,6 +449,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_023_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_023_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+          # Roll back migrations 025 and 024 so the protected test targets 023
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
           INSERT INTO accounts(id) VALUES ('00000000-0000-0000-0000-000000000023');
@@ -731,8 +792,21 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 024
+      - name: Reapply migrations 008 through 025
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+
+      - name: Verify migration 025 present after reapply
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='025_add_professional_subscriptions')
+              OR to_regclass('subscription_plans') IS NULL
+              OR to_regclass('professional_subscriptions') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM subscription_plans WHERE code='marketplace_standard_v1')
+              OR NOT EXISTS (SELECT 1 FROM subscription_plan_entitlements WHERE entitlement_key='marketplace_access')
+            THEN RAISE EXCEPTION 'migration 025 missing or incomplete after reapply'; END IF;
+          END $$;
+          SQL
 
       - name: Test PostgreSQL integrations after reapply
         run: pnpm --filter @contatocerto/api test:integration

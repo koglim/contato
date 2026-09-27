@@ -1,13 +1,13 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import type { ProfessionalEligibility, ProfessionalResponse, ProfessionalServiceResponse, ServiceAreaResponse, ServiceCatalogItem } from "@contatocerto/shared";
+import type { ProfessionalEligibility, ProfessionalEntitlementSnapshot, ProfessionalResponse, ProfessionalServiceResponse, ServiceAreaResponse, ServiceCatalogItem } from "@contatocerto/shared";
 import { formatKilometers, formatPrice } from "../../lib/formatters";
 import { AvailabilityControl } from "./availability-control";
 import { PageHeader, StatusBadge } from "./shell";
 import { upsertArea, upsertService } from "../../lib/dashboard/state";
 
-type Data = { professional: ProfessionalResponse; services: ProfessionalServiceResponse[]; areas: ServiceAreaResponse[]; catalog: ServiceCatalogItem[]; eligibility: ProfessionalEligibility };
+type Data = { professional: ProfessionalResponse; services: ProfessionalServiceResponse[]; areas: ServiceAreaResponse[]; catalog: ServiceCatalogItem[]; eligibility: ProfessionalEligibility; entitlement?: ProfessionalEntitlementSnapshot };
 type PriceMode = "quote" | "fixed" | "from" | "range";
 
 async function save(action: string, data?: unknown, id?: string, method = "PATCH") {
@@ -27,8 +27,22 @@ export function DashboardContent({ section, data, selfServiceLifecycleEnabled }:
   const availabilityPolicy = selfServiceLifecycleEnabled ? { canEnable: data.eligibility.can_set_available_now, disabledReason: availabilityReason } : {};
   if (section === "availability") return <><PageHeader title="Disponibilidade" description="Confirme quando estiver pronto para receber novos pedidos." /><AvailabilityControl initial={data.professional.is_available_now} updatedAt={data.professional.available_now_updated_at} {...availabilityPolicy} /></>;
   const primary = data.areas.find((area) => area.is_primary); const mainService = data.services.find((service) => service.is_active); const activeCount = data.services.filter((item) => item.is_active).length;
-  return <><PageHeader title={`Olá, ${data.professional.display_name.split(" ")[0]}`} description="Acompanhe os pontos essenciais do seu cadastro." />{selfServiceLifecycleEnabled&&data.professional.status==="active"&&!data.eligibility.ready_to_publish?<p className="eligibility-warning" role="status">Seu perfil está publicado, mas deixou de atender aos requisitos atuais. Revise o checklist para voltar a receber oportunidades.</p>:null}{selfServiceLifecycleEnabled?<EligibilityCard eligibility={data.eligibility} />:null}<AvailabilityControl compact initial={data.professional.is_available_now} updatedAt={data.professional.available_now_updated_at} {...availabilityPolicy} /><div className="overview-grid"><section className="summary-card"><p>Cadastro</p><StatusBadge status={data.professional.status} /><strong>{activeCount} serviço{activeCount === 1 ? "" : "s"} ativo{activeCount === 1 ? "" : "s"}</strong></section><section className="summary-card"><p>Área principal</p><strong>{primary ? `${primary.city}, ${primary.state}` : "Ainda não definida"}</strong><span>{primary ? formatKilometers(primary.radius_meters) : "Defina onde você atende"}</span></section><section className="summary-card"><p>Serviço em destaque</p><strong>{mainService?.service.name ?? "Nenhum serviço cadastrado"}</strong><span>{mainService ? formatPrice(mainService.price_mode, mainService.price_from_cents, mainService.price_to_cents) : "Adicione seu primeiro serviço"}</span></section></div></>;
+  return <><PageHeader title={`Olá, ${data.professional.display_name.split(" ")[0]}`} description="Acompanhe os pontos essenciais do seu cadastro." />{selfServiceLifecycleEnabled&&data.professional.status==="active"&&!data.eligibility.ready_to_publish?<p className="eligibility-warning" role="status">Seu perfil está publicado, mas deixou de atender aos requisitos atuais. Revise o checklist para voltar a receber oportunidades.</p>:null}{selfServiceLifecycleEnabled&&data.professional.status==="active"&&data.eligibility.ready_to_publish&&data.entitlement&&!data.entitlement.has_marketplace_access?<p className="eligibility-warning" role="status">Seu perfil está publicado, mas não está participando de novas buscas porque não há assinatura ativa.</p>:null}{selfServiceLifecycleEnabled?<EligibilityCard eligibility={data.eligibility} />:null}{selfServiceLifecycleEnabled&&data.entitlement?<SubscriptionCard entitlement={data.entitlement} />:null}<AvailabilityControl compact initial={data.professional.is_available_now} updatedAt={data.professional.available_now_updated_at} {...availabilityPolicy} /><div className="overview-grid"><section className="summary-card"><p>Cadastro</p><StatusBadge status={data.professional.status} /><strong>{activeCount} serviço{activeCount === 1 ? "" : "s"} ativo{activeCount === 1 ? "" : "s"}</strong></section><section className="summary-card"><p>Área principal</p><strong>{primary ? `${primary.city}, ${primary.state}` : "Ainda não definida"}</strong><span>{primary ? formatKilometers(primary.radius_meters) : "Defina onde você atende"}</span></section><section className="summary-card"><p>Serviço em destaque</p><strong>{mainService?.service.name ?? "Nenhum serviço cadastrado"}</strong><span>{mainService ? formatPrice(mainService.price_mode, mainService.price_from_cents, mainService.price_to_cents) : "Adicione seu primeiro serviço"}</span></section></div></>;
 }
+
+function SubscriptionCard({ entitlement }: { entitlement: ProfessionalEntitlementSnapshot }) {
+  if (entitlement.state === "legacy_exempt") {
+    return <section className="panel subscription-card"><div><h2>Assinatura</h2><p>Perfil legado isento de assinatura no momento.</p></div></section>;
+  }
+  if (entitlement.state === "active") {
+    const formattedEndsAt = entitlement.ends_at ? new Date(entitlement.ends_at).toLocaleDateString("pt-BR", { timeZone: "UTC" }) : null;
+    return <section className="panel subscription-card"><div><h2>Assinatura ativa</h2><p>Seu perfil pode participar do marketplace enquanto os demais requisitos estiverem válidos.</p>{formattedEndsAt ? <small>Vigência até {formattedEndsAt}</small> : null}</div></section>;
+  }
+  const isExpired = entitlement.state === "expired";
+  const title = isExpired ? "Assinatura expirada" : "Assinatura necessária";
+  return <section className="panel subscription-card"><div><h2>{title}</h2><p>Seu perfil e seus dados continuam disponíveis. Para receber novos clientes, é necessária uma assinatura ativa.</p><small className="subscription-notice">Pagamento online será habilitado em uma próxima etapa.</small></div></section>;
+}
+
 
 function EligibilityCard({ eligibility }: { eligibility: ProfessionalEligibility }) {
   const [status, setStatus] = useState(eligibility.profile_status); const [message, setMessage] = useState(""); const [pending, setPending] = useState(false);

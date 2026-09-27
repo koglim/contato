@@ -94,6 +94,12 @@ test("eligibility gates publish, availability and matching while preserving lega
     const search = () => new PostgresMatchingRepository(tx).search({ raw_text: "serviço", service_id: serviceId, latitude: -11.8, longitude: -55.5, city: "Sinop", state: "MT", limit: 10 });
     const before = await search(); assert.equal(before.kind, "success"); if (before.kind === "success") assert.equal(before.response.matches.some(item => item.professional.id === professionalId), false);
     const published = await eligibility.publish(accountId, professionalId); assert.equal(published.professional.status, "active"); assert.equal(published.professional.is_available_now, false);
+    const planResult = await client.query<{ id: string }>("SELECT id FROM subscription_plans WHERE code = 'marketplace_standard_v1'");
+    await client.query(
+      `INSERT INTO professional_subscriptions (professional_id, plan_id, starts_at, ends_at)
+       VALUES ($1, $2, NOW() - INTERVAL '1 hour', NOW() + INTERVAL '30 days')`,
+      [professionalId, planResult.rows[0].id],
+    );
     const during = await search(); assert.equal(during.kind, "success"); if (during.kind === "success") assert.equal(during.response.matches.some(item => item.professional.id === professionalId), true);
     assert.equal((await eligibility.updateAvailability(accountId, professionalId, true)).is_available_now, true);
     await client.query("UPDATE professional_services SET is_active=FALSE WHERE professional_id=$1", [professionalId]);
