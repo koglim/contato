@@ -525,6 +525,12 @@ test("customer selects João; João unavailable; customer returns and selects Ca
     await query(`INSERT INTO professional_service_areas (professional_id,city,state,country_code,center,radius_meters)
       VALUES ($1,'Sinop','MT','BR',ST_SetSRID(ST_MakePoint(-55.5,-11.86),4326)::geography,40000)`, [carlosId]);
     await query("INSERT INTO matches (id,search_request_id,professional_id,rank_position,shown_at) VALUES ($1,$2,$3,2,NOW())", [matchId, f.searchId, carlosId]);
+    const presInbound = await query<{ id: string }>(`INSERT INTO channel_inbound_messages (provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at)
+      VALUES ('test', $1, $2, 'carlos', 'BR', 3, 'processed', NOW()) RETURNING id`, [randomUUID(), f.customerPhone]);
+    const presOutbound = await query<{ id: string }>(`INSERT INTO channel_outbound_messages (channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id)
+      VALUES ($1, 'test', $2, $3, 'sent', NOW(), 'bilateral-v1', $4) RETURNING id`,
+      [presInbound.rows[0].id, f.customerPhone, `1. Carlos\n${BILATERAL_NOTICE}`, randomUUID()]);
+    await query("INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id) VALUES ($1, $2)", [presOutbound.rows[0].id, matchId]);
 
     // João declares unavailability via "não consigo"
     const unavail = await f.send(`não consigo ${f.code}`);
@@ -549,6 +555,7 @@ test("customer selects João; João unavailable; customer returns and selects Ca
     // João's unavailability event remains intact and Carlos has no unavailability event
     assert.equal(await f.countUnavailabilityEvents(), 1);
   } finally {
+    await query("DELETE FROM channel_outbound_message_matches WHERE match_id=$1", [matchId]);
     await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164=$1", [carlosPhone]);
     await query("DELETE FROM contacts WHERE professional_id=$1", [carlosId]);
     await query("DELETE FROM matches WHERE id=$1", [matchId]);
