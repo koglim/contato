@@ -8,9 +8,7 @@ import { bilateralSnapshotSchema } from "../bilateral-contact/bilateral-contact.
 import { parseGlobalConversationCommand } from "../conversation-commands/conversation-command.parser.js";
 import type { ChannelInboundMessageRecord } from "../channel-inbox/channel-inbox.types.js";
 import {
-  InboxContextChangedError,
   InboxFenceError,
-  inboxContextSql,
   liveInboxLeaseSql,
 } from "../channel-inbox/inbox-recovery.policy.js";
 import { parseContactCompletionCommand } from "./contact-completion.parser.js";
@@ -78,15 +76,6 @@ export class ContactCompletionService {
       );
       if (!live.rows.length) throw new InboxFenceError();
 
-      const fingerprint = (
-        await db.query<{ fingerprint: string }>(
-          `SELECT COALESCE(${inboxContextSql},'none') AS fingerprint`,
-          [record.phoneE164]
-        )
-      ).rows[0]?.fingerprint;
-      if (record.contextFingerprint && fingerprint !== record.contextFingerprint) {
-        throw new InboxContextChangedError();
-      }
 
       const foundContact = await this.repository.findContactByPublicCode(db, command.code);
       if (!foundContact) {

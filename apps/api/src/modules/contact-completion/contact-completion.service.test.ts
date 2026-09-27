@@ -90,9 +90,6 @@ function createMockDb(): DatabaseClient {
       if (sql.includes("channel_inbound_messages WHERE id = $1 AND processing_token = $2")) {
         return { rows: [{ id: params?.[0] }], rowCount: 1 };
       }
-      if (sql.includes("fingerprint")) {
-        return { rows: [{ fingerprint: "none" }], rowCount: 1 };
-      }
       return { rows: [], rowCount: 0 };
     },
   } as unknown as DatabaseClient;
@@ -880,4 +877,72 @@ test("replays processed inbound with duplicate flag and preserved reply", async 
   assert.equal(res.duplicate, true);
   assert.equal(res.reply_text, "Mensagem gravada");
   assert.equal(res.outbound.id, outboundId);
+});
+
+test("contact completion service is decoupled from active-search context fingerprint", async () => {
+  const contact = createMockContact();
+  const mockRepo: ContactCompletionRepository = {
+    findContactByPublicCode: async () => contact,
+    lockContact: async () => contact,
+    findCompletionByContactId: async () => null,
+    createCompletion: async () => ({
+      id: randomUUID(),
+      contact_id: contact.id,
+      state: "pending_confirmation",
+      declared_by: "customer",
+      declared_at: new Date(),
+      confirmed_at: null,
+      contested_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    updateCompletionState: async () => { throw new Error("not called"); },
+    createEvent: async () => ({
+      id: randomUUID(),
+      completion_id: randomUUID(),
+      contact_id: contact.id,
+      actor_role: "customer",
+      action: "declared",
+      inbound_message_id: randomUUID(),
+      created_at: new Date(),
+    }),
+    updateContactStatus: async () => {},
+    insertOutboundReply: async () => randomUUID(),
+    insertOutboundNotification: async () => randomUUID(),
+    markInboundProcessed: async () => {},
+  };
+
+  const service = new ContactCompletionService(
+    mockRepo,
+    async (fn) => {
+      const db = createMockDb();
+      db.query = async (sql) => {
+        if (sql.includes("SELECT status, processing_token")) {
+          return {
+            rows: [{ status: "processing", processing_token: "tok-ctx", result: null, response_outbound_id: null }],
+            rowCount: 1,
+          };
+        }
+        if (sql.includes("channel_inbound_messages WHERE id")) {
+          return { rows: [{ id: "msg-ctx" }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+      return fn(db);
+    }
+  );
+
+  // Inbound record has an active-search context fingerprint
+  const record = createInboundRecord({
+    rawText: `concluido ${contact.public_code}`,
+    phoneE164: "+5565988880002",
+    processingToken: "tok-ctx",
+    contextFingerprint: "unrelated-active-search-fingerprint-12345",
+  });
+
+  const res = await service.handle(record);
+  assert.ok(res);
+  assert.equal(res.duplicate, false);
+  assert.equal(res.result.action, "declared");
+  assert.match(res.reply_text, /Aguardando confirmação do profissional/);
 });

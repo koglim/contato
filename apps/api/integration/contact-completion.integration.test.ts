@@ -3,14 +3,59 @@ import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
 import { buildApp } from "../src/app.js";
-import { closeDatabaseConnection, query } from "../src/database/connection.js";
+import { closeDatabaseConnection, query, type DatabaseClient } from "../src/database/connection.js";
 import { createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
+import { ContactCompletionService } from "../src/modules/contact-completion/contact-completion.service.js";
+import { PostgresContactCompletionRepository } from "../src/modules/contact-completion/contact-completion.repository.js";
+import type { ContactRow } from "../src/modules/contact-completion/contact-completion.types.js";
 import { rollbackThrough } from "./rollback-helper.js";
 
 after(closeDatabaseConnection);
 
 const internalKey = "contact-completion-integration-key";
 const randomPhone = () => `+5565${Math.floor(100000000 + Math.random() * 899999999)}`;
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitForBlockedPid(blockedPid: number, blockerPid: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < 10000) {
+    const res = await query<{ blockers: number[] }>(
+      "SELECT pg_blocking_pids($1) as blockers",
+      [blockedPid]
+    );
+    const blockers = res.rows[0]?.blockers;
+    if (blockers && blockers.includes(blockerPid)) {
+      return;
+    }
+    await new Promise((r) => setImmediate(r));
+  }
+  throw new Error(`PID ${blockedPid} was not blocked by ${blockerPid} within timeout`);
+}
+
+class HookableContactCompletionRepository extends PostgresContactCompletionRepository {
+  public onBeforeLockContact?: (db: DatabaseClient, contactId: string) => Promise<void>;
+  public onAfterLockContact?: (db: DatabaseClient, contactId: string) => Promise<void>;
+
+  override async lockContact(db: DatabaseClient, contactId: string): Promise<ContactRow | null> {
+    if (this.onBeforeLockContact) {
+      await this.onBeforeLockContact(db, contactId);
+    }
+    const result = await super.lockContact(db, contactId);
+    if (this.onAfterLockContact) {
+      await this.onAfterLockContact(db, contactId);
+    }
+    return result;
+  }
+}
 
 type FixtureOptions = {
   status?: string;
@@ -31,7 +76,16 @@ async function createFixture(options: FixtureOptions = {}) {
   const activeSearchId = randomUUID();
   const activeConversationId = randomUUID();
 
-  const app = buildApp({ internalApiKey: internalKey });
+  const repo = new HookableContactCompletionRepository();
+  const service = new ContactCompletionService(repo);
+  const app = buildApp({ internalApiKey: internalKey, contactCompletionService: service });
+
+  const contactIds = new Set<string>([contactId]);
+  const searchIds = new Set<string>([searchId]);
+  const conversationIds = new Set<string>([conversationId]);
+  const professionalIds = new Set<string>([professionalId]);
+  const customerIds = new Set<string>([customerId]);
+  const usedPhones = new Set<string>([customerPhone, professionalPhone]);
 
   // 1. Insert customer and professional
   await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, customerPhone]);
@@ -130,7 +184,128 @@ async function createFixture(options: FixtureOptions = {}) {
     }
   }
 
-  const usedPhones = new Set<string>([customerPhone, professionalPhone]);
+  async function addContact(serviceName = "encanador", proSlugPrefix = "outro-pro") {
+    const pId = randomUUID();
+    const pPhone = randomPhone();
+    const sId = randomUUID();
+    const convId = randomUUID();
+    const chId = randomUUID();
+    const cId = randomUUID();
+    const cCode = createOpportunityCode();
+
+    usedPhones.add(pPhone);
+    professionalIds.add(pId);
+    searchIds.add(sId);
+    conversationIds.add(convId);
+    contactIds.add(cId);
+
+    await query(
+      "INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1, 'Outro Pro', $2, $3, 'active')",
+      [pId, `${proSlugPrefix}-${pId}`, pPhone]
+    );
+    await query(
+      "INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, $3, 'selected')",
+      [sId, customerId, `${serviceName} em Cuiabá`]
+    );
+    await query(
+      `INSERT INTO search_conversations (
+         id, customer_id, status, original_raw_text, service_text, location_text, country_code, limit_value, search_request_id, expires_at, completed_at
+       )
+       VALUES ($1, $2, 'completed', $3, $4, 'Cuiabá, MT', 'BR', 3, $5, NOW() + INTERVAL '1 hour', NOW())`,
+      [convId, customerId, `${serviceName} em Cuiabá`, serviceName, sId]
+    );
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
+       VALUES ($1, 'test', $2, $3, 'Outro', 'BR', 3, 'processed', NOW(), '{"route":"selection"}'::jsonb)`,
+      [chId, chId, customerPhone]
+    );
+    const snap = {
+      public_code: cCode,
+      service_name: serviceName,
+      city: "Cuiabá",
+      state: "MT",
+      neighborhood: "Centro",
+      summary: `Serviço de ${serviceName}`,
+      professional_name: "Outro Pro",
+      professional_phone_e164: pPhone,
+      customer_phone_e164: customerPhone,
+      notice_version: "bilateral-v1",
+      notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(),
+      choice_inbound_id: chId,
+      chosen_at: new Date().toISOString(),
+      consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice",
+    };
+    await query(
+      `INSERT INTO contacts (
+         id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'accepted')`,
+      [cId, pId, customerId, sId, chId, cCode, JSON.stringify(snap), convId]
+    );
+    return { id: cId, code: cCode, professionalPhone: pPhone };
+  }
+
+  async function addOpportunityForPro(serviceName = "marceneiro") {
+    const cId2 = randomUUID();
+    const cPhone2 = randomPhone();
+    const sId = randomUUID();
+    const convId = randomUUID();
+    const chId = randomUUID();
+    const contId = randomUUID();
+    const cCode = createOpportunityCode();
+
+    usedPhones.add(cPhone2);
+    customerIds.add(cId2);
+    searchIds.add(sId);
+    conversationIds.add(convId);
+    contactIds.add(contId);
+
+    await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [cId2, cPhone2]);
+    await query(
+      "INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, $3, 'selected')",
+      [sId, cId2, `${serviceName} em Cuiabá`]
+    );
+    await query(
+      `INSERT INTO search_conversations (
+         id, customer_id, status, original_raw_text, service_text, location_text, country_code, limit_value, search_request_id, expires_at, completed_at
+       )
+       VALUES ($1, $2, 'completed', $3, $4, 'Cuiabá, MT', 'BR', 3, $5, NOW() + INTERVAL '1 hour', NOW())`,
+      [convId, cId2, `${serviceName} em Cuiabá`, serviceName, sId]
+    );
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
+       VALUES ($1, 'test', $2, $3, 'Carlos', 'BR', 3, 'processed', NOW(), '{"route":"selection"}'::jsonb)`,
+      [chId, chId, cPhone2]
+    );
+    const snap = {
+      public_code: cCode,
+      service_name: serviceName,
+      city: "Cuiabá",
+      state: "MT",
+      neighborhood: "Centro",
+      summary: `Serviço de ${serviceName}`,
+      professional_name: "Carlos Pro",
+      professional_phone_e164: professionalPhone,
+      customer_phone_e164: cPhone2,
+      notice_version: "bilateral-v1",
+      notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(),
+      choice_inbound_id: chId,
+      chosen_at: new Date().toISOString(),
+      consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice",
+    };
+    await query(
+      `INSERT INTO contacts (
+         id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'accepted')`,
+      [contId, professionalId, cId2, sId, chId, cCode, JSON.stringify(snap), convId]
+    );
+    return { id: contId, code: cCode, customerPhone: cPhone2 };
+  }
 
   async function send(text: string, sender = customerPhone, msgId = randomUUID()) {
     usedPhones.add(sender);
@@ -191,32 +366,33 @@ async function createFixture(options: FixtureOptions = {}) {
     }>(
       `SELECT id, purpose, recipient_phone_e164, text_content, business_key
        FROM channel_outbound_messages
-       WHERE recipient_phone_e164 IN ($1, $2)
+       WHERE recipient_phone_e164 = ANY($1)
        ORDER BY created_at ASC`,
-      [customerPhone, professionalPhone]
+      [Array.from(usedPhones)]
     );
     return res.rows;
   }
 
   async function cleanup() {
     const phones = Array.from(usedPhones);
+    const cIds = Array.from(contactIds);
     await query(
       "UPDATE channel_inbound_messages SET response_outbound_id = NULL WHERE phone_e164 = ANY($1)",
       [phones]
     );
     await query(
-      "UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)",
-      [contactId]
+      "UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = ANY($1))",
+      [cIds]
     );
     await query(
       "DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 = ANY($1)",
       [phones]
     );
     await query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
-    await query("DELETE FROM contact_completion_events WHERE contact_id = $1", [contactId]);
+    await query("DELETE FROM contact_completion_events WHERE contact_id = ANY($1)", [cIds]);
     await query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
-    await query("DELETE FROM contact_completions WHERE contact_id = $1", [contactId]);
-    await query("DELETE FROM contacts WHERE id = $1", [contactId]);
+    await query("DELETE FROM contact_completions WHERE contact_id = ANY($1)", [cIds]);
+    await query("DELETE FROM contacts WHERE id = ANY($1)", [cIds]);
     if (subId) {
       await query("DELETE FROM professional_subscriptions WHERE id = $1", [subId]);
     }
@@ -224,8 +400,8 @@ async function createFixture(options: FixtureOptions = {}) {
       await query("DELETE FROM search_conversations WHERE id = $1", [activeConversationId]);
       await query("DELETE FROM search_requests WHERE id = $1", [activeSearchId]);
     }
-    await query("DELETE FROM search_conversations WHERE id = $1", [conversationId]);
-    await query("DELETE FROM search_requests WHERE id = $1", [searchId]);
+    await query("DELETE FROM search_conversations WHERE id = ANY($1)", [Array.from(conversationIds)]);
+    await query("DELETE FROM search_requests WHERE id = ANY($1)", [Array.from(searchIds)]);
     await query(
       `DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (
         SELECT id FROM channel_inbound_messages WHERE phone_e164 = ANY($1)
@@ -233,8 +409,8 @@ async function createFixture(options: FixtureOptions = {}) {
       [phones]
     );
     await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = ANY($1)", [phones]);
-    await query("DELETE FROM professionals WHERE id = $1", [professionalId]);
-    await query("DELETE FROM customers WHERE id = $1", [customerId]);
+    await query("DELETE FROM professionals WHERE id = ANY($1)", [Array.from(professionalIds)]);
+    await query("DELETE FROM customers WHERE id = ANY($1)", [Array.from(customerIds)]);
   }
 
   return {
@@ -245,7 +421,12 @@ async function createFixture(options: FixtureOptions = {}) {
     customerPhone,
     professionalPhone,
     activeConversationId,
+    repo,
+    service,
+    app,
     send,
+    addContact,
+    addOpportunityForPro,
     getContact,
     getCompletion,
     getEvents,
@@ -570,29 +751,555 @@ test("Scenario 12: Professional subscription revoked after acceptance does NOT b
   }
 });
 
-test("Scenario 13: Deterministic concurrency - parallel customer and professional declarations serialize safely", async () => {
+test("Scenario 13A: Deterministic concurrency Scenario A — declaration vs declaration: proves contacts.id FOR UPDATE blocking via pg_blocking_pids", async () => {
   const f = await createFixture();
   try {
-    // Both customer and professional declare concurrently
-    const [resCustomer, resProfessional] = await Promise.all([
-      f.send(`concluido ${f.code}`, f.customerPhone),
-      f.send(`concluido ${f.code}`, f.professionalPhone),
-    ]);
+    let partyAPid: number | null = null;
+    let partyBPid: number | null = null;
+    const partyALocked = createDeferred<void>();
+    const allowPartyACommit = createDeferred<void>();
+    const partyBAttempting = createDeferred<void>();
 
-    // One must be declared, the other confirmed! Or both result in confirmed!
-    assert.ok(
-      (resCustomer.result.action === "declared" && resProfessional.result.action === "confirmed") ||
-      (resCustomer.result.action === "confirmed" && resProfessional.result.action === "declared")
-    );
+    f.repo.onAfterLockContact = async (db, contactId) => {
+      if (contactId === f.contactId && !partyAPid) {
+        const pidRes = await (db as unknown as { query: (sql: string) => Promise<{ rows: Array<{ pid: number }> }> }).query(
+          "SELECT pg_backend_pid() as pid"
+        );
+        partyAPid = pidRes.rows[0].pid;
+        partyALocked.resolve();
+        await allowPartyACommit.promise;
+      }
+    };
 
+    f.repo.onBeforeLockContact = async (db, contactId) => {
+      if (contactId === f.contactId && partyAPid) {
+        const pidRes = await (db as unknown as { query: (sql: string) => Promise<{ rows: Array<{ pid: number }> }> }).query(
+          "SELECT pg_backend_pid() as pid"
+        );
+        partyBPid = pidRes.rows[0].pid;
+        partyBAttempting.resolve();
+      }
+    };
+
+    // 1. Party A (Customer) attempts declaration
+    const partyAPromise = f.send(`concluído ${f.code}`, f.customerPhone);
+
+    // 2. Wait until Party A has acquired contacts.id FOR UPDATE
+    await partyALocked.promise;
+    assert.ok(partyAPid);
+
+    // 3. Party B (Professional) attempts declaration against the same contact
+    const partyBPromise = f.send(`concluído ${f.code}`, f.professionalPhone);
+
+    // 4. Wait until Party B reaches lockContact query
+    await partyBAttempting.promise;
+    assert.ok(partyBPid);
+
+    // 5. Prove via PostgreSQL pg_blocking_pids that Party B is blocked by Party A
+    await waitForBlockedPid(partyBPid, partyAPid);
+
+    // 6. Release Party A to commit its transaction
+    allowPartyACommit.resolve();
+
+    // 7. Both complete
+    const [resA, resB] = await Promise.all([partyAPromise, partyBPromise]);
+    assert.equal(resA.result.action, "declared");
+    assert.equal(resB.result.action, "confirmed");
+
+    // 8. Assertions:
+    // - exactly one contact_completions row
+    const completions = (await query("SELECT * FROM contact_completions WHERE contact_id = $1", [f.contactId])).rows;
+    assert.equal(completions.length, 1);
+    // - state = confirmed
+    assert.equal(completions[0].state, "confirmed");
+    assert.ok(completions[0].confirmed_at);
+    // - contact = completed
+    const contact = await f.getContact();
+    assert.equal(contact.status, "completed");
+    // - exactly two logical completion events
+    const events = await f.getEvents();
+    assert.equal(events.length, 2);
+    assert.equal(events[0].actor_role, "customer");
+    assert.equal(events[0].action, "declared");
+    assert.equal(events[1].actor_role, "professional");
+    assert.equal(events[1].action, "confirmed");
+    // - no duplicated logical notifications
+    const outbounds = await f.getOutbounds();
+    const promptNotifs = outbounds.filter((o) => o.business_key === `contact:${f.contactId}:completion:prompt`);
+    const confirmedNotifs = outbounds.filter((o) => o.business_key === `contact:${f.contactId}:completion:confirmed`);
+    assert.equal(promptNotifs.length, 1);
+    assert.equal(confirmedNotifs.length, 1);
+  } finally {
+    f.repo.onBeforeLockContact = undefined;
+    f.repo.onAfterLockContact = undefined;
+    await f.cleanup();
+  }
+});
+
+test("Scenario 13B: Deterministic concurrency Scenario B — declaration vs confirmation: locks serialize, no lost update, exactly one terminal transition", async () => {
+  const f = await createFixture();
+  try {
+    // Start from a valid pending confirmation: Customer declared
+    await f.send(`concluído ${f.code}`, f.customerPhone);
+    const completionBefore = await f.getCompletion();
+    assert.equal(completionBefore?.state, "pending_confirmation");
+
+    let partyAPid: number | null = null;
+    let partyBPid: number | null = null;
+    const partyALocked = createDeferred<void>();
+    const allowPartyACommit = createDeferred<void>();
+    const partyBAttempting = createDeferred<void>();
+
+    f.repo.onAfterLockContact = async (db, contactId) => {
+      if (contactId === f.contactId && !partyAPid) {
+        const pidRes = await (db as unknown as { query: (sql: string) => Promise<{ rows: Array<{ pid: number }> }> }).query(
+          "SELECT pg_backend_pid() as pid"
+        );
+        partyAPid = pidRes.rows[0].pid;
+        partyALocked.resolve();
+        await allowPartyACommit.promise;
+      }
+    };
+
+    f.repo.onBeforeLockContact = async (db, contactId) => {
+      if (contactId === f.contactId && partyAPid) {
+        const pidRes = await (db as unknown as { query: (sql: string) => Promise<{ rows: Array<{ pid: number }> }> }).query(
+          "SELECT pg_backend_pid() as pid"
+        );
+        partyBPid = pidRes.rows[0].pid;
+        partyBAttempting.resolve();
+      }
+    };
+
+    // Operation 1 (Customer repeats declaration) holds the contact lock
+    const partyAPromise = f.send(`concluído ${f.code}`, f.customerPhone);
+    await partyALocked.promise;
+
+    // Operation 2 (Professional confirms) attempts confirmation concurrently
+    const partyBPromise = f.send(`confirmar ${f.code}`, f.professionalPhone);
+    await partyBAttempting.promise;
+
+    // Prove B is blocked on A via pg_blocking_pids
+    await waitForBlockedPid(partyBPid!, partyAPid!);
+
+    // Release A to commit
+    allowPartyACommit.resolve();
+
+    const [resA, resB] = await Promise.all([partyAPromise, partyBPromise]);
+    assert.equal(resA.result.action, "idempotent_replay");
+    assert.equal(resB.result.action, "confirmed");
+
+    // After serialization:
+    // - no lost update;
+    // - exactly one terminal transition to completed
     const contact = await f.getContact();
     assert.equal(contact.status, "completed");
 
     const completion = await f.getCompletion();
-    assert.equal(completion.state, "confirmed");
+    assert.equal(completion?.state, "confirmed");
+    assert.ok(completion?.confirmed_at);
+  } finally {
+    f.repo.onBeforeLockContact = undefined;
+    f.repo.onAfterLockContact = undefined;
+    await f.cleanup();
+  }
+});
 
+test("Scenario 13C: Deterministic concurrency Scenario C — declaration vs contestation: deterministic serialization, no mixed state, no duplicate terminal notifications", async () => {
+  const f = await createFixture();
+  try {
+    // Start from valid pending confirmation
+    await f.send(`concluído ${f.code}`, f.customerPhone);
+
+    let partyAPid: number | null = null;
+    let partyBPid: number | null = null;
+    const partyALocked = createDeferred<void>();
+    const allowPartyACommit = createDeferred<void>();
+    const partyBAttempting = createDeferred<void>();
+
+    f.repo.onAfterLockContact = async (db, contactId) => {
+      if (contactId === f.contactId && !partyAPid) {
+        const pidRes = await (db as unknown as { query: (sql: string) => Promise<{ rows: Array<{ pid: number }> }> }).query(
+          "SELECT pg_backend_pid() as pid"
+        );
+        partyAPid = pidRes.rows[0].pid;
+        partyALocked.resolve();
+        await allowPartyACommit.promise;
+      }
+    };
+
+    f.repo.onBeforeLockContact = async (db, contactId) => {
+      if (contactId === f.contactId && partyAPid) {
+        const pidRes = await (db as unknown as { query: (sql: string) => Promise<{ rows: Array<{ pid: number }> }> }).query(
+          "SELECT pg_backend_pid() as pid"
+        );
+        partyBPid = pidRes.rows[0].pid;
+        partyBAttempting.resolve();
+      }
+    };
+
+    // Operation 1 (Customer mutation) holds lock
+    const partyAPromise = f.send(`concluído ${f.code}`, f.customerPhone);
+    await partyALocked.promise;
+
+    // Operation 2 (Professional contestation) attempts contestation concurrently
+    const partyBPromise = f.send(`contestar ${f.code}`, f.professionalPhone);
+    await partyBAttempting.promise;
+
+    // Prove B is blocked on A via pg_blocking_pids
+    await waitForBlockedPid(partyBPid!, partyAPid!);
+
+    allowPartyACommit.resolve();
+
+    const [resA, resB] = await Promise.all([partyAPromise, partyBPromise]);
+    assert.equal(resA.result.action, "idempotent_replay");
+    assert.equal(resB.result.action, "contested");
+
+    // Final state must be one valid domain state only:
+    // - completion state is contested
+    const completion = await f.getCompletion();
+    assert.equal(completion?.state, "contested");
+    assert.ok(completion?.contested_at);
+    assert.equal(completion?.confirmed_at, null); // NOT mixed confirmed + contested!
+
+    // - contact status remains accepted (never completed with contested aggregate)
+    const contact = await f.getContact();
+    assert.equal(contact.status, "accepted");
+
+    // - no duplicate terminal notifications
+    const outbounds = await f.getOutbounds();
+    const contestNotifs = outbounds.filter((o) => o.business_key === `contact:${f.contactId}:completion:contested`);
+    assert.equal(contestNotifs.length, 1);
+  } finally {
+    f.repo.onBeforeLockContact = undefined;
+    f.repo.onAfterLockContact = undefined;
+    await f.cleanup();
+  }
+});
+
+test("Scenario 13D: Deterministic concurrency Scenario D — conflicting commands from same actor serialize into valid terminal state", async () => {
+  const f = await createFixture();
+  try {
+    // Customer declared completion
+    await f.send(`concluído ${f.code}`, f.customerPhone);
+
+    const cmd1InboundId = randomUUID();
+    const cmd1Tok = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processing_token, processing_started_at)
+       VALUES ($1, 'test', $2, $3, $4, 'BR', 3, 'processing', $5, NOW())`,
+      [cmd1InboundId, cmd1InboundId, f.professionalPhone, `confirmar ${f.code}`, cmd1Tok]
+    );
+
+    const cmd2InboundId = randomUUID();
+    const cmd2Tok = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processing_token, processing_started_at)
+       VALUES ($1, 'test', $2, $3, $4, 'BR', 3, 'processing', $5, NOW())`,
+      [cmd2InboundId, cmd2InboundId, f.professionalPhone, `contestar ${f.code}`, cmd2Tok]
+    );
+
+    const baseRecord = {
+      provider: "test",
+      countryCode: "BR",
+      limitValue: 3,
+      status: "processing" as const,
+      processingStartedAt: new Date(),
+      processedAt: null,
+      failureReason: null,
+      result: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      responseOutboundId: null,
+      recoveryState: "none" as const,
+      recoveryAction: "none" as const,
+      quarantineReason: null,
+      recoveryNextAttemptAt: null,
+      recoveryAttemptCount: 0,
+      recoveryStartedAt: null,
+      contextualQueue: false,
+    };
+
+    const cmd1Record = {
+      ...baseRecord,
+      id: cmd1InboundId,
+      providerMessageId: cmd1InboundId,
+      phoneE164: f.professionalPhone,
+      rawText: `confirmar ${f.code}`,
+      processingToken: cmd1Tok,
+    };
+
+    const cmd2Record = {
+      ...baseRecord,
+      id: cmd2InboundId,
+      providerMessageId: cmd2InboundId,
+      phoneE164: f.professionalPhone,
+      rawText: `contestar ${f.code}`,
+      processingToken: cmd2Tok,
+    };
+
+    let cmd1Pid: number | null = null;
+    let cmd2Pid: number | null = null;
+    const cmd1Locked = createDeferred<void>();
+    const allowCmd1Commit = createDeferred<void>();
+    const cmd2Attempting = createDeferred<void>();
+
+    f.repo.onAfterLockContact = async (db, contactId) => {
+      if (contactId === f.contactId && !cmd1Pid) {
+        const pidRes = await (db as unknown as { query: (sql: string) => Promise<{ rows: Array<{ pid: number }> }> }).query(
+          "SELECT pg_backend_pid() as pid"
+        );
+        cmd1Pid = pidRes.rows[0].pid;
+        cmd1Locked.resolve();
+        await allowCmd1Commit.promise;
+      }
+    };
+
+    f.repo.onBeforeLockContact = async (db, contactId) => {
+      if (contactId === f.contactId && cmd1Pid) {
+        const pidRes = await (db as unknown as { query: (sql: string) => Promise<{ rows: Array<{ pid: number }> }> }).query(
+          "SELECT pg_backend_pid() as pid"
+        );
+        cmd2Pid = pidRes.rows[0].pid;
+        cmd2Attempting.resolve();
+      }
+    };
+
+    // Command 1 from professional: confirmar
+    const cmd1Promise = f.service.handle(cmd1Record);
+    await cmd1Locked.promise;
+
+    // Command 2 from same professional: contestar (conflicting command)
+    const cmd2Promise = f.service.handle(cmd2Record);
+    await cmd2Attempting.promise;
+
+    // Prove Command 2 blocks on Command 1 via pg_blocking_pids
+    await waitForBlockedPid(cmd2Pid!, cmd1Pid!);
+
+    allowCmd1Commit.resolve();
+
+    const [res1, res2] = await Promise.all([cmd1Promise, cmd2Promise]);
+    assert.ok(res1);
+    assert.ok(res2);
+    assert.equal(res1.result.action, "confirmed");
+    assert.equal(res2.result.action, "idempotent_replay");
+    assert.match(res2.reply_text, /já foi concluída e não pode ser contestada/);
+
+    // Final state is strictly confirmed, contact is completed
+    const contact = await f.getContact();
+    assert.equal(contact.status, "completed");
+
+    const completion = await f.getCompletion();
+    assert.equal(completion?.state, "confirmed");
+    assert.equal(completion?.contested_at, null);
+
+    // Exactly 2 events (customer declared, professional confirmed); zero contestation event!
     const events = await f.getEvents();
     assert.equal(events.length, 2);
+    assert.equal(events[0].action, "declared");
+    assert.equal(events[1].action, "confirmed");
+  } finally {
+    f.repo.onBeforeLockContact = undefined;
+    f.repo.onAfterLockContact = undefined;
+    await f.cleanup();
+  }
+});
+
+test("Scenario 13E: Deterministic concurrency Scenario E — same inbound replay concurrency produces exactly one logical effect", async () => {
+  const f = await createFixture();
+  try {
+    const eInboundId = randomUUID();
+    const eTok = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processing_token, processing_started_at)
+       VALUES ($1, 'test', $2, $3, $4, 'BR', 3, 'processing', $5, NOW())`,
+      [eInboundId, eInboundId, f.customerPhone, `concluído ${f.code}`, eTok]
+    );
+
+    const eRecord = {
+      id: eInboundId,
+      provider: "test",
+      providerMessageId: eInboundId,
+      phoneE164: f.customerPhone,
+      rawText: `concluído ${f.code}`,
+      countryCode: "BR",
+      limitValue: 3,
+      status: "processing" as const,
+      processingToken: eTok,
+      processingStartedAt: new Date(),
+      processedAt: null,
+      failureReason: null,
+      result: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      responseOutboundId: null,
+      recoveryState: "none" as const,
+      recoveryAction: "none" as const,
+      quarantineReason: null,
+      recoveryNextAttemptAt: null,
+      recoveryAttemptCount: 0,
+      recoveryStartedAt: null,
+      contextualQueue: false,
+    };
+
+    // Two concurrent executions of the identical claimed inbound record
+    const [res1, res2] = await Promise.all([
+      f.service.handle(eRecord),
+      f.service.handle(eRecord),
+    ]);
+
+    assert.ok(res1);
+    assert.ok(res2);
+
+    // One must be the original execution (duplicate = false), the other must be the replay (duplicate = true)
+    const duplicateFlags = [res1.duplicate, res2.duplicate].sort();
+    assert.deepEqual(duplicateFlags, [false, true]);
+
+    // Both return identical reply text and outbound id
+    assert.equal(res1.reply_text, res2.reply_text);
+    assert.equal(res1.outbound.id, res2.outbound.id);
+
+    // Exactly one completion row created
+    const completions = (await query("SELECT * FROM contact_completions WHERE contact_id = $1", [f.contactId])).rows;
+    assert.equal(completions.length, 1);
+
+    // Exactly one event created
+    const events = await f.getEvents();
+    assert.equal(events.length, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario 13F: Multi-contact: Customer with multiple historical contacts targets exact public code without mutating other contacts", async () => {
+  const f = await createFixture();
+  const contact2 = await f.addContact("encanador", "pro-encanador");
+  try {
+    // Customer has contact 1 (f.code) and contact 2 (contact2.code)
+    // Customer declares completion for contact 1 only
+    const res = await f.send(`concluído ${f.code}`, f.customerPhone);
+    assert.equal(res.result.action, "declared");
+
+    // Contact 1 must be pending_confirmation
+    const completion1 = await f.getCompletion();
+    assert.equal(completion1?.state, "pending_confirmation");
+
+    // Contact 2 must remain strictly accepted with NO completion record
+    const contact2Record = (await query<{ status: string }>("SELECT status FROM contacts WHERE id = $1", [contact2.id])).rows[0];
+    assert.equal(contact2Record.status, "accepted");
+    const completion2 = (await query("SELECT * FROM contact_completions WHERE contact_id = $1", [contact2.id])).rows;
+    assert.equal(completion2.length, 0);
+
+    // Code resolution is exact: declaring for contact 2 targets contact 2 specifically
+    const res2 = await f.send(`concluído ${contact2.code}`, f.customerPhone);
+    assert.equal(res2.result.action, "declared");
+
+    const completion2After = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1", [contact2.id])).rows[0];
+    assert.equal(completion2After?.state, "pending_confirmation");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario 13G: Multi-contact: Professional with multiple accepted opportunities targets exact public code without affecting others", async () => {
+  const f = await createFixture();
+  // Professional Carlos has opportunity 1 (f.code) and opportunity 2 (contactB.code)
+  const contactB = await f.addOpportunityForPro("marceneiro");
+  try {
+    // Customer 1 declares completion on opportunity 1
+    await f.send(`concluído ${f.code}`, f.customerPhone);
+
+    // Professional confirms opportunity 1
+    const res = await f.send(`confirmar ${f.code}`, f.professionalPhone);
+    assert.equal(res.result.action, "confirmed");
+
+    // Opportunity 1 is completed
+    const contact1 = await f.getContact();
+    assert.equal(contact1.status, "completed");
+
+    // Opportunity 2 must remain accepted with no completion
+    const contactBRecord = (await query<{ status: string }>("SELECT status FROM contacts WHERE id = $1", [contactB.id])).rows[0];
+    assert.equal(contactBRecord.status, "accepted");
+    const completionB = (await query("SELECT * FROM contact_completions WHERE contact_id = $1", [contactB.id])).rows;
+    assert.equal(completionB.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario 13H: Decoupled context: Active search conversation changing after inbound claim does NOT fail completion with InboxContextChangedError", async () => {
+  const f = await createFixture({ hasActiveSearch: true });
+  try {
+    // 1. Customer has accepted contact A and active search conversation B
+    const activeConv = (await query<{ status: string; pending_slot: string }>(
+      "SELECT status, pending_slot FROM search_conversations WHERE id = $1",
+      [f.activeConversationId]
+    )).rows[0];
+    assert.equal(activeConv.status, "active");
+
+    // 2. Insert inbound completion message for contact A in 'processing' state with a stale context fingerprint
+    const inboundId = randomUUID();
+    const processingToken = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (
+         id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value,
+         status, processing_token, processing_started_at, context_fingerprint
+       )
+       VALUES ($1, 'test', $2, $3, $4, 'BR', 3, 'processing', $5, NOW(), 'stale-search-fingerprint-before-change')`,
+      [inboundId, inboundId, f.customerPhone, `concluído ${f.code}`, processingToken]
+    );
+
+    // 3. Search B changes concurrently after that claim (simulating user or system updating the active search)
+    await query(
+      "UPDATE search_conversations SET pending_slot = 'service', original_raw_text = 'alteração pós-claim' WHERE id = $1",
+      [f.activeConversationId]
+    );
+
+    // 4. Contact completion service processes the claimed message
+    const record = {
+      id: inboundId,
+      provider: "test",
+      providerMessageId: inboundId,
+      phoneE164: f.customerPhone,
+      rawText: `concluído ${f.code}`,
+      countryCode: "BR",
+      limitValue: 3,
+      status: "processing" as const,
+      processingToken,
+      processingStartedAt: new Date(),
+      processedAt: null,
+      failureReason: null,
+      result: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      responseOutboundId: null,
+      recoveryState: "none" as const,
+      recoveryAction: "none" as const,
+      quarantineReason: null,
+      recoveryNextAttemptAt: null,
+      recoveryAttemptCount: 0,
+      recoveryStartedAt: null,
+      contextualQueue: false,
+      contextFingerprint: "stale-search-fingerprint-before-change",
+    };
+
+    const res = await f.service.handle(record);
+    assert.ok(res);
+    assert.equal(res.duplicate, false);
+    assert.equal(res.result.action, "declared");
+
+    // 5. Contact A successfully updated to pending_confirmation
+    const completion = await f.getCompletion();
+    assert.equal(completion?.state, "pending_confirmation");
+
+    // 6. Search B remains untouched by the completion operation
+    const activeConvAfter = (await query<{ status: string; pending_slot: string; original_raw_text: string }>(
+      "SELECT status, pending_slot, original_raw_text FROM search_conversations WHERE id = $1",
+      [f.activeConversationId]
+    )).rows[0];
+    assert.equal(activeConvAfter.status, "active");
+    assert.equal(activeConvAfter.pending_slot, "service");
+    assert.equal(activeConvAfter.original_raw_text, "alteração pós-claim");
   } finally {
     await f.cleanup();
   }

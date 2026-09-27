@@ -22,18 +22,18 @@ A tabela canônica `contact_completions` rastreia o estado da conclusão com cha
 
 ```mermaid
 stateDiagram-v2
-    [*] --> declared: Declaração (Cliente ou Profissional)
-    declared --> confirmed: Confirmação da contraparte
-    declared --> confirmed: Declaração concorrente da contraparte
-    declared --> contested: Contestação da contraparte
+    [*] --> pending_confirmation: Declaração (Cliente ou Profissional)
+    pending_confirmation --> confirmed: Confirmação da contraparte
+    pending_confirmation --> confirmed: Declaração concorrente da contraparte
+    pending_confirmation --> contested: Contestação da contraparte
     confirmed --> [*]: contacts.status = 'completed'
     contested --> [*]: contacts.status mantido 'accepted'
 ```
 
-### Estados:
-1. `declared`: Uma das partes enviou comando determinístico declarando conclusão do atendimento. A contraparte é notificada via Outbox solicitando confirmação ou contestação.
-2. `confirmed`: A contraparte confirmou explicitamente a declaração (ou ambas as partes declararam de forma independente). O contato em `contacts` é atualizado para `status = 'completed'` e `completed_at = NOW()`.
-3. `contested`: A contraparte rejeitou a declaração de conclusão. O contato em `contacts` permanece com `status = 'accepted'`. Nenhum encerramento automático é forçado; o caso é registrado como disputa para eventual mediação/suporte.
+### Estados do Aggregate:
+1. `pending_confirmation`: Uma das partes enviou comando determinístico declarando conclusão do atendimento (ação registrada no ledger como evento `'declared'`). O registro em `contact_completions` é persistido com `state = 'pending_confirmation'`, `declared_by = 'customer' | 'professional'`, `declared_at = NOW()`, e timestamps `confirmed_at` e `contested_at` nulos. A contraparte é notificada via Outbox solicitando confirmação ou contestação.
+2. `confirmed`: A contraparte confirmou explicitamente a declaração (ou ambas as partes declararam de forma independente). O aggregate `contact_completions` transiciona para `state = 'confirmed'` com `confirmed_at = NOW()`. O contato em `contacts` é atualizado atomicamente para `status = 'completed'`. A tabela `contacts` não possui coluna `completed_at`; o timestamp canônico da conclusão é registrado em `contact_completions.confirmed_at`.
+3. `contested`: A contraparte contestou a declaração de conclusão. O aggregate `contact_completions` transiciona para `state = 'contested'` com `contested_at = NOW()`. O contato em `contacts` permanece com `status = 'accepted'`. Nenhum encerramento automático é forçado; o caso é registrado como disputa durável para eventual mediação/suporte.
 
 ---
 
@@ -57,13 +57,16 @@ Os atores são estritamente bilaterais:
 
 Nenhuma IA / LLM intervém no reconhecimento dos comandos de conclusão. O parser (`contact-completion.parser.ts`) avalia expressões regulares normalizadas extraindo a intenção e o código público `CC-XXXXXXXX`:
 
-| Intenção | Expressões Reconhecidas | Exemplo |
+| Intenção | Comandos Reconhecidos (normalizados) | Exemplo |
 | :--- | :--- | :--- |
-| `declare` | `conclu[ií]do`, `concluir`, `finalizado`, `finalizar`, `terminei`, `terminado` + `CC-XXXXXXXX` | `concluído CC-A1B2C3D4` |
-| `confirm` | `confirmar`, `confirmo`, `confirmado`, `sim`, `ok`, `positivo` + `CC-XXXXXXXX` | `confirmar CC-A1B2C3D4` |
-| `contest` | `contestar`, `contesto`, `contestação`, `não conclu[ií]do`, `nao conclu[ií]do`, `não fez`, `nao fez`, `não terminou`, `nao terminou` + `CC-XXXXXXXX` | `contestar CC-A1B2C3D4` |
+| `declare` | `concluido CC-XXXXXXXX`<br>`concluído CC-XXXXXXXX`<br>`servico concluido CC-XXXXXXXX`<br>`serviço concluído CC-XXXXXXXX`<br>`concluido o servico CC-XXXXXXXX`<br>`concluído o serviço CC-XXXXXXXX` | `concluído CC-A1B2C3D4` |
+| `confirm` | `confirmar CC-XXXXXXXX`<br>`confirmo CC-XXXXXXXX`<br>`confirmar conclusao CC-XXXXXXXX`<br>`confirmar conclusão CC-XXXXXXXX`<br>`confirmo conclusao CC-XXXXXXXX`<br>`confirmo conclusão CC-XXXXXXXX` | `confirmar CC-A1B2C3D4` |
+| `contest` | `contestar CC-XXXXXXXX`<br>`contesto CC-XXXXXXXX`<br>`contestar conclusao CC-XXXXXXXX`<br>`contestar conclusão CC-XXXXXXXX`<br>`contesto conclusao CC-XXXXXXXX`<br>`contesto conclusão CC-XXXXXXXX` | `contestar CC-A1B2C3D4` |
 
-*Nota:* Se uma parte enviar `concluído CC-XXXXXXXX` enquanto houver uma declaração pendente da **contraparte**, o sistema interpreta a ação de forma inteligente como **confirmação**, concluindo o atendimento bilateralmente.
+*Notas:*
+- Comandos não listados (ex.: `finalizado`, `finalizar`, `terminei`, `terminado`, `sim`, `ok`, `positivo`, `não`, `não fez`, etc.) **não** são aceitos pelo parser, preservando a disciplina de determinismo estrito sem falsos positivos.
+- Mensagens contendo ponto de interrogação (`?`) são sumariamente ignoradas para evitar que dúvidas sejam tratadas como ações afirmativas.
+- Se uma parte enviar `concluído CC-XXXXXXXX` enquanto houver uma declaração pendente da **contraparte**, o sistema interpreta a ação como **confirmação**, concluindo o atendimento bilateralmente.
 
 ---
 
@@ -111,6 +114,7 @@ Se o webhook do canal reenviar a mesma mensagem (`provider` + `provider_message_
 
 ## 9. Isolamento em Relação a Buscas Ativas e Assinatura
 
+- **Desacoplamento de contexto de busca ativa**: O processamento de conclusão de atendimento é uma operação no nível de contato, autorizada pelo snapshot bilateral e serializada na linha de `contacts`. Alterações em conversas de busca ativas do cliente (e consequente mudança de `context_fingerprint`) **não** geram `InboxContextChangedError` na rota de conclusão de contatos, assegurando que o comando seja processado sem interferir ou ser bloqueado pelo fluxo de busca.
 - **Preservação de conversas de busca ativas**: Se um cliente estiver no meio de um fluxo de busca de outro serviço e enviar um comando determinístico de conclusão de um contato anterior (`concluído CC-XXXXXXXX`), o comando é roteado estritamente para o módulo de conclusão de contatos. A conversa de busca ativa **não é cancelada, corrompida ou sobrescrita**.
 - **Independência de assinatura profissional**: Uma vez que o contato foi aceito (`contacts.status = 'accepted'`), o ciclo de vida do serviço pode ser concluído normalmente, mesmo se a assinatura do profissional expirar ou for revogada posteriormente.
 
