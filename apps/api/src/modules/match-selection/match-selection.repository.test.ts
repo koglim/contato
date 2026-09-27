@@ -248,6 +248,8 @@ test("selection match repository selects a shown match atomically and completes 
     [activeConversation()],
     [],
     [selectableSearchRequest()],
+    [{ match_id: matchId, professional_id: professionalId }],
+    [{ id: professionalId }],
     [selectableMatch()],
     [{ selected_at: selectedAtForTest }],
     [],
@@ -274,7 +276,8 @@ test("selection match repository selects a shown match atomically and completes 
   assert.match(context.calls[3]!.text, /search_requests[\s\S]*FOR NO KEY UPDATE/u);
   assert.match(context.calls[4]!.text, /shown_at IS NOT NULL/u);
   assert.match(context.calls[4]!.text, /selected_at IS NULL/u);
-  assert.match(context.calls[4]!.text, /FOR UPDATE OF matches/u);
+  assert.match(context.calls[5]!.text, /professionals[\s\S]*FOR UPDATE/u);
+  assert.match(context.calls[6]!.text, /FOR UPDATE OF matches/u);
   const sql = context.calls.map((call) => call.text).join("\n");
   assert.match(sql, /SET selected_at = NOW\(\)/u);
   assert.match(sql, /status = 'selected'/u);
@@ -313,7 +316,11 @@ test("selection match repository rolls back if an atomic write fails", async () 
   // The contact insertion receives no row, which simulates a database write that
   // cannot produce the required contact. The transaction must not commit it.
   const failing = fakeDatabase([
-    [], [activeConversation()], [], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [],
+    [], [activeConversation()], [], [selectableSearchRequest()],
+    [{ match_id: matchId, professional_id: professionalId }],
+    [{ id: professionalId }],
+    [selectableMatch()],
+    [{ selected_at: selectedAtForTest }], [], [],
   ]);
   await assert.rejects(failing.repository.selectShownMatch(selectInput));
   assert.deepEqual(failing.transactionState(), { committed: 0, rolledBack: 1 });
@@ -409,12 +416,17 @@ test("selection match repository recovers a selected contact by customer and sel
 
 test("selection match repository serializes competing selections through row locks", async () => {
   const first = fakeDatabase([
-    [], [activeConversation()], [], [selectableSearchRequest()], [selectableMatch()], [{ selected_at: selectedAtForTest }], [], [{ id: contactId }], [],
+    [], [activeConversation()], [], [selectableSearchRequest()],
+    [{ match_id: matchId, professional_id: professionalId }],
+    [{ id: professionalId }],
+    [selectableMatch()],
+    [{ selected_at: selectedAtForTest }], [], [{ id: contactId }], [],
   ]);
   assert.equal((await first.repository.selectShownMatch(selectInput)).kind, "selected");
   const second = fakeDatabase([[], [activeConversation({ status: "completed", pending_slot: null })], []]);
   assert.equal((await second.repository.selectShownMatch({ ...selectInput, position: 1 })).kind, "conversation_not_active");
   assert.match(first.calls[1]!.text, /search_conversations[\s\S]*FOR NO KEY UPDATE/u);
   assert.match(first.calls[3]!.text, /search_requests[\s\S]*FOR NO KEY UPDATE/u);
-  assert.match(first.calls[4]!.text, /FOR UPDATE OF matches/u);
+  assert.match(first.calls[5]!.text, /professionals[\s\S]*FOR UPDATE/u);
+  assert.match(first.calls[6]!.text, /FOR UPDATE OF matches/u);
 });

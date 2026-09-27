@@ -9,9 +9,14 @@ import {
 } from "../src/database/connection.js";
 import { PostgresMatchingRepository } from "../src/modules/matching/matching.repository.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
+import type { SelectShownMatchOutcome } from "../src/modules/match-selection/match-selection.types.js";
 import { PostgresProfessionalSubscriptionRepository } from "../src/modules/professional-subscription/professional-subscription.repository.js";
 import { ProfessionalOpportunityService } from "../src/modules/professional-opportunity/professional-opportunity.service.js";
-import { createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
+import {
+  BILATERAL_NOTICE,
+  BILATERAL_NOTICE_VERSION,
+  createOpportunityCode,
+} from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
 import { opportunityMessageSchema } from "@contatocerto/shared";
 import { rollbackThrough } from "./rollback-helper.js";
 
@@ -135,6 +140,47 @@ async function createProfessional(params: {
   return { professionalId, phone, accountId, identifierId };
 }
 
+async function cleanupProfessionalFixture(params: {
+  professionalId: string;
+  accountId?: string;
+  serviceId?: string;
+  categoryId?: string;
+  customerId?: string;
+}) {
+  await query("ALTER TABLE professional_subscription_events DISABLE TRIGGER professional_subscription_events_immutable");
+  await query(`DELETE FROM professional_subscription_events WHERE professional_id = $1`, [params.professionalId]);
+  await query("ALTER TABLE professional_subscription_events ENABLE TRIGGER professional_subscription_events_immutable");
+
+  await query(`DELETE FROM professional_subscriptions WHERE professional_id = $1`, [params.professionalId]);
+
+  await query("ALTER TABLE professional_membership_events DISABLE TRIGGER professional_membership_event_immutable");
+  await query(`DELETE FROM professional_membership_events WHERE professional_id = $1`, [params.professionalId]);
+  await query("ALTER TABLE professional_membership_events ENABLE TRIGGER professional_membership_event_immutable");
+
+  await query("ALTER TABLE professional_memberships DISABLE TRIGGER professional_membership_no_delete");
+  await query(`DELETE FROM professional_memberships WHERE professional_id = $1`, [params.professionalId]);
+  await query("ALTER TABLE professional_memberships ENABLE TRIGGER professional_membership_no_delete");
+
+  if (params.accountId) {
+    await query(`DELETE FROM account_identifiers WHERE account_id = $1`, [params.accountId]);
+    await query(`DELETE FROM accounts WHERE id = $1`, [params.accountId]);
+  }
+
+  await query(`DELETE FROM professional_services WHERE professional_id = $1`, [params.professionalId]);
+  await query(`DELETE FROM professional_service_areas WHERE professional_id = $1`, [params.professionalId]);
+  await query(`DELETE FROM professionals WHERE id = $1`, [params.professionalId]);
+
+  if (params.serviceId) {
+    await query(`DELETE FROM services WHERE id = $1`, [params.serviceId]);
+  }
+  if (params.categoryId) {
+    await query(`DELETE FROM service_categories WHERE id = $1`, [params.categoryId]);
+  }
+  if (params.customerId) {
+    await query(`DELETE FROM customers WHERE id = $1`, [params.customerId]);
+  }
+}
+
 test("entitlement snapshot accurately derives all 7 states and controlled reason codes", async () => {
   await rolledBack(async () => {
     const repo = new PostgresProfessionalSubscriptionRepository();
@@ -169,11 +215,12 @@ test("entitlement snapshot accurately derives all 7 states and controlled reason
     assert.deepEqual(notStartedSnapshot.reasons, ["subscription_not_started"]);
 
     // 4. active
-    await repo.grant(managed.professionalId, {
-      plan_code: "marketplace_standard_v1",
-      starts_at: new Date(Date.now() - 3600000).toISOString(),
-      ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
-    });
+    await query(
+      `UPDATE professional_subscriptions
+       SET starts_at = NOW() - INTERVAL '1 hour', ends_at = NOW() + INTERVAL '30 days'
+       WHERE professional_id = $1`,
+      [managed.professionalId],
+    );
     const activeSnapshot = await repo.getEntitlementSnapshot(managed.professionalId);
     assert.equal(activeSnapshot.state, "active");
     assert.equal(activeSnapshot.has_marketplace_access, true);
@@ -305,6 +352,89 @@ test("internal mutations create audit events, enforce locking and protect immuta
     );
     await query("ROLLBACK TO sp2");
   });
+});
+
+test("grant is create-only and rejects duplicate subscriptions on active and revoked states", async () => {
+  await rolledBack(async () => {
+    const repo = new PostgresProfessionalSubscriptionRepository();
+    const { serviceId } = await createBaseCatalogAndCustomer();
+    const { professionalId } = await createProfessional({ managementMode: "account_managed", serviceId });
+
+    // Initial grant succeeds
+    const startsAt = new Date(Date.now() - 3600000).toISOString();
+    const endsAt = new Date(Date.now() + 86400000 * 30).toISOString();
+    const granted = await repo.grant(professionalId, {
+      plan_code: "marketplace_standard_v1",
+      starts_at: startsAt,
+      ends_at: endsAt,
+    });
+    assert.equal(granted.state, "active");
+
+    // Re-granting when active throws subscription_already_exists
+    await assert.rejects(
+      () =>
+        repo.grant(professionalId, {
+          plan_code: "marketplace_standard_v1",
+          starts_at: startsAt,
+          ends_at: endsAt,
+        }),
+      /subscription_already_exists/,
+    );
+
+    // Revoke subscription
+    await repo.revoke(professionalId);
+
+    // Re-granting when revoked ALSO throws subscription_already_exists (must reactivate, not grant)
+    await assert.rejects(
+      () =>
+        repo.grant(professionalId, {
+          plan_code: "marketplace_standard_v1",
+          starts_at: startsAt,
+          ends_at: endsAt,
+        }),
+      /subscription_already_exists/,
+    );
+  });
+});
+
+test("concurrent grant calls on same professional: exactly one succeeds and one throws subscription_already_exists", async () => {
+  const repo = new PostgresProfessionalSubscriptionRepository();
+  const { serviceId, categoryId, customerId } = await createBaseCatalogAndCustomer();
+  const { professionalId, accountId } = await createProfessional({ managementMode: "account_managed", serviceId });
+
+  try {
+    const startsAt = new Date(Date.now() - 3600000).toISOString();
+    const endsAt = new Date(Date.now() + 86400000 * 30).toISOString();
+
+    const [res1, res2] = await Promise.allSettled([
+      repo.grant(professionalId, {
+        plan_code: "marketplace_standard_v1",
+        starts_at: startsAt,
+        ends_at: endsAt,
+      }),
+      repo.grant(professionalId, {
+        plan_code: "marketplace_standard_v1",
+        starts_at: startsAt,
+        ends_at: endsAt,
+      }),
+    ]);
+
+    const successes = [res1, res2].filter((r) => r.status === "fulfilled");
+    const failures = [res1, res2].filter((r) => r.status === "rejected");
+
+    assert.equal(successes.length, 1, "Exactly one grant must succeed");
+    assert.equal(failures.length, 1, "Exactly one grant must fail");
+    assert.equal((failures[0] as PromiseRejectedResult).reason?.message, "subscription_already_exists");
+
+    const subs = await query(`SELECT id FROM professional_subscriptions WHERE professional_id = $1`, [professionalId]);
+    assert.equal(subs.rows.length, 1);
+
+    const events = await query(`SELECT action FROM professional_subscription_events WHERE professional_id = $1`, [professionalId]);
+    assert.equal(events.rows.length, 1);
+    assert.equal(events.rows[0].action, "granted");
+  } finally {
+    await cleanupProfessionalFixture({ professionalId, accountId, serviceId, categoryId, customerId });
+  }
 });
 
 test("matching search distinguishes legacy_unmanaged and account_managed with active/expired/revoked subscription", async () => {
@@ -623,6 +753,267 @@ test("delivered contact invariant: contacts already delivered remain respondable
     const updatedContact = (await query<{ status: string }>(`SELECT status FROM contacts WHERE id = $1`, [contactId])).rows[0];
     assert.equal(updatedContact.status, "accepted");
   });
+});
+
+test("concurrency Scenario A: REVOKE VENCE - selection blocks on professional row lock, revoke commits first, selection sees match_not_available and creates 0 contacts", async () => {
+  const { serviceId, categoryId, customerId, customerPhone } = await createBaseCatalogAndCustomer();
+  const { professionalId, accountId } = await createProfessional({ managementMode: "account_managed", serviceId });
+  const subRepo = new PostgresProfessionalSubscriptionRepository();
+  const selectionRepo = new PostgresSelectionMatchRepository();
+
+  await subRepo.grant(professionalId, {
+    plan_code: "marketplace_standard_v1",
+    starts_at: new Date(Date.now() - 3600000).toISOString(),
+    ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+  });
+
+  const searchRequestId = randomUUID();
+  await query(
+    `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status, location)
+     VALUES ($1, $2, 'teste concorrencia A', $3, 'matched', ST_SetSRID(ST_MakePoint(-56.09, -15.60), 4326)::geography)`,
+    [searchRequestId, customerId, serviceId],
+  );
+
+  const conversationId = randomUUID();
+  await query(
+    `INSERT INTO search_conversations (id, customer_id, search_request_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, expires_at)
+     VALUES ($1, $2, $3, 'active', 'selection', 'teste concorrencia A', 'servico', 'BR', 3, NOW() + INTERVAL '1 hour')`,
+    [conversationId, customerId, searchRequestId],
+  );
+
+  const matchId = randomUUID();
+  await query(
+    `INSERT INTO matches (id, search_request_id, professional_id, rank_position, score, score_breakdown, shown_at)
+     VALUES ($1, $2, $3, 1, 100, '{}'::jsonb, NOW())`,
+    [matchId, searchRequestId, professionalId],
+  );
+
+  const selectionInboundId = randomUUID();
+  await query(
+    `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, status)
+     VALUES ($1, 'test', $2, $3, '1', 'received')`,
+    [selectionInboundId, `sel-${selectionInboundId}`, customerPhone],
+  );
+
+  try {
+    let selectionPromise: Promise<SelectShownMatchOutcome> | undefined;
+
+    // Transaction A locks the professional row first
+    await withTransaction(async (clientA) => {
+      await clientA.query(`SELECT id FROM professionals WHERE id = $1 FOR UPDATE`, [professionalId]);
+
+      // Now start selection concurrently (runs in independent transaction)
+      selectionPromise = selectionRepo.selectShownMatch({
+        customerId,
+        conversationId,
+        searchRequestId,
+        position: 1,
+        selectionKey: selectionInboundId,
+        inboundMessageId: selectionInboundId,
+        lastMessageText: "1",
+        now: new Date(),
+      });
+
+      // Verify selection is blocked waiting for professional row lock
+      let settled = false;
+      selectionPromise.then(
+        () => { settled = true; },
+        () => { settled = true; },
+      );
+      await new Promise((r) => setTimeout(r, 150));
+      assert.equal(settled, false, "Selection must be blocked waiting for professional row lock");
+
+      // While holding lock, revoke the subscription using clientA
+      await subRepo.revoke(professionalId, clientA);
+      // Exiting withTransaction commits clientA's transaction and releases the lock on professionalId
+    });
+
+    // Wait for selection to unblock and finish
+    assert.ok(selectionPromise);
+    const outcome = await selectionPromise;
+    assert.equal(outcome.kind, "match_not_available");
+
+    // Invariant: 0 contacts created, 0 outbox messages, match unselected
+    const contactsCount = await query<{ count: number }>(
+      `SELECT count(*)::int count FROM contacts WHERE search_request_id = $1`,
+      [searchRequestId],
+    );
+    assert.equal(contactsCount.rows[0].count, 0, "No contacts should be created when revoke wins");
+
+    const matchRow = (await query<{ selected_at: Date | null }>(
+      `SELECT selected_at FROM matches WHERE id = $1`,
+      [matchId],
+    )).rows[0];
+    assert.equal(matchRow.selected_at, null, "Match must not be marked selected");
+
+    const outboxCount = await query<{ count: number }>(
+      `SELECT count(*)::int count FROM channel_outbound_messages WHERE recipient_phone_e164 = $1`,
+      [customerPhone],
+    );
+    assert.equal(outboxCount.rows[0].count, 0, "No outbound messages should be created");
+  } finally {
+    await query(`DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 = $1`, [customerPhone]);
+    await query(`DELETE FROM contacts WHERE search_request_id = $1`, [searchRequestId]);
+    await query(`DELETE FROM channel_inbound_messages WHERE id = $1`, [selectionInboundId]);
+    await query(`DELETE FROM matches WHERE search_request_id = $1`, [searchRequestId]);
+    await query(`DELETE FROM search_conversations WHERE id = $1`, [conversationId]);
+    await query(`DELETE FROM search_requests WHERE id = $1`, [searchRequestId]);
+    await cleanupProfessionalFixture({ professionalId, accountId, serviceId, categoryId, customerId });
+  }
+});
+
+test("concurrency Scenario B: SELECTION VENCE - selection locks professional first, concurrent revoke blocks, selection completes contact, revoke finishes; contact remains valid and opportunity respondable", async () => {
+  const { serviceId, categoryId, customerId, customerPhone } = await createBaseCatalogAndCustomer();
+  const { professionalId, phone: profPhone, accountId } = await createProfessional({ managementMode: "account_managed", serviceId });
+  const subRepo = new PostgresProfessionalSubscriptionRepository();
+  const oppService = new ProfessionalOpportunityService();
+
+  await subRepo.grant(professionalId, {
+    plan_code: "marketplace_standard_v1",
+    starts_at: new Date(Date.now() - 3600000).toISOString(),
+    ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+  });
+
+  const searchRequestId = randomUUID();
+  await query(
+    `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status, location)
+     VALUES ($1, $2, 'teste concorrencia B', $3, 'matched', ST_SetSRID(ST_MakePoint(-56.09, -15.60), 4326)::geography)`,
+    [searchRequestId, customerId, serviceId],
+  );
+
+  const conversationId = randomUUID();
+  await query(
+    `INSERT INTO search_conversations (id, customer_id, search_request_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, expires_at)
+     VALUES ($1, $2, $3, 'active', 'selection', 'teste concorrencia B', 'servico', 'BR', 3, NOW() + INTERVAL '1 hour')`,
+    [conversationId, customerId, searchRequestId],
+  );
+
+  const matchId = randomUUID();
+  await query(
+    `INSERT INTO matches (id, search_request_id, professional_id, rank_position, score, score_breakdown, shown_at)
+     VALUES ($1, $2, $3, 1, 100, '{}'::jsonb, NOW())`,
+    [matchId, searchRequestId, professionalId],
+  );
+
+  // Presentation inbound and outbound message with BILATERAL_NOTICE
+  const presentationInboundId = randomUUID();
+  await query(
+    `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, status, customer_id, conversation_id, search_request_id, result, processed_at)
+     VALUES ($1, 'test', $2, $3, 'teste concorrencia B', 'processed', $4, $5, $6, '{"route":"contextual"}'::jsonb, NOW())`,
+    [presentationInboundId, `pres-${presentationInboundId}`, customerPhone, customerId, conversationId, searchRequestId],
+  );
+
+  const presentationOutboundId = randomUUID();
+  await query(
+    `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id)
+     VALUES ($1, $2, 'test', $3, $4, 'sent', NOW(), $5, $6)`,
+    [presentationOutboundId, presentationInboundId, customerPhone, `1. Prof Sub Test\n${BILATERAL_NOTICE}`, BILATERAL_NOTICE_VERSION, `prov-${presentationOutboundId}`],
+  );
+
+  await query(
+    `INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id) VALUES ($1, $2)`,
+    [presentationOutboundId, matchId],
+  );
+
+  const selectionInboundId = randomUUID();
+  await query(
+    `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, status)
+     VALUES ($1, 'test', $2, $3, '1', 'received')`,
+    [selectionInboundId, `sel-${selectionInboundId}`, customerPhone],
+  );
+
+  try {
+    let revokePromise: Promise<unknown> | undefined;
+
+    // Selection repo with barrier hook: triggers revoke after acquiring professional lock
+    const selectionRepo = new PostgresSelectionMatchRepository(
+      undefined,
+      undefined,
+      undefined,
+      async (_client, profId) => {
+        // Dispatched in background on an independent connection (not sharing _client)
+        revokePromise = subRepo.revoke(profId);
+
+        // Verify revoke is blocked waiting for the professional row lock
+        let revokeSettled = false;
+        revokePromise.then(
+          () => { revokeSettled = true; },
+          () => { revokeSettled = true; },
+        );
+        await new Promise((r) => setTimeout(r, 150));
+        assert.equal(revokeSettled, false, "Revoke must be blocked by selection's lock on professional");
+      },
+    );
+
+    const selectionOutcome = await selectionRepo.selectShownMatch({
+      customerId,
+      conversationId,
+      searchRequestId,
+      position: 1,
+      selectionKey: selectionInboundId,
+      inboundMessageId: selectionInboundId,
+      lastMessageText: "1",
+      now: new Date(),
+    });
+
+    assert.equal(selectionOutcome.kind, "selected");
+    if (selectionOutcome.kind !== "selected") return;
+
+    // Wait for the background revoke to unblock and finish
+    assert.ok(revokePromise);
+    await revokePromise;
+
+    // Subscription is now revoked
+    const snapshot = await subRepo.getEntitlementSnapshot(professionalId);
+    assert.equal(snapshot.state, "revoked");
+
+    // Invariant: contact was successfully created and committed
+    const contactRow = (await query<{ id: string; status: string; public_code: string }>(
+      `SELECT id, status, public_code FROM contacts WHERE id = $1`,
+      [selectionOutcome.contactId],
+    )).rows[0];
+    assert.ok(contactRow);
+    assert.equal(contactRow.status, "requested");
+
+    // Invariant: Delivered contact remains respondable despite later revocation
+    const oppInboundId = randomUUID();
+    const oppToken = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, status, processing_token, processing_started_at, lease_expires_at)
+       VALUES ($1, 'test', $2, $3, $4, 'processing', $5, NOW(), NOW() + INTERVAL '1 minute')`,
+      [oppInboundId, `opp-${oppInboundId}`, profPhone, `aceito ${contactRow.public_code}`, oppToken],
+    );
+
+    const oppOutcome = await oppService.handle({
+      id: oppInboundId,
+      provider: "test",
+      phoneE164: profPhone,
+      rawText: `aceito ${contactRow.public_code}`,
+      receivedAt: new Date(),
+      processingToken: oppToken,
+    });
+
+    assert.ok(oppOutcome);
+    const parsed = opportunityMessageSchema.safeParse(oppOutcome.result);
+    assert.ok(parsed.success);
+    assert.equal(parsed.data.result.kind, "accepted");
+
+    const updatedContact = (await query<{ status: string }>(`SELECT status FROM contacts WHERE id = $1`, [contactRow.id])).rows[0];
+    assert.equal(updatedContact.status, "accepted");
+  } finally {
+    await query(`UPDATE channel_inbound_messages SET response_outbound_id = NULL WHERE phone_e164 IN ($1, $2)`, [customerPhone, profPhone]);
+    await query(`DELETE FROM channel_outbound_message_matches WHERE match_id = $1`, [matchId]);
+    await query(`DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2)`, [customerPhone, profPhone]);
+    await query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
+    await query(`DELETE FROM opportunity_response_events WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1)`, [searchRequestId]);
+    await query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
+    await query(`DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1, $2)`, [customerPhone, profPhone]);
+    await query(`DELETE FROM contacts WHERE search_request_id = $1`, [searchRequestId]);
+    await query(`DELETE FROM matches WHERE search_request_id = $1`, [searchRequestId]);
+    await query(`DELETE FROM search_conversations WHERE id = $1`, [conversationId]);
+    await query(`DELETE FROM search_requests WHERE id = $1`, [searchRequestId]);
+    await cleanupProfessionalFixture({ professionalId, accountId, serviceId, categoryId, customerId });
+  }
 });
 
 test("migration 025 rollback is blocked with P0025 when subscriptions or events exist", async () => {

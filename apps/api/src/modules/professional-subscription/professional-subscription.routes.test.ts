@@ -66,6 +66,7 @@ test("internal professional subscriptions routes validate inputs and handle erro
       },
       grant: async (_id, input) => {
         if (input.plan_code === "unknown") throw new Error("plan_not_found");
+        if (input.plan_code === "already_exists") throw new Error("subscription_already_exists");
         return mockSnapshot;
       },
       extend: async (_id, input) => {
@@ -118,6 +119,20 @@ test("internal professional subscriptions routes validate inputs and handle erro
   });
   assert.equal(unknownPlanGrant.statusCode, 404);
 
+  // POST grant when subscription already exists -> 409
+  const alreadyExistsGrant = await app.inject({
+    method: "POST",
+    url: `/internal/professional-subscriptions/${profileId}/grant`,
+    headers,
+    payload: {
+      plan_code: "already_exists",
+      starts_at: "2026-01-01T00:00:00.000Z",
+      ends_at: "2026-12-31T00:00:00.000Z",
+    },
+  });
+  assert.equal(alreadyExistsGrant.statusCode, 409);
+  assert.deepEqual(alreadyExistsGrant.json(), { error: "subscription_already_exists" });
+
   // POST extend with invalid extension period
   const invalidExtend = await app.inject({
     method: "POST",
@@ -126,6 +141,16 @@ test("internal professional subscriptions routes validate inputs and handle erro
     payload: { ends_at: "2020-01-01T00:00:00.000Z" },
   });
   assert.equal(invalidExtend.statusCode, 400);
+
+  // POST revoke with unexpected body -> 400
+  const invalidRevoke = await app.inject({
+    method: "POST",
+    url: `/internal/professional-subscriptions/${profileId}/revoke`,
+    headers,
+    payload: { unexpected: true },
+  });
+  assert.equal(invalidRevoke.statusCode, 400);
+  assert.deepEqual(invalidRevoke.json(), { error: "invalid_request" });
 
   // POST revoke success
   const revokeRes = await app.inject({

@@ -43,11 +43,12 @@ export class PostgresProfessionalSubscriptionRepository {
     professionalId: string,
     client?: DatabaseClient,
   ): Promise<ProfessionalEntitlementSnapshot> {
+    const q = this.runQuery;
     // Typed query executor: delegates to client.query<T> when inside a transaction,
-    // or to the global query function otherwise. All callers pass SqlValue[] params.
+    // or to the injected runQuery function otherwise. All callers pass SqlValue[] params.
     async function runQ<T extends Record<string, unknown>>(text: string, values: SqlValue[]) {
       if (client) return client.query<T>(text, values);
-      return query<T>(text, values);
+      return q<T>(text, values);
     }
 
     const professionalRes = await runQ<ProfessionalRow>(
@@ -74,7 +75,7 @@ export class PostgresProfessionalSubscriptionRepository {
       });
     }
 
-    const subRes = await runQ<SubscriptionWithPlanRow>(
+    const subRes = await runQ<SubscriptionWithPlanRow & { db_now: string }>(
       `SELECT
         ps.id,
         ps.professional_id,
@@ -82,6 +83,7 @@ export class PostgresProfessionalSubscriptionRepository {
         ps.starts_at::text,
         ps.ends_at::text,
         ps.revoked_at::text,
+        NOW()::text AS db_now,
         sp.code AS plan_code,
         sp.is_active AS plan_is_active,
         EXISTS (
@@ -94,7 +96,7 @@ export class PostgresProfessionalSubscriptionRepository {
       [professionalId],
     );
 
-    const sub = subRes.rows[0] as SubscriptionWithPlanRow | undefined;
+    const sub = subRes.rows[0];
     if (!sub) {
       return professionalEntitlementSnapshotSchema.parse({
         policy_version: "entitlement-v1",
@@ -110,7 +112,7 @@ export class PostgresProfessionalSubscriptionRepository {
       });
     }
 
-    const now = new Date();
+    const now = new Date(sub.db_now);
     const startsAt = new Date(sub.starts_at);
     const endsAt = new Date(sub.ends_at);
     const isRevoked = sub.revoked_at !== null;
@@ -150,11 +152,20 @@ export class PostgresProfessionalSubscriptionRepository {
     });
   }
 
+  private runWithClient<T>(
+    client: DatabaseClient | undefined,
+    operation: (c: DatabaseClient) => Promise<T>,
+  ): Promise<T> {
+    if (client) return operation(client);
+    return this.transaction(operation);
+  }
+
   async grant(
     professionalId: string,
     input: GrantProfessionalSubscriptionInput,
+    client?: DatabaseClient,
   ): Promise<ProfessionalEntitlementSnapshot> {
-    return this.transaction(async (client) => {
+    return this.runWithClient(client, async (client) => {
       const profRes = await client.query(
         `SELECT id, management_mode FROM professionals WHERE id = $1 FOR UPDATE`,
         [professionalId],
@@ -187,12 +198,12 @@ export class PostgresProfessionalSubscriptionRepository {
         [professionalId],
       );
       const existing = existingRes.rows[0];
+      if (existing) {
+        throw new Error("subscription_already_exists");
+      }
 
       let subscriptionId: string;
-      const prevStartsAt = existing ? new Date(existing.starts_at).toISOString() : null;
-      const prevEndsAt = existing ? new Date(existing.ends_at).toISOString() : null;
-
-      if (!existing) {
+      try {
         const insertSub = await client.query<{ id: string }>(
           `INSERT INTO professional_subscriptions (professional_id, plan_id, starts_at, ends_at, revoked_at)
            VALUES ($1, $2, $3, $4, NULL)
@@ -200,22 +211,19 @@ export class PostgresProfessionalSubscriptionRepository {
           [professionalId, plan.id, input.starts_at, input.ends_at],
         );
         subscriptionId = insertSub.rows[0].id;
-      } else {
-        subscriptionId = existing.id;
-        await client.query(
-          `UPDATE professional_subscriptions
-           SET plan_id = $2, starts_at = $3, ends_at = $4, revoked_at = NULL, updated_at = NOW()
-           WHERE id = $1`,
-          [subscriptionId, plan.id, input.starts_at, input.ends_at],
-        );
+      } catch (err: unknown) {
+        if (typeof err === "object" && err !== null && "code" in err && (err as { code: unknown }).code === "23505") {
+          throw new Error("subscription_already_exists");
+        }
+        throw err;
       }
 
       await client.query(
         `INSERT INTO professional_subscription_events (
           subscription_id, professional_id, action, source,
           previous_starts_at, new_starts_at, previous_ends_at, new_ends_at
-        ) VALUES ($1, $2, 'granted', 'internal_provisioning', $3, $4, $5, $6)`,
-        [subscriptionId, professionalId, prevStartsAt, input.starts_at, prevEndsAt, input.ends_at],
+        ) VALUES ($1, $2, 'granted', 'internal_provisioning', NULL, $3, NULL, $4)`,
+        [subscriptionId, professionalId, input.starts_at, input.ends_at],
       );
 
       return this.getEntitlementSnapshot(professionalId, client);
@@ -225,8 +233,9 @@ export class PostgresProfessionalSubscriptionRepository {
   async extend(
     professionalId: string,
     input: ExtendProfessionalSubscriptionInput,
+    client?: DatabaseClient,
   ): Promise<ProfessionalEntitlementSnapshot> {
-    return this.transaction(async (client) => {
+    return this.runWithClient(client, async (client) => {
       const profRes = await client.query(
         `SELECT id FROM professionals WHERE id = $1 FOR UPDATE`,
         [professionalId],
@@ -279,8 +288,11 @@ export class PostgresProfessionalSubscriptionRepository {
     });
   }
 
-  async revoke(professionalId: string): Promise<ProfessionalEntitlementSnapshot> {
-    return this.transaction(async (client) => {
+  async revoke(
+    professionalId: string,
+    client?: DatabaseClient,
+  ): Promise<ProfessionalEntitlementSnapshot> {
+    return this.runWithClient(client, async (client) => {
       const profRes = await client.query(
         `SELECT id FROM professionals WHERE id = $1 FOR UPDATE`,
         [professionalId],
@@ -334,8 +346,9 @@ export class PostgresProfessionalSubscriptionRepository {
   async reactivate(
     professionalId: string,
     input: ReactivateProfessionalSubscriptionInput,
+    client?: DatabaseClient,
   ): Promise<ProfessionalEntitlementSnapshot> {
-    return this.transaction(async (client) => {
+    return this.runWithClient(client, async (client) => {
       const profRes = await client.query(
         `SELECT id FROM professionals WHERE id = $1 FOR UPDATE`,
         [professionalId],

@@ -24,11 +24,14 @@ const professionalParams = z
   })
   .strict();
 
+const emptyBodySchema = z.union([z.undefined(), z.null(), z.object({}).strict()]);
+
 function domainError(reply: FastifyReply, error: unknown) {
   const code = error instanceof Error ? error.message : "internal_error";
   const statuses: Record<string, number> = {
     professional_not_found: 404,
     subscription_not_found: 404,
+    subscription_already_exists: 409,
     plan_not_found: 404,
     plan_inactive: 409,
     invalid_extension_period: 400,
@@ -87,6 +90,9 @@ export const professionalSubscriptionsRoutes: FastifyPluginAsync<Options> = asyn
   app.post("/:professionalId/revoke", { preHandler: guard }, async (request, reply) => {
     const params = professionalParams.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const body = emptyBodySchema.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_request" });
 
     try {
       const snapshot = await service.revoke(params.data.professionalId);
