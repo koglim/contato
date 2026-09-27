@@ -526,11 +526,14 @@ test("customer selects João; João unavailable; customer returns and selects Ca
     await query(`INSERT INTO professional_service_areas (professional_id,city,state,country_code,center,radius_meters)
       VALUES ($1,'Sinop','MT','BR',ST_SetSRID(ST_MakePoint(-55.5,-11.86),4326)::geography,40000)`, [carlosId]);
     await query("INSERT INTO matches (id,search_request_id,professional_id,rank_position,shown_at) VALUES ($1,$2,$3,2,NOW())", [matchId, f.searchId, carlosId]);
-    const presInbound = await query<{ id: string }>(`INSERT INTO channel_inbound_messages (provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
-      VALUES ('test', $1, $2, 'carlos', 'BR', 3, 'processed', NOW(), '{}'::jsonb) RETURNING id`, [randomUUID(), f.customerPhone]);
+    const presInbound = await query<{ id: string }>(`INSERT INTO channel_inbound_messages
+      (provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result, customer_id, search_request_id, conversation_id, created_at)
+      VALUES ('test', $1, $2, 'carlos', 'BR', 3, 'processed', NOW() - INTERVAL '2 minutes', '{}'::jsonb, $3, $4, $5, NOW() - INTERVAL '2 minutes') RETURNING id`,
+      [randomUUID(), f.customerPhone, f.customerId, f.searchId, f.conversationId]);
     presInboundId = presInbound.rows[0].id;
-    const presOutbound = await query<{ id: string }>(`INSERT INTO channel_outbound_messages (channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id)
-      VALUES ($1, 'test', $2, $3, 'sent', NOW(), 'bilateral-v1', $4) RETURNING id`,
+    const presOutbound = await query<{ id: string }>(`INSERT INTO channel_outbound_messages
+      (channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id, created_at)
+      VALUES ($1, 'test', $2, $3, 'sent', NOW() - INTERVAL '1 minute', 'bilateral-v1', $4, NOW() - INTERVAL '1 minute') RETURNING id`,
       [presInboundId, f.customerPhone, `1. Carlos\n${BILATERAL_NOTICE}`, randomUUID()]);
     presOutboundId = presOutbound.rows[0].id;
     await query("INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id) VALUES ($1, $2)", [presOutboundId, matchId]);
