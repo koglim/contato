@@ -10,7 +10,7 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 
 * **Núcleo de Busca e Catálogo:** Resolução determinística de serviços com tolerância fonética/fuzzy, resolução em memória de municípios brasileiros (IBGE), cobertura geográfica espacial e cálculo de raio via PostGIS (`ST_DWithin`) e fallback Pelias/HeiGIT.
 * **Algoritmo de Matching e Ranking:** Algoritmo justo (*fair-v1*), pool de até 20 profissionais elegíveis, apresentação em blocos de 3 e limite máximo de 6 profissionais por busca.
-* **Contato Bilateral e Consentimento:** Transação atômica que registra o contato (`contacts`), captura snapshot dos dados cadastrais e gera o código público `CC-XXXXXXXX` mediante consentimento mútuo de telefone.
+* **Contato Bilateral e Consentimento:** Transação atômica que registra o contato (`contacts`), captura snapshot dos dados cadastrais e gera o código público `CC-XXXXXXXX` mediante seleção e consentimento informado do cliente para o compartilhamento bilateral de contatos.
 * **Durabilidade de Mensageria (Tabelas de Fila):** Tabelas `channel_inbound_messages` e `channel_outbound_messages` com controle de leases transacionais, proteção contra crash de workers, expurgo sanitizado, deduplicação idempotente e quarentena de conflitos.
 * **Motor Conversacional Híbrido (B2):** Arquitetura para processamento de áudio/texto com memória estruturada de hipóteses e slots contextuais.
 * **Identidade Individual do Profissional (PRs #10 a #13):** Separação de contas (`accounts`) e profissionais (`professionals`), autenticação sem senha (OTP de 6 dígitos via WhatsApp com TTL de 5 minutos e HMAC via `PROFESSIONAL_AUTH_PEPPER`), autocadastro e reivindicação de perfis legados.
@@ -26,7 +26,7 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
 1. **Ciclo de Conexão v2 ([ADR-004](decisions/ADR-004-connection-lifecycle-v2-direction.md)):**
-   * Ajustar a semântica do domínio: participação elegível do profissional + seleção ativa do cliente + consentimento informado bilateral = **conexão imediatamente estabelecida**.
+   * Ajustar a semântica do domínio: participação elegível do profissional + seleção ativa do cliente + consentimento informado do cliente para compartilhamento bilateral dos contatos = **conexão imediatamente estabelecida**.
    * Remover o aceite obrigatório do profissional do caminho crítico da entrega e do ciclo de vida do contato.
    * Adaptar mensagens do WhatsApp para refletir a oportunidade já conectada e tratar a recusa profissional apenas como sinal declaratório de indisponibilidade.
 2. **Conversation Intelligence / Seleção v2:**

@@ -92,7 +92,7 @@ flowchart TD
 
 ### CURRENT (Implementado no Repositório)
 * **Resolução Municipal em Memória:** Snapshot versionado de municípios do IBGE (`apps/api/src/modules/location-resolution/data/brazil-municipalities.json`), desambiguação cidade/UF e fallback geográfico via API Pelias / openrouteservice (HeiGIT).
-* **Cobertura Espacial PostGIS:** O PostGIS é utilizado separadamente para indexação espacial da malha de atendimento dos profissionais (`service_areas`), cálculo de raio com `ST_DWithin` e ordenação do matching.
+* **Cobertura Espacial PostGIS:** O PostGIS é utilizado separadamente para indexação espacial da malha de atendimento dos profissionais na tabela `professional_service_areas` (`center` e `radius_meters`), cálculo de raio com `ST_DWithin` e ordenação do matching.
 * Suporte a buscas com cidade e estado expressos no texto.
 * Resolução de ambiguidades com perguntas estruturadas.
 

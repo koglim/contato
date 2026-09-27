@@ -25,7 +25,7 @@ Na prática de um marketplace conversacional de serviços locais:
 ## Decisão
 
 1. **Equação da Conexão Bilateral v2:**
-   $$\text{Participação elegível} + \text{Seleção do cliente} + \text{Consentimento informado bilateral} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
+   $$\text{Participação elegível do profissional} + \text{Seleção ativa do cliente} + \text{Consentimento informado do cliente para compartilhamento bilateral dos contatos} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
 2. **Eliminação do Aceite Obrigatório:**
    * O profissional **não realiza um segundo aceite/autorização obrigatório** após ser selecionado pelo cliente.
    * Ambas as partes recebem imediatamente os dados de contato recíprocos via WhatsApp.

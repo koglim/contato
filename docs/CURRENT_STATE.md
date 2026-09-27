@@ -26,17 +26,17 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 ### Busca, Catálogo e Ranking Espacial
 * **Resolução Determinística de Serviços:** Mapeamento de termos e sinônimos com tolerância a variações linguísticas e cálculo de relevância (`SERVICE_RESOLUTION_FUZZY_THRESHOLD=0.53`).
 * **Resolução Geográfica de Municípios:** Resolução determinística em memória a partir do snapshot versionado de municípios brasileiros do IBGE (`apps/api/src/modules/location-resolution/data/brazil-municipalities.json`), com desambiguação exata cidade/UF e fallback via geocodificador HeiGIT/Pelias.
-* **Cobertura Espacial PostGIS:** O PostGIS é utilizado especificamente para a geometria de cobertura dos profissionais (`service_areas.radius_km`), cálculo de distância via `ST_DWithin` e ordenação do matching. O índice IBGE em si não depende do PostGIS para resolução.
+* **Cobertura Espacial PostGIS:** O PostGIS é utilizado especificamente para a geometria de cobertura dos profissionais na tabela `professional_service_areas` (`center` e `radius_meters`), cálculo de distância via `ST_DWithin` e ordenação do matching. O índice IBGE em si não depende do PostGIS para resolução.
 * **Algoritmo de Matching e Ranking:** Seleção espacial com rotação justa (*fair-v1*), pool máximo de 20 profissionais, paginação de 3 em 3 e teto máximo de apresentação de 6 profissionais por busca.
 
 ### Contato Bilateral e Consentimento
 * **Transação Bilateral Atômica:** Criação atômica do registro de contato (`contacts`), snapshot dos dados cadastrais das partes no instante da escolha, vinculação a `matches` e geração de código público `CC-XXXXXXXX`.
-* **Consentimento de Compartilhamento:** A seleção explícita pelo cliente após apresentação dos dados constitui consentimento formal para compartilhamento mútuo de telefones via WhatsApp.
+* **Consentimento de Compartilhamento:** A seleção ativa pelo cliente após apresentação dos dados constitui consentimento informado do cliente para o compartilhamento bilateral de telefones via WhatsApp.
 
 ### Durabilidade de Mensageria (Tabelas de Fila)
-* **Inbox Durável (`channel_inbound_messages`):** Tabela de persistência idempotente para mensagens recebidas via webhook da borda, deduplicação por hash de conteúdo/timestamp, controle transacional de lease (`CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS=60`), quarentena administrativa de mensagens conflitantes e processamento FIFO.
+* **Inbox Durável (`channel_inbound_messages`):** Tabela de persistência idempotente para mensagens recebidas via webhook da borda, com deduplicação e idempotência durável baseadas no par único `(provider, provider_message_id)` via `ON CONFLICT DO NOTHING`. O hashing de evidências do payload é utilizado para detecção de divergência e quarentena de conflitos caso a mesma identidade de mensagem seja recebida com conteúdo conflitante. Possui controle transacional de lease (`CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS=60`) e processamento FIFO.
 * **Outbox Durável (`channel_outbound_messages`):** Tabela de persistência para mensagens a enviar com controle de lease (`CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS=60`), claim atômico por token UUID, tentativas com backoff exponencial e retenção de auditoria.
-* **Sanitização de Logs e Diagnóstico:** Mascaramento obrigatório de dados pessoais (PII / telefones) em logs e endpoints de diagnóstico agregado da fila (`GET /internal/channel/inbox/diagnostics`).
+* **Sanitização de Logs e Telemetria de Fila:** Mascaramento obrigatório de dados pessoais (PII / telefones) em logs e monitoramento do estado da fila via `GET /internal/channel/inbound/queue-status`.
 
 ### Identidade e Governança Profissional (PRs #10 a #13)
 * **Identidade Individual (`accounts`):** Separação entre credenciais de acesso individuais e entidades profissionais cadastradas (`professionals`).
@@ -127,7 +127,7 @@ Com base nos dados fornecidos pelo operador da infraestrutura instalada (EasyPan
 > No código atual em `main`, o ciclo de atendimento ainda contém estados legados como `accepted` e `declined` no enum `contact_status` (`'requested'`, `'shared'`, `'accepted'`, `'declined'`, `'completed'`, `'cancelled'`), exigindo em certas rotas que o profissional aceite o lead.
 >
 > **A direção de produto decidida ([ADR-004](decisions/ADR-004-connection-lifecycle-v2-direction.md)) estabelece que:**
-> Participação elegível do profissional + seleção ativa do cliente + consentimento informado de compartilhamento bilateral = **CONEXÃO ESTABELECIDA**.
+> Participação elegível do profissional + seleção ativa do cliente + consentimento informado do cliente para compartilhamento bilateral dos contatos = **CONEXÃO ESTABELECIDA**.
 > O aceite do profissional **NÃO deve ser obrigatório** para que a oportunidade exista e os telefones sejam trocados.
 >
 > **Status:** `ACEITO / NÃO IMPLEMENTADO NO CÓDIGO`.

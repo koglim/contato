@@ -25,7 +25,7 @@ cliente solicita serviço
 → posteriormente é possível avaliar
 ```
 
-* **Entregas Consolidadas:** Resolução de serviços e municípios, cobertura espacial PostGIS, ranking justo, apresentação em páginas de 3, seleção transacional, consentimento bilateral e snapshot de contato já existem e possuem testes de integração. Identidade individual e onboarding (PRs #10–#13), assinatura profissional & entitlements neutros (PR #14) e conclusão e confirmação bilateral de atendimento (PR #15) estão totalmente integrados e aprovados em `main`.
+* **Entregas Consolidadas:** Resolução de serviços e municípios, cobertura espacial PostGIS, ranking justo, apresentação em páginas de 3, seleção transacional, consentimento para compartilhamento bilateral de contatos e snapshot de contato já existem e possuem testes de integração. Identidade individual e onboarding (PRs #10–#13), assinatura profissional & entitlements neutros (PR #14) e conclusão e confirmação bilateral de atendimento (PR #15) estão totalmente integrados e aprovados em `main`.
 * **Governança Documental (PR #16):** Reconciliação canônica da documentação, estabelecimento da Fonte Única da Verdade e alinhamento do roadmap de produto.
 * **Próximas Etapas:** O ciclo de avaliações estruturadas e reputação, a homologação final de ponta a ponta com instâncias reais de WhatsApp e o Ciclo de Conexão v2 ([ADR-004](decisions/ADR-004-connection-lifecycle-v2-direction.md)) constam como próximas etapas no [ROADMAP.md](ROADMAP.md).
 * **Cobrança / Gateways:** Permanecem formalmente congelados ([ADR-003](decisions/ADR-003-billing-provider-decision-frozen.md)).

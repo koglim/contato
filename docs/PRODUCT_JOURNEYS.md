@@ -36,11 +36,11 @@ flowchart TD
 * **CURRENT:** O cliente recebe uma mensagem estruturada com nome, especialidade e indicadores factuais disponíveis. O cliente pode escolher por número da opção (ex.: `1`) ou pelo nome do profissional.
 * **TARGET (Conversation Intelligence v2):** O cliente poderá fazer perguntas comparativas factuais sobre os profissionais apresentados (ex.: *"Qual deles atende mais perto do centro?"*). O assistente responderá com base estritamente em dados reais cadastrados, sem nunca inventar estimativas de preço, prazos de garantia ou disponibilidade que não existam no sistema.
 
-#### 4. Seleção e Consentimento Bilateral
+#### 4. Seleção e Consentimento do Cliente para Compartilhamento Bilateral
 * Ao escolher um profissional, o cliente autoriza o compartilhamento do seu número de WhatsApp com o prestador selecionado.
 * **CURRENT:** A transação gera um registro `contacts` e envia o resumo ao cliente com o telefone do profissional e o código público `CC-XXXXXXXX`.
 * **TARGET (Connection Lifecycle v2):**
-  $$\text{Participação elegível} + \text{Seleção do cliente} + \text{Consentimento informado bilateral} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
+  $$\text{Participação elegível do profissional} + \text{Seleção ativa do cliente} + \text{Consentimento informado do cliente para compartilhamento bilateral dos contatos} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
   Não há dependência de um segundo aceite mandatório pelo profissional para a conexão ser considerada real e ativa.
 
 #### 5. Execução do Serviço no Mundo Real
@@ -102,7 +102,7 @@ flowchart TD
 
 Destinada aos mantenedores da plataforma para monitoramento, segurança e governança.
 
-* **Auditoria de Mensageria:** Acompanhamento da saúde das filas através de endpoints agregados (`/internal/channel/inbox/diagnostics`), sem exposição de dados pessoais nos logs.
+* **Auditoria de Mensageria:** Acompanhamento da saúde das filas através de endpoints agregados como `GET /internal/channel/inbound/queue-status`, sem exposição de dados pessoais nos logs.
 * **Gestão de Quarentena:** Resolução de mensagens retidas na tabela `channel_inbound_messages` devido a conflitos de concorrência ou falhas de transporte.
 * **Gestão de Catálogo e Mapeamento:** Ajuste de sinônimos de serviços e calibragem de limites de busca espacial.
 * **Governança de Assinaturas:** Concessão, renovação ou encerramento manual de assinaturas profissionais enquanto os gateways de pagamento automatizados permanecem congelados.

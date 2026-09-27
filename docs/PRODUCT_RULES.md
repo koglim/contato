@@ -55,7 +55,7 @@ Para evitar fraudes, distorções de reputação e falsas expectativas de client
 | **1. Fato Observado pela Plataforma** | Evento registrado diretamente pela infraestrutura e auditado via log/banco. | Timestamp de envio na Outbox (`channel_outbound_messages`), contagem de apresentações (`shown_at`). | **Absoluto** |
 | **2. Fato Bilateralmente Confirmado** | Informação validada mutuamente por ambas as partes independentes. | Cliente e profissional confirmam a conclusão do mesmo atendimento (`state = 'confirmed'` em `contact_completions`). | **Altíssimo** |
 | **3. Estado Derivado Determinístico** | Cálculo reproduzível derivado de regras de negócio estritas sobre fatos observados. | Distância espacial PostGIS entre o raio do profissional e as coordenadas da busca. | **Altíssimo** |
-| **4. Fato Declarado pelo Cliente** | Afirmação unilateral do contratante sobre o mundo real. | Cliente declara que o serviço foi concluído satisfatoriamente. | **Subjetivo / Declaratório** |
+| **4. Fato Declarado pelo Cliente** | Afirmação unilateral do contratante sobre o mundo real. | Cliente declara que o serviço foi concluído. | **Subjetivo / Declaratório** |
 | **5. Fato Declarado pelo Profissional** | Afirmação unilateral do prestador sobre si ou sobre o serviço. | Profissional sinaliza que está indisponível ou afirma que concluiu o trabalho. | **Subjetivo / Declaratório** |
 
 > [!IMPORTANT]
