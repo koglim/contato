@@ -5,6 +5,8 @@ import { customerSearchMessageResponseSchema } from "./customer-search.js";
 import { opportunityMessageSchema } from "./opportunity-message.js";
 import { contextualMessageSchema } from "./contextual-message.js";
 
+import { contactCompletionMessageSchema } from "./contact-completion.js";
+
 function hasRawMessageText(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasRawMessageText);
   if (typeof value !== "object" || value === null) return false;
@@ -42,7 +44,14 @@ export const channelInboundMessageResponseSchema = z.object({
   duplicate: z.boolean(),
   reply_text: z.string().trim().min(1).max(2_000),
   outbound: channelOutboundMessageSummarySchema,
-  result: z.union([publicCustomerResultSchema, opportunityMessageSchema, contextualMessageSchema]).refine((value) => !hasRawMessageText(value), {
-    message: "channel inbox results must not expose raw message text",
-  }),
+  result: z
+    .union([
+      publicCustomerResultSchema,
+      opportunityMessageSchema,
+      contextualMessageSchema,
+      contactCompletionMessageSchema,
+    ])
+    .refine((value) => !hasRawMessageText(value), {
+      message: "channel inbox results must not expose raw message text",
+    }),
 }).strict();

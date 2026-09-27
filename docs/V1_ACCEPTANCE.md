@@ -41,21 +41,21 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T27 | Profissional/código alheio | Aprovado automatizado no domínio |
 | T28 | Pessoa em dois papéis | Aprovado automatizado no roteamento existente |
 | T29 | Recusa com outra busca | Aprovado automatizado: preservação, retomada explícita e concorrência |
-| T30 | OTP e limite de tentativas | Não implementado |
-| T31 | Duas contas no painel | Não implementado; profissional demonstrativo fixo |
-| T32 | Revogação/troca de telefone | Parcial: troca bloqueada no autosserviço; identidade/revalidação pendentes |
+| T30 | OTP e limite de tentativas | Aprovado automatizado (PR #11, Migration 022: desafios OTP passwordless, rate limit, TTL e expiração segura) |
+| T31 | Duas contas no painel | Aprovado automatizado (PRs #10–#13: contas de usuário isoladas, sessões e vínculo via memberships) |
+| T32 | Revogação/troca de telefone | Parcial: troca bloqueada no autosserviço; identidade com auditoria em professional_membership_events |
 | T33 | Autoativação administrativa | Aprovado no handler real do BFF com dependências simuladas: status/identidade rejeitados antes do proxy |
-| T34 | Conclusão/contestação | Não implementado como jornada |
-| T35 | Avaliação elegível/única | Não implementado como jornada |
+| T34 | Conclusão/contestação | Aprovado automatizado (PR #15, Migration 026: declaração bilateral, confirmação, contestação, serialização em contacts.id e P0026) |
+| T35 | Avaliação elegível/única | Próxima etapa (PR #16: Reviews & Ratings v1; condicionado a contact completion) |
 | T36 | Moderação auditada | Não implementado |
-| T37 | Pagamento fora de ordem | Não implementado; fornecedor não escolhido |
-| T38 | Entitlement/trial/legado | Não implementado |
+| T37 | Pagamento fora de ordem | Congelado: gateways de pagamento suspensos por decisão de produto |
+| T38 | Entitlement/trial/legado | Aprovado automatizado (PR #14, Migration 025: planos de assinatura e entitlements marketplace_access; billing congelado) |
 | T39 | Browser/teclado/mobile | Não executado nesta rodada; testes de BFF não substituem browser E2E |
 | T40 | Opt-out/janela de canal | Não executado; modalidade e política operacional pendentes |
 | T41 | Anonimização/retenção | Parcial: logs sanitizados; política de expurgo/dados imutáveis pendente |
 | T42 | Backup/restauração | Não executado; runbook sem alegação de ensaio realizado |
 | T43 | Carga/providers lentos | Parcial: testes de corrida/leases; carga e SLOs não medidos |
-| T44 | Migrations/rollback | CI ampliado até020: P0020 e proteções anteriores, down compatível020–008, reaplicação008–020 e nova rodada PostgreSQL; evidência por SHA no relatório de transporte |
+| T44 | Migrations/rollback | CI ampliado até 026: P0026 e proteções anteriores (P0025, P0024, P0023, P0022, P0020, etc.), down compatível 026–008, reaplicação 008–026 e rodada completa PostgreSQL |
 | T45 | Regionalismos/abreviações | Corpus B2 inclui casos sintéticos; execução com propostas simuladas não mede compreensão real |
 | T46 | Problema sem profissão | Aprovado automatizado: hipótese ligada ao catálogo real, confirmação antes da promoção; modelo real pendente |
 | T47 | Dados fora de ordem | Teste PostgreSQL B2 de cidade antes do serviço; preservação de slots e no_matches |

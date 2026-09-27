@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { channelInboundMessageResponseSchema, customerSearchMessageResponseSchema, opportunityMessageSchema, contextualMessageSchema, type ChannelInboundMessageInput } from "@contatocerto/shared";
+import {
+  channelInboundMessageResponseSchema,
+  customerSearchMessageResponseSchema,
+  opportunityMessageSchema,
+  contextualMessageSchema,
+  contactCompletionMessageSchema,
+  type ChannelInboundMessageInput,
+} from "@contatocerto/shared";
 import { InboxFenceError, InboxPermanentError, InboxContextChangedError } from "./inbox-recovery.policy.js";
 import { PostgresCustomerRepository } from "../customers/customer.repository.js";
 import type { ContextualInboxHandler } from "../contextual-conversation/contextual.service.js";
 import type { ProfessionalOpportunityService } from "../professional-opportunity/professional-opportunity.service.js";
+import type { ContactCompletionService } from "../contact-completion/contact-completion.service.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import type { ChannelInboxConfig } from "../../config/channel-inbox.js";
@@ -85,6 +93,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     private readonly channelOutboundMessageRepository: ChannelOutboundMessageRepository,
     private readonly professionalOpportunities?: Pick<ProfessionalOpportunityService, "handle">,
     private readonly contextualConversation?: ContextualInboxHandler,
+    private readonly contactCompletions?: Pick<ContactCompletionService, "handle">,
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
@@ -117,6 +126,8 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     if (!processingToken) return { kind: "channel_message_processing" };
     try {
       if (claimed.result !== null) throw new InboxPermanentError("conversation_state_invalid");
+      const completion = await this.contactCompletions?.handle(claimed);
+      if (completion) return { kind: "response", response: completion };
       const opportunity = await this.professionalOpportunities?.handle(claimed);
       if (opportunity) return { kind: "response", response: opportunity };
       if (this.contextualConversation) {
@@ -201,6 +212,21 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       if (!outbound) return this.invalidResult(record.id);
       return { kind: "response", response: { message_id: record.id, duplicate: true, reply_text: outbound.textContent,
         outbound: { id: outbound.id, status: outbound.status }, result: contextual.data } };
+    }
+    const completion = contactCompletionMessageSchema.safeParse(record.result);
+    if (completion.success) {
+      const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id);
+      if (!outbound) return this.invalidResult(record.id);
+      return {
+        kind: "response",
+        response: {
+          message_id: record.id,
+          duplicate: true,
+          reply_text: outbound.textContent,
+          outbound: { id: outbound.id, status: outbound.status },
+          result: completion.data,
+        },
+      };
     }
     if (opportunityMessageSchema.safeParse(record.result).success) {
       const response = await this.professionalOpportunities?.handle(record);

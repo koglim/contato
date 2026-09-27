@@ -12,8 +12,11 @@ cliente solicita serviço
 → posteriormente é possível avaliar
 
 Busca, ranking, opções, seleção e contato bilateral já existem e possuem testes.
-Aceite/recusa e retomada também estão implementados. Avaliação, conclusão do
-atendimento, identidade individual e cobrança ainda não são jornadas completas.
+Aceite/recusa e retomada também estão implementados. Identidade individual e
+onboarding (PRs #10–#13), assinatura profissional & entitlements v1 (PR #14) e
+conclusão bilateral de atendimento (PR #15) já foram entregues. Avaliação e
+reputação (PR #16) e homologação final da comunicação continuam como próximas etapas;
+gateways de cobrança permanecem explicitamente congelados.
 
 Preservar pool 20, páginas de 3 e teto de 6; cliente gratuito e assinatura do
 profissional, sem cobrança por lead. A conversa contextual híbrida faz parte da

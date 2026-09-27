@@ -19,10 +19,10 @@ são histórico; código, contratos e migrations atuais prevalecem.
 | Revalidação da primeira escolha | Corrigida (F04) | Status, serviço/catálogo, contato canônico e cobertura obrigatórios em nova seleção/apresentação |
 | Entrega n8n | Candidato preparado / homologação pendente | Cinco exports inativos; áudio/avisos duráveis020, administração e Shared Delivery; versões1.123.21/2.3.7; execução real pendente |
 | Conversa contextual híbrida | Implementação B2 disponível, desligada | Memória/hipóteses, controlador, perguntas fundamentadas, persistência e corpus 300; modelo real/revisão humana pendentes |
-| Identidade e onboarding | Ausente | Acesso demonstrativo com profissional fixo |
-| Painel | Parcial | Allowlist no BFF fecha F02; status/telefone somente leitura; falta ownership individual |
-| Conclusão / avaliações | Ausente como jornada | Tabelas existem; estados e interfaces não |
-| Assinatura / cobrança | Ausente | Gateway, preço e políticas ainda pendentes de decisão |
+| Identidade e onboarding | Implementado | PRs #10–#13 (Migrations 021–024): Contas, OTP passwordless, auditoria e ownership individual |
+| Painel | Parcial | Allowlist no BFF fecha F02; status/telefone somente leitura; suporte a ownership individual |
+| Conclusão / avaliações | Parcial (Conclusão implementada) | PR #15 (Migration 026): conclusão e confirmação bilateral; Avaliações/reputação pendentes (PR #16) |
+| Assinatura / cobrança | Parcial (Assinatura implementada) | PR #14 (Migration 025): planos e entitlements do marketplace; Gateways de pagamento congelados |
 | Administração / operação | Parcial | Diagnóstico sem PII, logs sanitizados, disposição auditada da Inbox; papéis individuais, alertas ativos e administração Outbox pendentes |
 | QA | Parcial | Baseline ampliado pela suíte B2 e corpus; resultados/SHA exatos no relatório B2; falta browser, carga, modelo e transporte reais |
 
@@ -92,9 +92,10 @@ execução. Publicar commits para revisão/CI na branch de execução.
 ## Matriz de aceite do plano
 
 [V1_ACCEPTANCE.md](V1_ACCEPTANCE.md) registra cada cenário T01–T60 com estado e
-evidência/pendência. A fase A foi concluída; B/C e a proteção F02 avançaram, mas
-essas fases não estão integralmente homologadas. A implementação B2 foi adicionada;
-seu aceite conversacional real ainda está pendente. D–I não foram concluídas.
+evidência/pendência. As fases A, B/C e B2 avançaram. A fase D (identidade individual)
+foi concluída nos PRs #10–#13. A fase F (assinatura e entitlements v1) foi concluída
+no PR #14 (com billing congelado). A conclusão bilateral da fase E foi concluída no
+PR #15; avaliações (PR #16) e homologações finais permanecem como próximas etapas.
 
 ## Onde continuar
 
