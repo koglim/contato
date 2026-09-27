@@ -300,8 +300,8 @@ jobs:
           INSERT INTO customers (id, phone_e164) VALUES ('00000000-0000-0000-0027-000000000001', '+5566900000027');
           INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ('00000000-0000-0000-0027-000000000002', '00000000-0000-0000-0027-000000000001', 'eletricista', 'selected');
           INSERT INTO professionals (id, display_name, slug, phone_e164) VALUES ('00000000-0000-0000-0027-000000000003', 'Fixture 027', 'fixture-027', '+5566900000028');
-          INSERT INTO contacts (id, search_request_id, professional_id, status, bilateral_snapshot)
-          VALUES ('00000000-0000-0000-0027-000000000004', '00000000-0000-0000-0027-000000000002', '00000000-0000-0000-0027-000000000003', 'shared', '{"public_code":"CC-02700001"}'::jsonb);
+          INSERT INTO contacts (id, search_request_id, professional_id, status)
+          VALUES ('00000000-0000-0000-0027-000000000004', '00000000-0000-0000-0027-000000000002', '00000000-0000-0000-0027-000000000003', 'shared');
           INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
           VALUES ('00000000-0000-0000-0027-000000000005', 'test', 'msg-027', '+5566900000028', 'recuso CC-02700001');
           INSERT INTO professional_unavailability_events (id, contact_id, professional_id, inbound_id, origin, rule_version)
