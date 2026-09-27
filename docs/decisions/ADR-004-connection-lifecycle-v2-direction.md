@@ -15,7 +15,7 @@
 
 ## Contexto
 
-No modelo original e na base atual de código do ContatoCerto, após a escolha do profissional pelo cliente, o registro de contato (`contacts`) transita por estados intermediários de resposta do profissional (como `pending`, `accepted` ou `rejected`).
+No modelo original e na base atual de código do ContatoCerto, após a escolha do profissional pelo cliente, o registro de contato (`contacts`) transita por estados onde a resposta profissional (`accepted` ou `declined` dentro do enum `contact_status`: `'requested'`, `'shared'`, `'accepted'`, `'declined'`, `'completed'`, `'cancelled'`) participa do ciclo de vida.
 
 Na prática de um marketplace conversacional de serviços locais:
 1. O cliente procura um profissional com urgência e espera contato imediato.
@@ -25,14 +25,14 @@ Na prática de um marketplace conversacional de serviços locais:
 ## Decisão
 
 1. **Equação da Conexão Bilateral v2:**
-   $$\text{Seleção Ativa do Cliente} + \text{Consentimento Mútuo de Telefones} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
+   $$\text{Participação elegível} + \text{Seleção do cliente} + \text{Consentimento informado bilateral} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
 2. **Eliminação do Aceite Obrigatório:**
-   * O profissional **não precisará** abrir dashboard, clicar em botão de aceite, enviar *"aceito"* ou realizar qualquer ação mandatória para que o contato exista e seja considerado entregue.
+   * O profissional **não realiza um segundo aceite/autorização obrigatório** após ser selecionado pelo cliente.
    * Ambas as partes recebem imediatamente os dados de contato recíprocos via WhatsApp.
 3. **Sinal Opcional de Indisponibilidade:**
-   * O profissional receberá a notificação da oportunidade contendo o telefone do cliente, resumo do serviço e endereço seguro.
+   * O profissional receberá a notificação da oportunidade contendo o telefone do cliente, resumo do serviço e o contexto seguro de localização disponível.
    * O profissional terá a opção de sinalizar caso não possa atender (*"estou indisponível"*).
-   * Essa resposta de indisponibilidade é classificada estritamente como **declaração unilateral do profissional**, servindo para telemetria de qualidade e para que o sistema possa oferecer opções adicionais ao cliente, sem apagar o fato de que a oportunidade foi entregue.
+   * Essa resposta de indisponibilidade é classificada estritamente como **declaração unilateral do profissional**, servindo para telemetria operacional de qualidade e para que o sistema possa oferecer opções adicionais ao cliente, sem apagar o fato de que a oportunidade foi entregue.
 4. **Planejamento de Engenharia:**
    * Esta alteração será implementada na frente técnica subsequente (Connection Lifecycle v2), ajustando migrations, transições de status da tabela `contacts` e templates de mensagens.
 

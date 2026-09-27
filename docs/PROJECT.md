@@ -27,7 +27,7 @@ A contratação de serviços locais (eletricistas, encanadores, diaristas, técn
 * **Leads Qualificados com Alta Intenção:** Quando uma conexão ocorre, foi o cliente que escolheu ativamente aquele profissional específico para o seu problema.
 * **Previsibilidade Financeira:** Modelo baseado em assinatura recorrente com valor fixo e justo.
 * **Autonomia Operacional:** O profissional recebe os dados diretamente no WhatsApp e negocia condições, preços e prazos diretamente com o cliente.
-* **Painel Web Dedicado:** Área administrativa (`/dashboard`) para gerenciar dados cadastrais, cobertura de serviços, histórico de atendimentos e status da conta.
+* **Painel Web Dedicado:** Área administrativa (`/dashboard`) para gerenciar dados cadastrais, cobertura de serviços, disponibilidade e status da conta.
 
 ---
 
@@ -38,8 +38,8 @@ A contratação de serviços locais (eletricistas, encanadores, diaristas, técn
    * Interface primária de notificação e comunicação rápida para profissionais (recebimento de oportunidades com dados de contato do cliente).
 2. **Painel Web do Profissional (`/dashboard`):**
    * Aplicação web Next.js acessível via navegador móvel ou desktop.
-   * Autenticação segura sem senha (OTP por e-mail).
-   * Gerenciamento de perfil, serviços atendidos, cidades/bairros de atuação e visualização de atendimentos.
+   * Autenticação segura sem senha (OTP de 6 dígitos via WhatsApp).
+   * Gerenciamento de perfil, serviços atendidos, cidades/bairros de atuação, disponibilidade e elegibilidade.
 
 ---
 

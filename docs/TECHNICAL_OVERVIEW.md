@@ -31,7 +31,7 @@ flowchart TD
 
     subgraph BordaTransporte ["Borda e Transporte"]
         Evo["Evolution API\n(Instância WhatsApp)"]
-        N8N["n8n Orchestrator\n(Gateways e Subworkflows)"]
+        N8N["n8n Orchestrator\n(Gateways, Transcrição e Subworkflows)"]
     end
 
     subgraph CorePlataforma ["Núcleo do ContatoCerto"]
@@ -42,20 +42,27 @@ flowchart TD
 
     WA <-->|"Webhook / Envio HTTP"| Evo
     Evo <-->|"HTTP Webhook / Proxy"| N8N
-    N8N -->|"POST /internal/channel/inbox/webhook"| FastifyAPI
-    FastifyAPI -->|"Transação SQL / Lock"| DB
-    DB -->|"Polling Leased: GET /claim"| N8N
+    N8N -->|"POST /internal/channel/inbound/messages"| FastifyAPI
+    N8N -->|"POST /internal/channel/outbound/next/claim"| FastifyAPI
+    FastifyAPI -->|"Transação SQL / Locks Atômicos"| DB
+    FastifyAPI -->|"Mensagem Reivindicada"| N8N
     N8N -->|"Envio Outbound HTTP"| Evo
 
     Browser <-->|"HTTPS / Session Cookie"| WebBFF
     WebBFF <-->|"HTTP Interno + API Key"| FastifyAPI
 ```
 
+### Rotas Canônicas de Mensageria e Fila
+* **Entrada de Mensagens (Inbound):** `POST /internal/channel/inbound/messages`
+* **Recuperação de Fila (Recovery):** `POST /internal/channel/inbound/next/process`
+* **Reivindicação de Saída (Outbound Claim):** `POST /internal/channel/outbound/next/claim` (e `/internal/channel/outbound/:id/claim`)
+* **Confirmação de Despacho:** `POST /internal/channel/outbound/:id/sent`, `/failed`, `/hold`
+
 ### Fronteiras de Responsabilidade e Invariantes
 
-* **n8n (Orquestração e Transporte):** Responsável exclusivamente pelo transporte de entrada/saída, conversão de payloads de mensageria e retry de rede. O n8n **não detém lógica de negócio**, não toma decisões de autorização e não é a fonte da verdade de dados.
+* **n8n (Orquestração de Integração e Transporte):** Responsável pelo transporte de entrada/saída, conversão de payloads de mensageria, retries de rede e execução de workflows externos de transcrição de áudio (reivindicação de mídias, chamada Groq com fallback para OpenAI e persistência do resultado). O n8n **não detém lógica de negócio**, não toma decisões de autorização e não é a fonte da verdade de dados.
 * **ContatoCerto API (Autoridade de Negócio e Domínio):** O backend Fastify é a autoridade absoluta sobre resolução de serviços, elegibilidade, criação de buscas, ranking espacial, consentimento, geração de contatos bilaterais e ciclo de vida de atendimentos.
-* **PostgreSQL / PostGIS (Persistência Canônica):** Camada de dados única e centralizada. É a guardiã das transações, tabelas de fila (`channel_inbox`, `channel_outbox`), locks concorrentes (`FOR UPDATE`) e do catálogo geográfico.
+* **PostgreSQL / PostGIS (Persistência Canônica):** Camada de dados única e centralizada. É a guardiã das transações, tabelas de fila (`channel_inbound_messages`, `channel_outbound_messages`), locks concorrentes (`FOR UPDATE`) e do catálogo geográfico.
 
 ---
 
@@ -76,7 +83,7 @@ flowchart TD
 ```
 
 ### Estado Atual vs. Alvo (Target)
-* **CURRENT:** O motor conversacional B2 utiliza hipóteses estruturadas, memória de slots e fast paths determinísticos para números e comandos. A flag `CONVERSATION_AI_ENABLED=false` mantém as chamadas externas desativadas por padrão.
+* **CURRENT:** O motor conversacional B2 utiliza hipóteses estruturadas, memória de slots e fast paths determinísticos para números e comandos. O padrão de código é `CONVERSATION_AI_ENABLED=false` (embora o snapshot de ambiente instalado do operador reporte `true`).
 * **TARGET (Conversation Intelligence v2):** Auditoria formal e benchmark detalhado de consumo de tokens, custo por conversa, tamanho de prompt, latência percebida e garantia de que o modelo receba apenas as variáveis factuais necessárias para a decisão do momento.
 
 ---
@@ -84,10 +91,10 @@ flowchart TD
 ## 4. Diretrizes de Localização (Location v2)
 
 ### CURRENT (Implementado no Repositório)
-* Resolução determinística baseada na malha municipal do IBGE via PostGIS (`ST_DWithin` / projeções espaciais).
+* **Resolução Municipal em Memória:** Snapshot versionado de municípios do IBGE (`apps/api/src/modules/location-resolution/data/brazil-municipalities.json`), desambiguação cidade/UF e fallback geográfico via API Pelias / openrouteservice (HeiGIT).
+* **Cobertura Espacial PostGIS:** O PostGIS é utilizado separadamente para indexação espacial da malha de atendimento dos profissionais (`service_areas`), cálculo de raio com `ST_DWithin` e ordenação do matching.
 * Suporte a buscas com cidade e estado expressos no texto.
 * Resolução de ambiguidades com perguntas estruturadas.
-* Fallback geográfico via API Pelias / openrouteservice (HeiGIT).
 
 ### TARGET (Location v2 — Planejado)
 * **Estrutura Mínima Obrigatória:** Cidade + Estado (UF).
@@ -108,12 +115,14 @@ flowchart TD
 
 * **Rota Canônica:** `/dashboard` (aplicação Next.js em `apps/web`).
 * **Capacidades Atuais:**
-  * Autenticação passwordless via código OTP enviado por e-mail;
+  * Autenticação passwordless via código OTP de 6 dígitos no WhatsApp com TTL de 5 minutos;
   * Sessão segura via cookie assinado no BFF (`DASHBOARD_SESSION_SECRET`);
-  * Edição de dados de perfil (nome, telefone de contato);
+  * Edição de dados cadastrais de perfil (nome, bio; telefone de contato em modo somente-leitura);
   * Seleção de categorias de serviços atendidos e municípios de cobertura;
-  * Consulta do histórico de atendimentos e status de conclusão.
+  * Configuração de disponibilidade e elegibilidade;
+  * Fluxos de autocadastro e reivindicação de perfil legado (claim).
 * **Direção Futura (Dashboard v2):**
+  * Tela de histórico de atendimentos e conclusão de serviços;
   * Visualização de métricas de conversão e exposição (quantas vezes o perfil foi exibido no WhatsApp);
   * Gestão de status de verificação e reputação;
   * Consulta de planos e status da assinatura;
@@ -160,13 +169,13 @@ A tabela a seguir documenta os nomes canônicos e responsabilidades das variáve
 | **Catálogo de Serviços** | `SERVICE_RESOLUTION_FUZZY_THRESHOLD` | Limite de calibragem fuzzy para identificação de serviços. |
 | **Geocodificação** | `OPENROUTESERVICE_BASE_URL` | Endpoint da API HeiGIT/Pelias para fallback de municípios. |
 | **Geocodificação** | `OPENROUTESERVICE_API_KEY` | Chave de acesso à API HeiGIT. |
-| **Autenticação Web** | `PROFESSIONAL_AUTH_ENABLED` | Flag booleana que habilita a emissão pública de OTP por e-mail. |
-| **Autenticação Web** | `PROFESSIONAL_AUTH_PEPPER` | Segredo criptográfico (mínimo 32 bytes) para compor o hash do OTP. |
+| **Autenticação Web** | `PROFESSIONAL_AUTH_ENABLED` | Flag booleana que habilita a emissão pública de OTP no WhatsApp. |
+| **Autenticação Web** | `PROFESSIONAL_AUTH_PEPPER` | Segredo criptográfico (mínimo 32 bytes) para derivar chave HMAC e AES do OTP e Outbox. |
 | **Portal Web / BFF** | `CONTATOCERTO_API_URL` | URL base da API consumida pelo backend do portal web. |
 | **Portal Web / BFF** | `DASHBOARD_SESSION_SECRET` | Segredo utilizado para assinar o cookie de sessão do profissional. |
-| **Fila e Leases** | `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` | Tempo de lease para recuperação de mensagens travadas na Inbox. |
-| **Fila e Leases** | `CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` | Tempo de lease para envio de mensagens pela Outbox via n8n. |
-| **Conversação IA** | `CONVERSATION_AI_ENABLED` | **Flag canônica principal.** Habilita o motor conversacional com IA. |
+| **Fila e Leases** | `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` | Tempo de lease para recuperação de mensagens travadas na tabela `channel_inbound_messages`. |
+| **Fila e Leases** | `CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` | Tempo de lease para envio de mensagens pela tabela `channel_outbound_messages` via n8n. |
+| **Conversação IA** | `CONVERSATION_AI_ENABLED` | **Flag canônica principal** (padrão no código: `false`; snapshot instalado do operador reportado como `true`). |
 | **Conversação IA (Legacy)**| `CONTEXTUAL_CONVERSATION_ENABLED` | *Alias legado.* O código audita ambas as variáveis, e **`CONVERSATION_AI_ENABLED` tem precedência absoluta** caso ambas estejam definidas. |
 | **Modelo de IA** | `OPENAI_CONVERSATION_MODEL` | Nome do modelo LLM homologado para a conversação (ex.: gpt-5.6-luna). *(Tem precedência sobre o alias legado `CONTEXTUAL_CONVERSATION_MODEL`)*. |
 | **Modelo de IA** | `OPENAI_CONVERSATION_TIMEOUT_MS` | Timeout máximo para requisições de modelo (padrão: 20000ms). |

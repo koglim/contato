@@ -56,17 +56,17 @@ Para aprofundamento na implementação de subsistemas específicos do ContatoCer
   * [ARCHITECTURE.md](ARCHITECTURE.md): Arquitetura modular, camadas e ciclo de requisição.
   * [DATA_MODEL.md](DATA_MODEL.md): Modelo relacional PostgreSQL/PostGIS, constraints, migrations e tabelas.
   * [API.md](API.md): Contratos de endpoints HTTP públicos, internos e de canal.
-  * [brazil-municipality-index.md](brazil-municipality-index.md): Resolução espacial e índice de municípios brasileiros (IBGE).
+  * [brazil-municipality-index.md](brazil-municipality-index.md): Resolução determinística e índice em memória de municípios brasileiros (IBGE).
 * **Mensageria, Durabilidade e Operação:**
   * [OPERATIONS.md](OPERATIONS.md): Runbook operacional, sanitização de PII, monitoramento de filas e leases.
   * [OUTBOUND_DELIVERY.md](OUTBOUND_DELIVERY.md): Despacho de mensagens via Outbox durável e reconciliação.
-  * [INBOX_RECOVERY.md](INBOX_RECOVERY.md): Recepção de webhooks da Inbox, idempotência, quarentena e recuperação.
+  * [INBOX_RECOVERY.md](INBOX_RECOVERY.md): Recepção de mensagens da Inbox, idempotência, quarentena e recuperação.
   * [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md): Integração com Evolution API, idempotência de canal e tolerância a falhas.
   * [workflows/n8n/README.md](../workflows/n8n/README.md): Especificação dos nós, orquestração e fluxos versionados do n8n.
 * **Profissional, Identidade e Negócio:**
   * [WEB_DASHBOARD.md](WEB_DASHBOARD.md): Portal web do profissional em Next.js (BFF, sessões e autosserviço).
   * [PROFESSIONAL_IDENTITY_FOUNDATION.md](PROFESSIONAL_IDENTITY_FOUNDATION.md): Fundação de identidade individual do profissional.
-  * [PROFESSIONAL_PASSWORDLESS_AUTH.md](PROFESSIONAL_PASSWORDLESS_AUTH.md): Autenticação sem senha via OTP por e-mail.
+  * [PROFESSIONAL_PASSWORDLESS_AUTH.md](PROFESSIONAL_PASSWORDLESS_AUTH.md): Autenticação sem senha via OTP de 6 dígitos no WhatsApp.
   * [PROFESSIONAL_ONBOARDING_ELIGIBILITY.md](PROFESSIONAL_ONBOARDING_ELIGIBILITY.md): Máquina de estados de elegibilidade e cobertura de serviços.
   * [PROFESSIONAL_SIGNUP_LEGACY_CLAIM.md](PROFESSIONAL_SIGNUP_LEGACY_CLAIM.md): Fluxo de autocadastro e reivindicação de perfis legados.
   * [PROFESSIONAL_SUBSCRIPTIONS_ENTITLEMENTS.md](PROFESSIONAL_SUBSCRIPTIONS_ENTITLEMENTS.md): Modelo agnóstico de planos, assinaturas e acesso a novos leads.

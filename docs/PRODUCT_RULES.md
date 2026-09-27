@@ -33,13 +33,15 @@ A Inteligência Artificial (LLMs) desempenha um papel fundamental de tradução 
 ## 3. Código Público de Contato (`CC-XXXXXXXX`)
 
 * **Finalidade Canônica:** O código público (ex.: `CC-AB12CD34`) é uma chave durável de referência bilateral para auditoria, rastreabilidade e **desambiguação**.
-* **Regra de Uso na UX:** O código `CC-...` é exibido em todas as notificações formais de contato, mas **não deve ser exigido do cliente** quando houver contexto suficiente na conversa (ex.: se o cliente só possui um atendimento ativo, um simples *"já terminei o serviço"* deve ser tratado contextualmente sem obrigá-lo a copiar e colar o código). Quando houver ambiguidade (múltiplos atendimentos concorrentes), o código serve como ferramenta definitiva de desempate.
+* **Comportamento Atual (CURRENT):** O parser determinístico atual de conclusão, confirmação e contestação (PR #15) exige estritamente a presença do código público `CC-XXXXXXXX` na mensagem recebida.
+* **Direção Futura de UX (TARGET):** No âmbito do Conversation Intelligence v2, o código não deve ser exigido do usuário quando houver contexto suficiente e unívoco na conversa (ex.: quando existir apenas um atendimento ativo). Caso haja múltiplos atendimentos simultâneos, o código continua atuando como ferramenta definitiva de desempate.
 
 ---
 
 ## 4. Papel do Painel Web do Profissional (`/dashboard`)
 
-* **Superfície de Gestão:** O painel web é uma ferramenta de apoio para consulta de histórico, edição de dados cadastrais, visualização de áreas de cobertura e gestão de perfil.
+* **Superfície de Gestão:** O painel web é uma ferramenta de apoio para gestão de perfil, serviços atendidos, áreas geográficas de cobertura e disponibilidade.
+* **Telefone Protegido:** No painel atual, o telefone é somente-leitura (`readOnly`) para prevenir mutações arbitrárias de identidade sem verificação.
 * **Não-Bloqueante:** O profissional **nunca** deve ser obrigado a acessar o painel para receber um lead, visualizar o telefone de um cliente que o escolheu ou iniciar o atendimento. O canal primário e operacional de entrega é o WhatsApp.
 
 ---
@@ -50,15 +52,15 @@ Para evitar fraudes, distorções de reputação e falsas expectativas de client
 
 | Categoria de Dado | Definição | Exemplo no Sistema | Grau de Confiança |
 | :--- | :--- | :--- | :---: |
-| **1. Fato Observado pela Plataforma** | Evento registrado diretamente pela infraestrutura e auditado via log/banco. | Timestamp de envio da Outbox, número de vezes que o perfil foi exibido (`shown_at`). | **Absoluto** |
-| **2. Fato Bilateralmente Confirmado** | Informação validada mutuamente por ambas as partes independentes. | Cliente e profissional confirmam a conclusão do mesmo atendimento (`completed_confirmed`). | **Altíssimo** |
-| **3. Estado Derivado Determinístico** | Cálculo reproduzível derivado de regras de negócio estritas sobre fatos observados. | Distância espacial PostGIS entre o profissional e o município da busca. | **Altíssimo** |
-| **4. Fato Declarado pelo Cliente** | Afirmação unilateral do contratante sobre o mundo real. | Cliente afirma que o serviço foi concluído satisfatoriamente. | **Subjetivo / Declaratório** |
-| **5. Fato Declarado pelo Profissional** | Afirmação unilateral do prestador sobre si ou sobre o serviço. | Profissional clica em "não tenho disponibilidade" ou afirma que concluiu o trabalho. | **Subjetivo / Declaratório** |
+| **1. Fato Observado pela Plataforma** | Evento registrado diretamente pela infraestrutura e auditado via log/banco. | Timestamp de envio na Outbox (`channel_outbound_messages`), contagem de apresentações (`shown_at`). | **Absoluto** |
+| **2. Fato Bilateralmente Confirmado** | Informação validada mutuamente por ambas as partes independentes. | Cliente e profissional confirmam a conclusão do mesmo atendimento (`state = 'confirmed'` em `contact_completions`). | **Altíssimo** |
+| **3. Estado Derivado Determinístico** | Cálculo reproduzível derivado de regras de negócio estritas sobre fatos observados. | Distância espacial PostGIS entre o raio do profissional e as coordenadas da busca. | **Altíssimo** |
+| **4. Fato Declarado pelo Cliente** | Afirmação unilateral do contratante sobre o mundo real. | Cliente declara que o serviço foi concluído satisfatoriamente. | **Subjetivo / Declaratório** |
+| **5. Fato Declarado pelo Profissional** | Afirmação unilateral do prestador sobre si ou sobre o serviço. | Profissional sinaliza que está indisponível ou afirma que concluiu o trabalho. | **Subjetivo / Declaratório** |
 
 > [!IMPORTANT]
 > **Invariante de Governança de Dados:**
-> Futuros algoritmos de ranking, incentivos, penalidades ou reputação **nunca devem tratar declarações unilaterais do profissional como verdades absolutas**. A auto-declaração de indisponibilidade ou conclusão é apenas uma declaração de intenção sujeita a confirmação do cliente ou telemetria objetiva da plataforma.
+> Futuros algoritmos de ranking, incentivos, penalidades ou reputação **nunca devem tratar declarações unilaterais do profissional como verdades absolutas**. A auto-declaração de indisponibilidade ou conclusão é apenas uma declaração de intenção sujeita a confirmação da contraparte ou telemetria objetiva da plataforma.
 
 ---
 
@@ -75,7 +77,7 @@ Para evitar fraudes, distorções de reputação e falsas expectativas de client
 
 ## 7. Assinaturas e Acesso a Novas Oportunidades
 
-* **Direitos de Acesso (*Entitlements*):** A assinatura ativa de um profissional é a condição necessária para que seu perfil participe do pool de matching e seja exibido para novos clientes.
+* **Direitos de Acesso (*Entitlements*):** Para profissionais sob gerenciamento individual (`management_mode = 'account_managed'`), a assinatura ativa é condição obrigatória para participação no pool de matching. Perfis legados não reivindicados (`management_mode = 'legacy_unmanaged'`) permanecem temporariamente isentos sob a política de transição.
 * **Proteção a Contatos Históricos:** Se a assinatura de um profissional expirar ou for revogada:
   * Ele é imediatamente removido de novas buscas de clientes.
   * **Seus contatos anteriores legítimos permanecem válidos e acessíveis.** O profissional mantém o direito de consultar e concluir os atendimentos já conectados no passado.
