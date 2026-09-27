@@ -24,7 +24,7 @@ const professionalParams = z
   })
   .strict();
 
-const emptyBodySchema = z.union([z.undefined(), z.null(), z.object({}).strict()]);
+const emptyBodySchema = z.union([z.undefined(), z.object({}).strict()]);
 
 function domainError(reply: FastifyReply, error: unknown) {
   const code = error instanceof Error ? error.message : "internal_error";
@@ -32,9 +32,11 @@ function domainError(reply: FastifyReply, error: unknown) {
     professional_not_found: 404,
     subscription_not_found: 404,
     subscription_already_exists: 409,
+    subscription_not_reactivatable: 409,
     plan_not_found: 404,
     plan_inactive: 409,
     invalid_extension_period: 400,
+    invalid_reactivation_period: 400,
     invalid_request: 400,
   };
   const status = statuses[code] ?? 500;

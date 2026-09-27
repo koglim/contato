@@ -18,9 +18,9 @@ type SubscriptionWithPlanRow = {
   id: string;
   professional_id: string;
   plan_id: string;
-  starts_at: string;
-  ends_at: string;
-  revoked_at: string | null;
+  starts_at: Date | string;
+  ends_at: Date | string;
+  revoked_at: Date | string | null;
   plan_code: string;
   plan_is_active: boolean;
   plan_has_marketplace_access: boolean;
@@ -75,15 +75,15 @@ export class PostgresProfessionalSubscriptionRepository {
       });
     }
 
-    const subRes = await runQ<SubscriptionWithPlanRow & { db_now: string }>(
+    const subRes = await runQ<SubscriptionWithPlanRow & { db_now: Date | string }>(
       `SELECT
         ps.id,
         ps.professional_id,
         ps.plan_id,
-        ps.starts_at::text,
-        ps.ends_at::text,
-        ps.revoked_at::text,
-        NOW()::text AS db_now,
+        ps.starts_at,
+        ps.ends_at,
+        ps.revoked_at,
+        NOW() AS db_now,
         sp.code AS plan_code,
         sp.is_active AS plan_is_active,
         EXISTS (
@@ -112,9 +112,9 @@ export class PostgresProfessionalSubscriptionRepository {
       });
     }
 
-    const now = new Date(sub.db_now);
-    const startsAt = new Date(sub.starts_at);
-    const endsAt = new Date(sub.ends_at);
+    const now = sub.db_now instanceof Date ? sub.db_now : new Date(sub.db_now);
+    const startsAt = sub.starts_at instanceof Date ? sub.starts_at : new Date(sub.starts_at);
+    const endsAt = sub.ends_at instanceof Date ? sub.ends_at : new Date(sub.ends_at);
     const isRevoked = sub.revoked_at !== null;
 
     let state: ProfessionalEntitlementState;
@@ -145,8 +145,8 @@ export class PostgresProfessionalSubscriptionRepository {
       subscription_required: true,
       state,
       plan_code: sub.plan_code,
-      starts_at: new Date(sub.starts_at).toISOString(),
-      ends_at: new Date(sub.ends_at).toISOString(),
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
       has_marketplace_access: hasMarketplaceAccess,
       reasons,
     });
@@ -360,11 +360,13 @@ export class PostgresProfessionalSubscriptionRepository {
       const existingRes = await client.query<{
         id: string;
         plan_id: string;
-        starts_at: string;
-        ends_at: string;
-        revoked_at: string | null;
+        starts_at: Date | string;
+        ends_at: Date | string;
+        revoked_at: Date | string | null;
+        is_still_active: boolean;
       }>(
-        `SELECT id, plan_id, starts_at::text, ends_at::text, revoked_at::text
+        `SELECT id, plan_id, starts_at, ends_at, revoked_at,
+                (revoked_at IS NULL AND ends_at > NOW()) AS is_still_active
          FROM professional_subscriptions
          WHERE professional_id = $1 FOR UPDATE`,
         [professionalId],
@@ -372,6 +374,10 @@ export class PostgresProfessionalSubscriptionRepository {
       const existing = existingRes.rows[0];
       if (!existing) {
         throw new Error("subscription_not_found");
+      }
+
+      if (existing.is_still_active) {
+        throw new Error("subscription_not_reactivatable");
       }
 
       let targetPlanId = existing.plan_id;
@@ -384,10 +390,18 @@ export class PostgresProfessionalSubscriptionRepository {
         if (!plan) throw new Error("plan_not_found");
         if (!plan.is_active) throw new Error("plan_inactive");
         targetPlanId = plan.id;
+      } else {
+        const currentPlanRes = await client.query<PlanRow>(
+          `SELECT id, code, name, is_active FROM subscription_plans WHERE id = $1`,
+          [existing.plan_id],
+        );
+        const currentPlan = currentPlanRes.rows[0];
+        if (!currentPlan || !currentPlan.is_active) throw new Error("plan_inactive");
+        targetPlanId = existing.plan_id;
       }
 
-      const prevStartsAt = new Date(existing.starts_at).toISOString();
-      const prevEndsAt = new Date(existing.ends_at).toISOString();
+      const prevStartsAt = (existing.starts_at instanceof Date ? existing.starts_at : new Date(existing.starts_at)).toISOString();
+      const prevEndsAt = (existing.ends_at instanceof Date ? existing.ends_at : new Date(existing.ends_at)).toISOString();
 
       await client.query(
         `UPDATE professional_subscriptions

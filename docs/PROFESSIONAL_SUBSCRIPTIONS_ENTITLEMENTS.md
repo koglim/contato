@@ -14,21 +14,23 @@ O sistema introduz um motor determinístico de direitos de acesso com 7 estados 
    - Não há checkout mockado, nem dependências externas de gateway financeiro.
 
 2. **Isenção Legada (Legacy Exemption)**:
-   - Perfis `legacy_unmanaged` mantêm isenção total de assinatura e conta (`state = 'legacy_exempt'`, `has_access = true`, `reason_code = 'legacy_profile_exempt'`).
+   - Perfis `legacy_unmanaged` mantêm isenção total de assinatura e conta (`state = 'legacy_exempt'`, `has_marketplace_access = true`, `reasons = []`, `subscription_required = false`).
    - Nenhum perfil histórico existente perde elegibilidade de matching ou exige assinatura antes de reivindicação explícita.
 
 3. **Guarda Centralizada de Marketplace**:
    - Perfis gerenciados (`account_managed`) exigem cumulativamente:
-     - Identidade ativa e verificada (`eligibleManagedIdentitySql`: conta ativa, membership ativa de dono/admin, telefone verificado).
-     - Direito ativo de marketplace (`activeMarketplaceEntitlementSql`: plano ativo com `marketplace_access`, status válido, período vigente, sem revogação).
+     - Identidade ativa e verificada (`eligibleManagedIdentitySql`: conta ativa, membership ativa e pelo menos um `account_identifier` verificado).
+     - Direito ativo de marketplace (`activeMarketplaceEntitlementSql`: plano ativo com entitlement `marketplace_access`, período vigente no relógio do banco, sem revogação).
    - A guarda `marketplaceParticipationSql(tableAlias)` unifica esse predicado SQL em todos os pontos do sistema.
 
-4. **Correção do GAP de Identidade do PR #13**:
-   - `resumedMatchEligibilitySql` agora aplica `marketplaceParticipationSql("current_professional")`.
-   - Se uma membership for revogada ou a conta for bloqueada após a criação do match, o profissional é imediatamente excluído de `listShown`, `findShownByPosition`, `listNextUnshown`, `selectShownMatch` e do despacho do outbox.
+4. **Identidade Gerenciada Elegível (`eligibleManagedIdentitySql`)**:
+   - Exige que o profissional possua `professional_memberships.status = 'active'`, `accounts.status = 'active'` e pelo menos um `account_identifiers.verified_at IS NOT NULL`.
+   - Não restringe o identificador especificamente a telefone (ao contrário do claim legado) nem restringe a roles específicas de owner/admin.
 
 5. **Invariante de Contatos Entregues**:
-   - Matches já convertidos em contatos entregues permanecem respondíveis (`accepted` / `declined`) mesmo se a assinatura do profissional expirar ou for revogada posteriormente.
+   - O Outbox Dispatcher não revalida assinatura para mensagens de contatos já gerados: a garantia ocorre no `selectShownMatch`, que revalida participação sob lock de linha `professionals.id FOR UPDATE`.
+   - Uma vez que o contato e as mensagens de outbox nascem legitimamente (`status = 'requested'`), o lead é considerado entregue.
+   - O profissional pode responder ao contato (`aceito <codigo>` / `recuso <codigo>`) mesmo que sua assinatura venha a expirar ou ser revogada posteriormente.
 
 ---
 
@@ -38,47 +40,45 @@ A migration `database/migrations/025_add_professional_subscriptions.js` adiciona
 
 ### 1. `subscription_plans`
 Catálogo de planos disponíveis:
-- `id` (UUID PK)
-- `key` (VARCHAR(64) UNIQUE, ex.: `'marketplace_standard_v1'`)
-- `name` (VARCHAR(128))
-- `status` (VARCHAR(32), `'active' | 'archived'`)
-- `price_cents` (INTEGER NOT NULL DEFAULT 0)
-- `currency` (VARCHAR(3) NOT NULL DEFAULT 'BRL')
-- `interval_unit` (VARCHAR(16), `'month' | 'year' | 'day'`)
-- `interval_count` (INTEGER NOT NULL DEFAULT 1)
-- `created_at`, `updated_at`
+- `id` (UUID PRIMARY KEY DEFAULT gen_random_uuid())
+- `code` (TEXT NOT NULL UNIQUE, ex.: `'marketplace_standard_v1'`)
+- `name` (TEXT NOT NULL)
+- `is_active` (BOOLEAN NOT NULL DEFAULT TRUE)
+- `created_at` (TIMESTAMPTZ NOT NULL DEFAULT NOW())
+- `updated_at` (TIMESTAMPTZ NOT NULL DEFAULT NOW())
 
 ### 2. `subscription_plan_entitlements`
 Direitos/recursos concedidos por plano:
-- `id` (UUID PK)
-- `plan_id` (FK `subscription_plans.id` ON DELETE CASCADE)
-- `entitlement_key` (VARCHAR(64) NOT NULL, ex.: `'marketplace_access'`)
-- Unique constraint em `(plan_id, entitlement_key)`.
+- `plan_id` (UUID NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT)
+- `entitlement_key` (TEXT NOT NULL CHECK (entitlement_key IN ('marketplace_access')))
+- `created_at` (TIMESTAMPTZ NOT NULL DEFAULT NOW())
+- PRIMARY KEY `(plan_id, entitlement_key)`
 
 ### 3. `professional_subscriptions`
-Assinatura vinculada ao perfil profissional:
-- `id` (UUID PK)
-- `professional_id` (FK `professionals.id` ON DELETE CASCADE)
-- `plan_id` (FK `subscription_plans.id`)
-- `status` (VARCHAR(32), `'trialing' | 'active' | 'past_due' | 'canceled' | 'expired'`)
-- `starts_at` (TIMESTAMPTZ)
-- `current_period_starts_at` (TIMESTAMPTZ)
-- `current_period_ends_at` (TIMESTAMPTZ)
-- `canceled_at` (TIMESTAMPTZ NULL)
+Assinatura vinculada ao perfil profissional (relação 1:1 estrita):
+- `id` (UUID PRIMARY KEY DEFAULT gen_random_uuid())
+- `professional_id` (UUID NOT NULL UNIQUE REFERENCES professionals(id) ON DELETE RESTRICT)
+- `plan_id` (UUID NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT)
+- `starts_at` (TIMESTAMPTZ NOT NULL)
+- `ends_at` (TIMESTAMPTZ NOT NULL)
 - `revoked_at` (TIMESTAMPTZ NULL)
-- `notes` (TEXT NULL)
-- Índice único parcial: `professional_subscriptions_one_active_idx` em `(professional_id)` onde `status IN ('trialing', 'active', 'past_due') AND revoked_at IS NULL`.
+- `created_at` (TIMESTAMPTZ NOT NULL DEFAULT NOW())
+- `updated_at` (TIMESTAMPTZ NOT NULL DEFAULT NOW())
+- CONSTRAINT `check_subscription_period` CHECK (`ends_at > starts_at`)
 
 ### 4. `professional_subscription_events`
 Log append-only imutável de transições de assinatura:
-- `id` (UUID PK)
-- `subscription_id` (FK `professional_subscriptions.id` ON DELETE CASCADE)
-- `event_type` (VARCHAR(64), ex.: `'granted'`, `'extended'`, `'revoked'`, `'reactivated'`)
-- `from_status` (VARCHAR(32) NULL)
-- `to_status` (VARCHAR(32) NOT NULL)
-- `metadata` (JSONB NOT NULL DEFAULT '{}')
+- `id` (UUID PRIMARY KEY DEFAULT gen_random_uuid())
+- `subscription_id` (UUID NOT NULL REFERENCES professional_subscriptions(id) ON DELETE RESTRICT)
+- `professional_id` (UUID NOT NULL REFERENCES professionals(id) ON DELETE RESTRICT)
+- `action` (TEXT NOT NULL CHECK (action IN ('granted', 'extended', 'revoked', 'reactivated')))
+- `source` (TEXT NOT NULL CHECK (source IN ('internal_provisioning')))
+- `previous_starts_at` (TIMESTAMPTZ NULL)
+- `new_starts_at` (TIMESTAMPTZ NULL)
+- `previous_ends_at` (TIMESTAMPTZ NULL)
+- `new_ends_at` (TIMESTAMPTZ NULL)
 - `created_at` (TIMESTAMPTZ NOT NULL DEFAULT NOW())
-- Protegido por trigger `protect_professional_subscription_events()` que impede `UPDATE` ou `DELETE`.
+- Protegido por trigger `protect_professional_subscription_events()` que impede `UPDATE`, `DELETE` ou `TRUNCATE`, disparando exceção `PROFESSIONAL_SUBSCRIPTION_EVENT_IMMUTABLE` com ERRCODE `P0025`.
 
 ### Rollback Protegido
 A migration 025 implementa proteção de rollback com código `P0025`: se houver qualquer linha em `professional_subscriptions` ou `professional_subscription_events`, o rollback aborta com erro `PROFESSIONAL_SUBSCRIPTION_ROLLBACK_BLOCKED`. Em banco com apenas dados compatíveis/seed, o rollback reverte tabelas, índices e funções cleanly.
@@ -87,17 +87,29 @@ A migration 025 implementa proteção de rollback com código `P0025`: se houver
 
 ## Motor de Entitlements (7 Estados)
 
-O cálculo do snapshot de direitos (`ProfessionalEntitlementSnapshot`) avalia deterministamente:
+O cálculo do snapshot de direitos (`ProfessionalEntitlementSnapshot`) avalia deterministamente utilizando o relógio do PostgreSQL (`NOW() AS db_now`):
 
-| Estado (`state`) | `has_access` | `reason_code` | Condição |
+| Estado (`state`) | `has_marketplace_access` | `reasons` | Condição |
 | :--- | :---: | :--- | :--- |
-| `legacy_exempt` | `true` | `legacy_profile_exempt` | Perfil possui `management_mode = 'legacy_unmanaged'`. |
-| `none` | `false` | `no_active_subscription` | Perfil `account_managed` sem registro em `professional_subscriptions`. |
-| `plan_inactive` | `false` | `subscription_plan_inactive` | Plano associado à assinatura está com `status != 'active'`. |
-| `revoked` | `false` | `subscription_revoked` | Assinatura possui `revoked_at IS NOT NULL AND revoked_at <= NOW()`. |
-| `not_started` | `false` | `subscription_not_started` | Assinatura possui `starts_at > NOW()`. |
-| `expired` | `false` | `subscription_period_ended` | Período da assinatura expirou (`current_period_ends_at <= NOW()`). |
-| `active` | `true` | `active_entitlement` | Assinatura ativa, dentro do período, sem revogação e com plano ativo. |
+| `legacy_exempt` | `true` | `[]` | Perfil possui `management_mode = 'legacy_unmanaged'`. |
+| `none` | `false` | `["subscription_required"]` | Perfil `account_managed` sem registro em `professional_subscriptions`. |
+| `plan_inactive` | `false` | `["subscription_plan_inactive"]` | Plano associado está com `is_active = FALSE` ou sem `marketplace_access`. |
+| `revoked` | `false` | `["subscription_revoked"]` | Assinatura possui `revoked_at IS NOT NULL`. |
+| `not_started` | `false` | `["subscription_not_started"]` | Assinatura possui `starts_at > db_now`. |
+| `expired` | `false` | `["subscription_expired"]` | Período expirou (`ends_at <= db_now`). |
+| `active` | `true` | `[]` | Assinatura ativa, dentro do período, sem revogação e com plano ativo. |
+
+Campos do Snapshot (`ProfessionalEntitlementSnapshot`):
+- `policy_version`: `"entitlement-v1"`
+- `professional_id`: UUID
+- `management_mode`: `"legacy_unmanaged" | "account_managed"`
+- `subscription_required`: boolean
+- `state`: `ProfessionalEntitlementState`
+- `plan_code`: string | null
+- `starts_at`: string (ISO 8601) | null
+- `ends_at`: string (ISO 8601) | null
+- `has_marketplace_access`: boolean
+- `reasons`: `ProfessionalEntitlementReason[]`
 
 ---
 
@@ -107,10 +119,8 @@ O predicado centralizador `marketplaceParticipationSql(tableAlias)` garante cons
 
 ```sql
 (
-  -- Perfis legados continuam operando normalmente
   ${tableAlias}.management_mode = 'legacy_unmanaged'
   OR (
-    -- Perfis gerenciados exigem identidade ativa E assinatura/entitlement ativo
     ${tableAlias}.management_mode = 'account_managed'
     AND ${eligibleManagedIdentitySql(tableAlias)}
     AND ${activeMarketplaceEntitlementSql(tableAlias)}
@@ -126,8 +136,7 @@ O predicado centralizador `marketplaceParticipationSql(tableAlias)` garante cons
    - `listShown`: matches exibidos para o cliente só aparecem se o profissional mantiver participação válida.
    - `findShownByPosition`: revalida identidade e entitlement ativo.
    - `listNextUnshown`: profissionais com assinatura revogada ou expirada são saltados na paginação de novos candidatos.
-   - `selectShownMatch`: ao selecionar um profissional, revalida participação ativa. Se a assinatura expirou ou a conta foi bloqueada, a seleção é rejeitada (`match_not_available`) sem criar contato, sem gerar snapshot bilateral e sem enfileirar outbound.
-   - `Outbox Dispatcher`: não notifica profissionais que perderam participação ativa.
+   - `selectShownMatch`: ao selecionar um profissional, executa busca estrutural do candidato, adquire lock pessimista `SELECT id FROM professionals WHERE id = $1 FOR UPDATE` como linha de autoridade, e reavalia a elegibilidade fresca (`resumedMatchEligibilitySql`) com `FOR UPDATE OF matches`. Se a assinatura tiver sido revogada ou expirado, a seleção é rejeitada (`match_not_available`) com 0 contatos, 0 outbox e sem marcar `selected_at`.
 
 ---
 
@@ -135,35 +144,38 @@ O predicado centralizador `marketplaceParticipationSql(tableAlias)` garante cons
 
 Todas as rotas exigem o cabeçalho `x-internal-key: INTERNAL_API_KEY`:
 
-1. **`POST /internal/professional-subscriptions/:professionalId/grant`**
-   - Cria uma nova assinatura para o perfil com o plano especificado (`plan_key`, padrão `'marketplace_standard_v1'`).
-   - Define `starts_at`, `current_period_starts_at` e `current_period_ends_at` conforme a duração informada (`duration_days`).
-   - Registra evento `'granted'` em auditoria.
-   - Rejeita com `409 Conflict` se já houver assinatura ativa para o perfil.
+1. **`GET /internal/professional-subscriptions/:professionalId`**
+   - Retorna o snapshot atual de direitos (`ProfessionalEntitlementSnapshot`).
 
-2. **`POST /internal/professional-subscriptions/:professionalId/extend`**
-   - Estende a data de término do período atual (`current_period_ends_at`).
-   - Revalida se o novo término é posterior ao término atual.
+2. **`POST /internal/professional-subscriptions/:professionalId/grant`**
+   - Input: `{ plan_code: string, starts_at: ISOString, ends_at: ISOString }`.
+   - Semântica create-only: cria assinatura para o perfil. Se o perfil já possuir assinatura (ativa ou revogada), retorna `409 subscription_already_exists`. Trata violação única do PG (`23505`) concorrente com `409 subscription_already_exists`.
+   - Registra evento `'granted'`.
+
+3. **`POST /internal/professional-subscriptions/:professionalId/extend`**
+   - Input: `{ ends_at: ISOString }`.
+   - Estende a data de término (`ends_at`). Revalida se o novo término é posterior ao término atual (senão `400 invalid_extension_period`).
    - Registra evento `'extended'`.
 
-3. **`POST /internal/professional-subscriptions/:professionalId/revoke`**
-   - Revoga imediatamente o acesso (`revoked_at = NOW()`, `status = 'canceled'`).
-   - Idempotente: se já revogada, retorna o estado atual sem lançar erro.
+4. **`POST /internal/professional-subscriptions/:professionalId/revoke`**
+   - Input: corpo estritamente vazio (`undefined` ou `{}`). Rejeita payloads com chaves ou `null` com `400 invalid_request`.
+   - Revoga imediatamente o acesso (`revoked_at = NOW()`). Idempotente: se já revogada, retorna snapshot sem duplicar evento.
    - Registra evento `'revoked'`.
 
-4. **`POST /internal/professional-subscriptions/:professionalId/reactivate`**
-   - Reativa uma assinatura expirada ou revogada, limpando `revoked_at` e definindo novo período.
+5. **`POST /internal/professional-subscriptions/:professionalId/reactivate`**
+   - Input: `{ starts_at: ISOString, ends_at: ISOString, plan_code?: string }`.
+   - Regra semântica: só é permitida em assinaturas revogadas (`revoked_at IS NOT NULL`) ou expiradas (`ends_at <= NOW()`). Se a assinatura estiver ativa, rejeita com `409 subscription_not_reactivatable` sem gerar eventos.
+   - Validação do plano: o plano alvo deve estar ativo (`is_active = TRUE`). Se `plan_code` for omitido, o plano atual deve permanecer ativo, senão retorna `409 plan_inactive`.
+   - Limpa `revoked_at = NULL` e atualiza datas e plano.
    - Registra evento `'reactivated'`.
-
-Todas as operações de mutação utilizam lock pessimista de linha (`SELECT ... FOR UPDATE`) sobre a assinatura e transações ACID.
 
 ---
 
 ## Consulta Self-Service e Dashboard Web
 
-1. **API de Consulta**:
-   - `GET /profiles/:professionalId/entitlement`: acessível por profissionais autenticados com membership ativa. Retorna `ProfessionalEntitlementSnapshot`.
-   - `GET /dashboard`: agregado do painel inclui o campo `entitlement` dentro do payload `ready`.
+1. **APIs Internas de Autenticação / Perfil**:
+   - `GET /internal/professional-auth/profiles/:professionalId/entitlement`: acessível com chave interna e sessão autenticada. Retorna `ProfessionalEntitlementSnapshot`.
+   - `GET /internal/professional-auth/profiles/:professionalId/dashboard`: agregado do painel inclui o campo `entitlement` dentro do payload `ready`.
 
 2. **Interface do Painel (`SubscriptionCard`)**:
    - Exibe o status da assinatura de forma clara (Ativo, Expirado, Necessário, Isento para legados).

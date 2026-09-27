@@ -757,9 +757,8 @@ test("delivered contact invariant: contacts already delivered remain respondable
 
 test("concurrency Scenario A: REVOKE VENCE - selection blocks on professional row lock, revoke commits first, selection sees match_not_available and creates 0 contacts", async () => {
   const { serviceId, categoryId, customerId, customerPhone } = await createBaseCatalogAndCustomer();
-  const { professionalId, accountId } = await createProfessional({ managementMode: "account_managed", serviceId });
+  const { professionalId, phone: profPhone, accountId } = await createProfessional({ managementMode: "account_managed", serviceId });
   const subRepo = new PostgresProfessionalSubscriptionRepository();
-  const selectionRepo = new PostgresSelectionMatchRepository();
 
   await subRepo.grant(professionalId, {
     plan_code: "marketplace_standard_v1",
@@ -796,14 +795,38 @@ test("concurrency Scenario A: REVOKE VENCE - selection blocks on professional ro
   );
 
   try {
+    let clientBPid: number | undefined;
+    let reachedLockResolve: () => void;
+    const reachedLockPromise = new Promise<void>((r) => { reachedLockResolve = r; });
+
+    // Custom selection repo running on connection B with query interceptor
+    const trackingSelectionRepo = new PostgresSelectionMatchRepository(
+      undefined,
+      async (callback) => {
+        return withTransaction(async (realClientB) => {
+          clientBPid = (await realClientB.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+          const proxyClientB: DatabaseClient = {
+            query: async (text: string, values?: SqlValue[]) => {
+              if (typeof text === "string" && text.includes("FROM professionals") && text.includes("FOR UPDATE")) {
+                reachedLockResolve();
+              }
+              return realClientB.query(text, values);
+            },
+          };
+          return callback(proxyClientB);
+        });
+      },
+    );
+
     let selectionPromise: Promise<SelectShownMatchOutcome> | undefined;
 
     // Transaction A locks the professional row first
     await withTransaction(async (clientA) => {
+      const clientAPid = (await clientA.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
       await clientA.query(`SELECT id FROM professionals WHERE id = $1 FOR UPDATE`, [professionalId]);
 
-      // Now start selection concurrently (runs in independent transaction)
-      selectionPromise = selectionRepo.selectShownMatch({
+      // Start selection concurrently on connection B
+      selectionPromise = trackingSelectionRepo.selectShownMatch({
         customerId,
         conversationId,
         searchRequestId,
@@ -814,14 +837,20 @@ test("concurrency Scenario A: REVOKE VENCE - selection blocks on professional ro
         now: new Date(),
       });
 
-      // Verify selection is blocked waiting for professional row lock
-      let settled = false;
-      selectionPromise.then(
-        () => { settled = true; },
-        () => { settled = true; },
-      );
-      await new Promise((r) => setTimeout(r, 150));
-      assert.equal(settled, false, "Selection must be blocked waiting for professional row lock");
+      // Deterministic barrier: wait until selection reaches the professional row lock
+      await reachedLockPromise;
+
+      // Confirm via PostgreSQL that connection B is actively blocked waiting on clientAPid
+      while (true) {
+        const blockersRes = await clientA.query<{ blockers: number[] }>(
+          `SELECT pg_blocking_pids($1) AS blockers`,
+          [clientBPid],
+        );
+        if (blockersRes.rows[0]?.blockers?.includes(clientAPid)) {
+          break;
+        }
+        await new Promise((r) => setImmediate(r));
+      }
 
       // While holding lock, revoke the subscription using clientA
       await subRepo.revoke(professionalId, clientA);
@@ -833,26 +862,42 @@ test("concurrency Scenario A: REVOKE VENCE - selection blocks on professional ro
     const outcome = await selectionPromise;
     assert.equal(outcome.kind, "match_not_available");
 
-    // Invariant: 0 contacts created, 0 outbox messages, match unselected
+    // Invariant 1: 0 contacts created for search_request
     const contactsCount = await query<{ count: number }>(
-      `SELECT count(*)::int count FROM contacts WHERE search_request_id = $1`,
+      `SELECT count(*)::int AS count FROM contacts WHERE search_request_id = $1`,
       [searchRequestId],
     );
     assert.equal(contactsCount.rows[0].count, 0, "No contacts should be created when revoke wins");
 
+    // Invariant 2: match.selected_at IS NULL
     const matchRow = (await query<{ selected_at: Date | null }>(
       `SELECT selected_at FROM matches WHERE id = $1`,
       [matchId],
     )).rows[0];
     assert.equal(matchRow.selected_at, null, "Match must not be marked selected");
 
-    const outboxCount = await query<{ count: number }>(
-      `SELECT count(*)::int count FROM channel_outbound_messages WHERE recipient_phone_e164 = $1`,
-      [customerPhone],
+    // Invariant 3: zero professional_contact_notification outbound messages for professional
+    const profNotificationCount = await query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM channel_outbound_messages
+       WHERE purpose = 'professional_contact_notification' AND recipient_phone_e164 = $1`,
+      [profPhone],
     );
-    assert.equal(outboxCount.rows[0].count, 0, "No outbound messages should be created");
+    assert.equal(profNotificationCount.rows[0].count, 0, "No professional contact notification should be sent");
+
+    // Invariant 4: zero outbound messages for customer or professional
+    const allOutboxCount = await query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2)`,
+      [customerPhone, profPhone],
+    );
+    assert.equal(allOutboxCount.rows[0].count, 0, "No outbound messages should be created");
+
+    // Invariant 5: zero initial contact business keys
+    const contactInitialKeyCount = await query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM channel_outbound_messages WHERE business_key LIKE 'contact:%:initial'`,
+    );
+    assert.equal(contactInitialKeyCount.rows[0].count, 0, "No initial contact messages should be created");
   } finally {
-    await query(`DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 = $1`, [customerPhone]);
+    await query(`DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2)`, [customerPhone, profPhone]);
     await query(`DELETE FROM contacts WHERE search_request_id = $1`, [searchRequestId]);
     await query(`DELETE FROM channel_inbound_messages WHERE id = $1`, [selectionInboundId]);
     await query(`DELETE FROM matches WHERE search_request_id = $1`, [searchRequestId]);
@@ -923,6 +968,10 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
   );
 
   try {
+    let clientBPid: number | undefined;
+    let revokeReachedLockResolve: () => void;
+    const revokeReachedLockPromise = new Promise<void>((r) => { revokeReachedLockResolve = r; });
+
     let revokePromise: Promise<unknown> | undefined;
 
     // Selection repo with barrier hook: triggers revoke after acquiring professional lock
@@ -930,18 +979,42 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
       undefined,
       undefined,
       undefined,
-      async (_client, profId) => {
-        // Dispatched in background on an independent connection (not sharing _client)
-        revokePromise = subRepo.revoke(profId);
+      async (clientA, profId) => {
+        const clientAPid = (await clientA.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
 
-        // Verify revoke is blocked waiting for the professional row lock
-        let revokeSettled = false;
-        revokePromise.then(
-          () => { revokeSettled = true; },
-          () => { revokeSettled = true; },
+        // Dispatched in background on an independent connection B with query interceptor
+        const subRepoB = new PostgresProfessionalSubscriptionRepository(
+          async (callback) => {
+            return withTransaction(async (realClientB) => {
+              clientBPid = (await realClientB.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+              const proxyClientB: DatabaseClient = {
+                query: async (text: string, values?: SqlValue[]) => {
+                  if (typeof text === "string" && text.includes("FROM professionals") && text.includes("FOR UPDATE")) {
+                    revokeReachedLockResolve();
+                  }
+                  return realClientB.query(text, values);
+                },
+              };
+              return callback(proxyClientB);
+            });
+          },
         );
-        await new Promise((r) => setTimeout(r, 150));
-        assert.equal(revokeSettled, false, "Revoke must be blocked by selection's lock on professional");
+        revokePromise = subRepoB.revoke(profId);
+
+        // Deterministic barrier: wait until revoke reaches the lock on professionals
+        await revokeReachedLockPromise;
+
+        // Confirm via PostgreSQL that connection B is blocked by connection A
+        while (true) {
+          const blockersRes = await clientA.query<{ blockers: number[] }>(
+            `SELECT pg_blocking_pids($1) AS blockers`,
+            [clientBPid],
+          );
+          if (blockersRes.rows[0]?.blockers?.includes(clientAPid)) {
+            break;
+          }
+          await new Promise((r) => setImmediate(r));
+        }
       },
     );
 
@@ -959,6 +1032,14 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
     assert.equal(selectionOutcome.kind, "selected");
     if (selectionOutcome.kind !== "selected") return;
 
+    // Invariant: contact was successfully created and committed before revocation finishes
+    const contactRow = (await query<{ id: string; status: string; public_code: string }>(
+      `SELECT id, status, public_code FROM contacts WHERE id = $1`,
+      [selectionOutcome.contactId],
+    )).rows[0];
+    assert.ok(contactRow);
+    assert.equal(contactRow.status, "requested");
+
     // Wait for the background revoke to unblock and finish
     assert.ok(revokePromise);
     await revokePromise;
@@ -966,14 +1047,6 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
     // Subscription is now revoked
     const snapshot = await subRepo.getEntitlementSnapshot(professionalId);
     assert.equal(snapshot.state, "revoked");
-
-    // Invariant: contact was successfully created and committed
-    const contactRow = (await query<{ id: string; status: string; public_code: string }>(
-      `SELECT id, status, public_code FROM contacts WHERE id = $1`,
-      [selectionOutcome.contactId],
-    )).rows[0];
-    assert.ok(contactRow);
-    assert.equal(contactRow.status, "requested");
 
     // Invariant: Delivered contact remains respondable despite later revocation
     const oppInboundId = randomUUID();
@@ -1014,6 +1087,90 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
     await query(`DELETE FROM search_requests WHERE id = $1`, [searchRequestId]);
     await cleanupProfessionalFixture({ professionalId, accountId, serviceId, categoryId, customerId });
   }
+});
+
+test("semantic reactivate lifecycle: rejects active, accepts expired, accepts revoked, and validates plan activity", async () => {
+  await rolledBack(async () => {
+    const repo = new PostgresProfessionalSubscriptionRepository();
+    const { serviceId } = await createBaseCatalogAndCustomer();
+    const { professionalId } = await createProfessional({ managementMode: "account_managed", serviceId });
+
+    // 1. Grant an active subscription
+    await repo.grant(professionalId, {
+      plan_code: "marketplace_standard_v1",
+      starts_at: new Date(Date.now() - 3600000).toISOString(),
+      ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+    });
+
+    // 2. Active subscription + reactivate -> 409 subscription_not_reactivatable
+    await assert.rejects(
+      () => repo.reactivate(professionalId, {
+        starts_at: new Date(Date.now() - 1000).toISOString(),
+        ends_at: new Date(Date.now() + 86400000 * 60).toISOString(),
+      }),
+      /subscription_not_reactivatable/,
+    );
+
+    // Verify no 'reactivated' event was written
+    const eventsAfterActiveReactivate = await query<{ action: string }>(
+      `SELECT action FROM professional_subscription_events WHERE professional_id = $1 AND action = 'reactivated'`,
+      [professionalId],
+    );
+    assert.equal(eventsAfterActiveReactivate.rows.length, 0);
+
+    // 3. Expired subscription + reactivate -> works!
+    await query(
+      `UPDATE professional_subscriptions
+       SET starts_at = NOW() - INTERVAL '60 days', ends_at = NOW() - INTERVAL '1 day'
+       WHERE professional_id = $1`,
+      [professionalId],
+    );
+    const expiredReactivated = await repo.reactivate(professionalId, {
+      starts_at: new Date(Date.now() - 1000).toISOString(),
+      ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+    });
+    assert.equal(expiredReactivated.state, "active");
+    const eventsAfterExpiredReactivate = await query<{ action: string }>(
+      `SELECT action FROM professional_subscription_events WHERE professional_id = $1 AND action = 'reactivated'`,
+      [professionalId],
+    );
+    assert.equal(eventsAfterExpiredReactivate.rows.length, 1);
+
+    // 4. Revoked subscription + reactivate -> works!
+    await repo.revoke(professionalId);
+    const revokedReactivated = await repo.reactivate(professionalId, {
+      starts_at: new Date(Date.now() - 1000).toISOString(),
+      ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+    });
+    assert.equal(revokedReactivated.state, "active");
+    const eventsAfterRevokedReactivate = await query<{ action: string }>(
+      `SELECT action FROM professional_subscription_events WHERE professional_id = $1 AND action = 'reactivated'`,
+      [professionalId],
+    );
+    assert.equal(eventsAfterRevokedReactivate.rows.length, 2);
+
+    // 5. Inactive current plan without replacement -> 409 plan_inactive
+    await repo.revoke(professionalId);
+    const currentPlanId = (await query<{ plan_id: string }>(
+      `SELECT plan_id FROM professional_subscriptions WHERE professional_id = $1`,
+      [professionalId],
+    )).rows[0].plan_id;
+
+    // Temporarily mark plan as inactive
+    await query(`UPDATE subscription_plans SET is_active = FALSE WHERE id = $1`, [currentPlanId]);
+    try {
+      await assert.rejects(
+        () => repo.reactivate(professionalId, {
+          starts_at: new Date(Date.now() - 1000).toISOString(),
+          ends_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+        }),
+        /plan_inactive/,
+      );
+    } finally {
+      // Restore plan active status
+      await query(`UPDATE subscription_plans SET is_active = TRUE WHERE id = $1`, [currentPlanId]);
+    }
+  });
 });
 
 test("migration 025 rollback is blocked with P0025 when subscriptions or events exist", async () => {

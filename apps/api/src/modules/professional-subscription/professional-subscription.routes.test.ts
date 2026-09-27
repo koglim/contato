@@ -74,7 +74,11 @@ test("internal professional subscriptions routes validate inputs and handle erro
         return mockSnapshot;
       },
       revoke: async () => mockSnapshot,
-      reactivate: async () => mockSnapshot,
+      reactivate: async (_id, input) => {
+        if (input.plan_code === "not_reactivatable") throw new Error("subscription_not_reactivatable");
+        if (input.plan_code === "inactive_plan") throw new Error("plan_inactive");
+        return mockSnapshot;
+      },
     },
   });
 
@@ -152,6 +156,16 @@ test("internal professional subscriptions routes validate inputs and handle erro
   assert.equal(invalidRevoke.statusCode, 400);
   assert.deepEqual(invalidRevoke.json(), { error: "invalid_request" });
 
+  // POST revoke with null body -> 400
+  const nullRevoke = await app.inject({
+    method: "POST",
+    url: `/internal/professional-subscriptions/${profileId}/revoke`,
+    headers: { ...headers, "content-type": "application/json" },
+    payload: "null",
+  });
+  assert.equal(nullRevoke.statusCode, 400);
+  assert.deepEqual(nullRevoke.json(), { error: "invalid_request" });
+
   // POST revoke success
   const revokeRes = await app.inject({
     method: "POST",
@@ -159,6 +173,34 @@ test("internal professional subscriptions routes validate inputs and handle erro
     headers,
   });
   assert.equal(revokeRes.statusCode, 200);
+
+  // POST reactivate when subscription is not reactivatable -> 409
+  const notReactivatableRes = await app.inject({
+    method: "POST",
+    url: `/internal/professional-subscriptions/${profileId}/reactivate`,
+    headers,
+    payload: {
+      plan_code: "not_reactivatable",
+      starts_at: "2026-06-01T00:00:00.000Z",
+      ends_at: "2026-12-31T00:00:00.000Z",
+    },
+  });
+  assert.equal(notReactivatableRes.statusCode, 409);
+  assert.deepEqual(notReactivatableRes.json(), { error: "subscription_not_reactivatable" });
+
+  // POST reactivate with inactive plan -> 409
+  const inactivePlanRes = await app.inject({
+    method: "POST",
+    url: `/internal/professional-subscriptions/${profileId}/reactivate`,
+    headers,
+    payload: {
+      plan_code: "inactive_plan",
+      starts_at: "2026-06-01T00:00:00.000Z",
+      ends_at: "2026-12-31T00:00:00.000Z",
+    },
+  });
+  assert.equal(inactivePlanRes.statusCode, 409);
+  assert.deepEqual(inactivePlanRes.json(), { error: "plan_inactive" });
 
   // POST reactivate success
   const reactivateRes = await app.inject({
