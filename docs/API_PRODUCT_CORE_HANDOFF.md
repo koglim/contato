@@ -1,6 +1,10 @@
 # API Product Core — contato bilateral
 
-> Estado atual: [V1_EXECUTION.md](V1_EXECUTION.md). As rodadas abaixo são histórico,
+> [!NOTE]
+> **Documento Histórico de Handoff:** Este documento registra etapas de desenvolvimento prévias.
+> Para a documentação canônica atual, consulte [docs/README.md](README.md), [PROJECT.md](PROJECT.md), [CURRENT_STATE.md](CURRENT_STATE.md) e [DATA_MODEL.md](DATA_MODEL.md).
+>
+> Estado atual da execução: [V1_EXECUTION.md](V1_EXECUTION.md). As rodadas abaixo são histórico,
 > não instruções para reconstruir módulos ou modificar migrations já aplicadas.
 > A base atual inclui resposta profissional/retomada (015), retry (016) e
 > recibo/retenção de entrega (017), memória B2 (018), recuperação da Inbox (019)

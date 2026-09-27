@@ -1,5 +1,9 @@
 # Execução da V1 — estado canônico
 
+> [!NOTE]
+> **Documento Histórico de Execução:** Este documento preserva o registro da execução técnica das entregas da V1 até o PR #15.
+> Para a definição canônica e o estado atual consolidado do produto, consulte [docs/README.md](README.md), [PROJECT.md](PROJECT.md), [CURRENT_STATE.md](CURRENT_STATE.md) e [ROADMAP.md](ROADMAP.md).
+
 Base confirmada em 09/09/2026: `main` em `5c20bd92cb13d8867ca21bcc819104dbf76ce1ff`,
 CI [34384354307](https://github.com/koglim/contato/actions/runs/34384354307) aprovado.
 Branch de execução: `codex/marketplace-v1-completion`.
