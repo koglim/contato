@@ -79,7 +79,7 @@ exports.down = (pgm) => {
        SET status = COALESCE(
          (SELECT ore.next_state FROM opportunity_response_events ore WHERE ore.contact_id = c.id),
          'requested'
-       )
+       )::contact_status
      WHERE c.bilateral_snapshot IS NOT NULL
        AND c.status = 'shared';
 

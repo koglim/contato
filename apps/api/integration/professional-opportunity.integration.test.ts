@@ -102,7 +102,6 @@ async function fixture(other = false) {
       await db.query("ALTER TABLE professional_unavailability_events ENABLE TRIGGER professional_unavailability_events_immutable");
       await db.query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
       await db.query("DELETE FROM opportunity_response_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$1)", [customerId]);
-      await db.query("ALTER TABLE opportunity_event_immutable ENABLE TRIGGER opportunity_event_immutable").catch(() => {});
       await db.query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
       await db.query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 IN ($1,$2))", [customerPhone, professionalPhone]);
       await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
