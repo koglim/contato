@@ -79,6 +79,7 @@ import { professionalAuthRoutes } from "./modules/professional-auth/professional
 import type { ProfessionalAuthService } from "./modules/professional-auth/professional-auth.service.js";
 import { professionalSubscriptionsRoutes } from "./modules/professional-subscription/professional-subscription.routes.js";
 import type { ProfessionalSubscriptionService } from "./modules/professional-subscription/professional-subscription.service.js";
+import { ContactCompletionService } from "./modules/contact-completion/contact-completion.service.js";
 
 type AppDependencies = {
   contextualConversation?: ContextualInboxHandler;
@@ -116,6 +117,7 @@ type AppDependencies = {
   internalApiKey?: string;
   professionalOpportunityService?: Pick<ProfessionalOpportunityService, "handle">;
   professionalAuthService?: ProfessionalAuthService;
+  contactCompletionService?: Pick<ContactCompletionService, "handle">;
 };
 
 function createLazyLocationResolutionService(provider: GeocodingProvider | undefined, observe: (diagnostic: LocationResolutionDiagnostic) => void): LocationResolutionService {
@@ -178,6 +180,7 @@ export function buildApp({
   professionalOpportunityService,
   professionalAuthService,
   professionalSubscriptionService,
+  contactCompletionService,
   logStream,
   contextualConversation,
 }: AppDependencies = {}) {
@@ -296,6 +299,7 @@ export function buildApp({
         }, "Contextual execution path"),
       });
     })(),
+    contactCompletionService ?? (channelInboundMessageRepository ? undefined : new ContactCompletionService()),
   );
 
   app.get("/health", async () => healthResponseSchema.parse({ status: "ok" }));
