@@ -12,7 +12,36 @@ import { PostgresSelectionMatchRepository } from "../src/modules/match-selection
 import { PostgresProfessionalSubscriptionRepository } from "../src/modules/professional-subscription/professional-subscription.repository.js";
 import { ProfessionalOpportunityService } from "../src/modules/professional-opportunity/professional-opportunity.service.js";
 import { createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
+import { opportunityMessageSchema } from "@contatocerto/shared";
 import { rollbackThrough } from "./rollback-helper.js";
+
+/**
+ * Narrows an unknown error to a PostgreSQL error by checking for
+ * the `code` and `message` properties without using `any`.
+ */
+function isPgError(error: unknown, expectedCode: string, expectedMessage?: string): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if (!("code" in error) || !("message" in error)) return false;
+  const { code, message } = error as { code: unknown; message: unknown };
+  if (code !== expectedCode) return false;
+  if (expectedMessage !== undefined && typeof message === "string") {
+    return message.includes(expectedMessage);
+  }
+  return true;
+}
+
+/**
+ * Extracts a diagnostic string from an unknown error thrown by child_process
+ * execFile (which surfaces stderr/stdout as properties alongside message).
+ */
+function extractRollbackError(error: unknown): string {
+  if (typeof error !== "object" || error === null) return String(error);
+  const e = error as Record<string, unknown>;
+  if (typeof e["stderr"] === "string") return e["stderr"];
+  if (typeof e["stdout"] === "string") return e["stdout"];
+  if (typeof e["message"] === "string") return e["message"];
+  return String(error);
+}
 
 after(closeDatabaseConnection);
 
@@ -265,14 +294,14 @@ test("internal mutations create audit events, enforce locking and protect immuta
     await query("SAVEPOINT sp1");
     await assert.rejects(
       () => query(`UPDATE professional_subscription_events SET action = 'tampered' WHERE professional_id = $1`, [professionalId]),
-      (err: any) => err.code === "P0025" && err.message.includes("PROFESSIONAL_SUBSCRIPTION_EVENT_IMMUTABLE"),
+      (err: unknown) => isPgError(err, "P0025", "PROFESSIONAL_SUBSCRIPTION_EVENT_IMMUTABLE"),
     );
     await query("ROLLBACK TO sp1");
 
     await query("SAVEPOINT sp2");
     await assert.rejects(
       () => query(`DELETE FROM professional_subscription_events WHERE professional_id = $1`, [professionalId]),
-      (err: any) => err.code === "P0025" && err.message.includes("PROFESSIONAL_SUBSCRIPTION_EVENT_IMMUTABLE"),
+      (err: unknown) => isPgError(err, "P0025", "PROFESSIONAL_SUBSCRIPTION_EVENT_IMMUTABLE"),
     );
     await query("ROLLBACK TO sp2");
   });
@@ -586,7 +615,9 @@ test("delivered contact invariant: contacts already delivered remain respondable
     });
 
     assert.ok(oppOutcome);
-    assert.equal((oppOutcome.result as any)?.result?.kind, "accepted");
+    const parsed = opportunityMessageSchema.safeParse(oppOutcome.result);
+    assert.ok(parsed.success, "oppOutcome.result should match opportunityMessageSchema");
+    assert.equal(parsed.data.result.kind, "accepted");
 
     // Contact status is updated to 'accepted'
     const updatedContact = (await query<{ status: string }>(`SELECT status FROM contacts WHERE id = $1`, [contactId])).rows[0];
@@ -610,8 +641,8 @@ test("migration 025 rollback is blocked with P0025 when subscriptions or events 
     // Attempting rollback through 025 must be blocked with P0025
     await assert.rejects(
       () => rollbackThrough("025_add_professional_subscriptions"),
-      (err: any) =>
-        /PROFESSIONAL_SUBSCRIPTION_ROLLBACK_BLOCKED|P0025/u.test(String(err?.stderr ?? err?.message)),
+      (err: unknown) =>
+        /PROFESSIONAL_SUBSCRIPTION_ROLLBACK_BLOCKED|P0025/u.test(extractRollbackError(err)),
     );
   } finally {
     await query(`DELETE FROM professional_subscriptions WHERE id = $1`, [subId]);

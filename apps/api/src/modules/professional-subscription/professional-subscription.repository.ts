@@ -7,7 +7,7 @@ import type {
   ReactivateProfessionalSubscriptionInput,
 } from "@contatocerto/shared";
 import { professionalEntitlementSnapshotSchema } from "@contatocerto/shared";
-import { type DatabaseClient, query, withTransaction } from "../../database/connection.js";
+import { type DatabaseClient, type SqlValue, query, withTransaction } from "../../database/connection.js";
 
 type ProfessionalRow = {
   id: string;
@@ -43,13 +43,18 @@ export class PostgresProfessionalSubscriptionRepository {
     professionalId: string,
     client?: DatabaseClient,
   ): Promise<ProfessionalEntitlementSnapshot> {
-    const q = client ? (text: string, params: unknown[]) => client.query(text, params as any) : this.runQuery;
+    // Typed query executor: delegates to client.query<T> when inside a transaction,
+    // or to the global query function otherwise. All callers pass SqlValue[] params.
+    async function runQ<T extends Record<string, unknown>>(text: string, values: SqlValue[]) {
+      if (client) return client.query<T>(text, values);
+      return query<T>(text, values);
+    }
 
-    const professionalRes = await q(
+    const professionalRes = await runQ<ProfessionalRow>(
       `SELECT id, management_mode FROM professionals WHERE id = $1`,
       [professionalId],
     );
-    const professional = professionalRes.rows[0] as ProfessionalRow | undefined;
+    const professional = professionalRes.rows[0];
     if (!professional) {
       throw new Error("professional_not_found");
     }
@@ -69,7 +74,7 @@ export class PostgresProfessionalSubscriptionRepository {
       });
     }
 
-    const subRes = await q(
+    const subRes = await runQ<SubscriptionWithPlanRow>(
       `SELECT
         ps.id,
         ps.professional_id,
