@@ -116,12 +116,13 @@ Se o webhook do canal reenviar a mesma mensagem (`provider` + `provider_message_
 
 - **Desacoplamento de contexto de busca ativa**: O processamento de conclusão de atendimento é uma operação no nível de contato, autorizada pelo snapshot bilateral e serializada na linha de `contacts`. Alterações em conversas de busca ativas do cliente (e consequente mudança de `context_fingerprint`) **não** geram `InboxContextChangedError` na rota de conclusão de contatos, assegurando que o comando seja processado sem interferir ou ser bloqueado pelo fluxo de busca.
 - **Preservação de conversas de busca ativas**: Se um cliente estiver no meio de um fluxo de busca de outro serviço e enviar um comando determinístico de conclusão de um contato anterior (`concluído CC-XXXXXXXX`), o comando é roteado estritamente para o módulo de conclusão de contatos. A conversa de busca ativa **não é cancelada, corrompida ou sobrescrita**.
-- **Independência de assinatura profissional**: Uma vez que o contato foi aceito (`contacts.status = 'accepted'`), o ciclo de vida do serviço pode ser concluído normalmente, mesmo se a assinatura do profissional expirar ou for revogada posteriormente.
+- **Independência de assinatura profissional**: Uma vez que o contato bilateral é estabelecido (`contacts.status = 'shared'`), o ciclo de vida do serviço pode ser concluído normalmente, mesmo se a assinatura do profissional expirar ou for revogada posteriormente.
+- **Indisponibilidade profissional não bloqueia conclusão**: Um evento de indisponibilidade em `professional_unavailability_events` é um fato declaratório unilateral do profissional. Ele **não** cancela a conexão bilateral, **não** anula o status `shared` do contato e **não** impede que qualquer das partes inicie ou conclua o ciclo de conclusão. Declarações de indisponibilidade e evidências de conclusão coexistem no ledger como registros auditáveis independentes.
 
 ---
 
-## 10. Desacoplamento de Avaliações e Reputação (PR #16)
+## 10. Desacoplamento de Avaliações e Reputação
 
 O módulo de conclusão de atendimento é deliberadamente separado de avaliações:
 - **Zero código de estrelas, notas ou reputação** foi inserido no PR #15.
-- A conclusão confirmada (`contacts.status = 'completed'`) servirá como pré-requisito e token de elegibilidade para que o cliente possa avaliar o profissional no futuro PR #16 (*Reviews & Ratings v1*).
+- A conclusão confirmada (`contacts.status = 'completed'`) servirá como pré-requisito e token de elegibilidade para que o cliente possa avaliar o profissional em uma etapa futura de engenharia (*Reviews & Ratings* — sem número de PR atribuído, pois o PR #16 corresponde à reconciliação canônica de documentação).

@@ -140,7 +140,7 @@ export class ProfessionalOpportunityService {
         const other = (await db.query<Conversation>(`SELECT *, expires_at > NOW() AS valid FROM search_conversations
           WHERE customer_id = $1 AND id <> $2 AND status = 'active' AND expires_at > NOW() FOR NO KEY UPDATE`, [contact.customer_id, conversation.id])).rows[0];
 
-        let customerText = `O profissional da solicitação de ${safeOpportunityText(snapshot.service_name, 120)}, código ${contact.public_code}, não poderá atender.`;
+        let customerText = `O profissional informou que não poderá atender a solicitação de ${safeOpportunityText(snapshot.service_name, 120)}, código ${contact.public_code}.`;
         await db.query("UPDATE search_conversations SET resume_slot = 'selection', resume_code = $2 WHERE id = $1 AND status <> 'active'", [conversation.id, contact.public_code]);
 
         if (conversation.valid) {
@@ -192,7 +192,7 @@ export class ProfessionalOpportunityService {
     if (decision === "declined") {
       const other = (await db.query<Conversation>(`SELECT *, expires_at > NOW() AS valid FROM search_conversations
         WHERE customer_id = $1 AND id <> $2 AND status = 'active' AND expires_at > NOW() FOR NO KEY UPDATE`, [contact.customer_id, conversation.id])).rows[0];
-      customerText = `O profissional da solicitação de ${safeOpportunityText(snapshot.service_name, 120)}, código ${contact.public_code}, não poderá atender.`;
+      customerText = `O profissional informou que não poderá atender a solicitação de ${safeOpportunityText(snapshot.service_name, 120)}, código ${contact.public_code}.`;
       await db.query("UPDATE search_conversations SET resume_slot = 'selection', resume_code = $2 WHERE id = $1 AND status <> 'active'", [conversation.id, contact.public_code]);
       if (conversation.valid) {
         await db.query("UPDATE search_requests SET status = 'matched' WHERE id = $1 AND status = 'selected'", [contact.search_request_id]);

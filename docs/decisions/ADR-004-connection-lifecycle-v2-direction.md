@@ -32,8 +32,8 @@ Na prática de um marketplace conversacional de serviços locais:
    * O profissional receberá a notificação da oportunidade contendo o telefone do cliente, resumo do serviço e o contexto seguro de localização disponível.
    * O profissional terá a opção de sinalizar caso não possa atender (*"estou indisponível"*).
    * Essa resposta de indisponibilidade é classificada estritamente como **declaração unilateral do profissional**, servindo para telemetria operacional de qualidade e para que o sistema possa oferecer opções adicionais ao cliente, sem apagar o fato de que a oportunidade foi entregue.
-4. **Planejamento de Engenharia:**
-   * Esta alteração será implementada na frente técnica subsequente (Connection Lifecycle v2), ajustando migrations, transições de status da tabela `contacts` e templates de mensagens.
+4. **Implementação de Engenharia:**
+   * Esta direção foi implementada na Migration 027 (`027_add_connection_lifecycle_v2.js`), com ajustes no `ContactCompletionService`, `ProfessionalOpportunityService`, schemas compartilhados e templates de mensagens.
 
 ## Consequências
 
@@ -42,4 +42,4 @@ Na prática de um marketplace conversacional de serviços locais:
   * Acelera drasticamente a velocidade de fechamento entre cliente e prestador.
   * Simplifica as regras de auditoria e elimina estados intermediários ambíguos de contatos "presos aguardando aceite".
 * **Negativas / Compromissos:**
-  * Exigirá refatoração das consultas e testes que hoje assumem que um contato só pode ser concluído ou confirmado se tiver passado previamente pelo status `'accepted'`.
+  * **LEGACY:** Requeria refatoração das consultas e testes que assumiam que um contato só podia ser concluído ou confirmado se tivesse passado previamente pelo status `'accepted'`. Essa refatoração foi concluída no PR #17 (Migration 027 + ajustes no `ContactCompletionService`).

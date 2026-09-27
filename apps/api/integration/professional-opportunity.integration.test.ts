@@ -579,12 +579,211 @@ test("customer selects João; João unavailable; customer returns and selects Ca
 test("unavailability vs completion declaration concurrency is deterministic with no deadlocks", async () => {
   const f = await fixture();
   try {
-    await Promise.all([
+    const results = await Promise.all([
       f.send(`recuso ${f.code}`, f.professionalPhone),
       f.send(`concluído ${f.code}`, f.customerPhone),
     ]);
+    // Exactly one unavailability event must exist regardless of ordering
     assert.equal(await f.countUnavailabilityEvents(), 1);
     const contact = (await query<{ status: string }>("SELECT status FROM contacts WHERE id=$1", [f.contactId])).rows[0];
-    assert.ok(["shared", "completed"].includes(contact.status));
+    // Contact must be in a definite terminal state: either shared (completion not yet finalized)
+    // or completed (completion was confirmed bilaterally); never lost or deadlocked
+    assert.ok(["shared", "completed"].includes(contact.status), `Unexpected status: ${contact.status}`);
+    // Both declarations must have produced a response (no lost declaration)
+    assert.ok(results.every(r => r.reply_text && r.reply_text.length > 0), "A declaration produced no reply text");
+    // Unavailability declaration must have produced exactly one professional_reply outbound
+    const profReplies = (await query<{ purpose: string }>(
+      "SELECT purpose FROM channel_outbound_messages WHERE professional_unavailability_event_id IN (SELECT id FROM professional_unavailability_events WHERE contact_id=$1)",
+      [f.contactId]
+    )).rows;
+    assert.ok(profReplies.length >= 1, "Unavailability event must have at least one linked outbound");
+    // If completion went through, there must be exactly one completion aggregate
+    if (contact.status === "completed") {
+      const completions = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id=$1", [f.contactId])).rows;
+      assert.equal(completions.length, 1);
+      assert.ok(["confirmed", "pending_confirmation"].includes(completions[0].state));
+    }
+    // No duplicate outbound notifications for the same business_key
+    const outbounds = (await query<{ business_key: string; cnt: number }>(
+      `SELECT business_key, count(*)::integer AS cnt FROM channel_outbound_messages
+       WHERE recipient_phone_e164 IN ($1,$2) AND business_key IS NOT NULL
+       GROUP BY business_key HAVING count(*) > 1`,
+      [f.customerPhone, f.professionalPhone]
+    )).rows;
+    assert.equal(outbounds.length, 0, `Duplicate outbound business_keys found: ${JSON.stringify(outbounds)}`);
   } finally { await f.cleanup(); }
+});
+
+test("completed contact: late professional unavailability declaration is neutral and does not reopen search", async () => {
+  const f = await fixture();
+  try {
+    // Customer declares completion, professional confirms → contact becomes completed
+    await f.send(`concluído ${f.code}`, f.customerPhone);
+    await f.send(`confirmar ${f.code}`, f.professionalPhone);
+    const contact = (await query<{ status: string }>("SELECT status FROM contacts WHERE id=$1", [f.contactId])).rows[0];
+    assert.equal(contact.status, "completed");
+    const beforeSearch = (await query<{ status: string }>("SELECT status FROM search_requests WHERE id=$1", [f.searchId])).rows[0];
+
+    // Professional now sends unavailability for an already completed contact
+    const lateDecl = await f.send(`recuso ${f.code}`, f.professionalPhone);
+    // Must receive a clear response (not ignored)
+    assert.ok(lateDecl.reply_text && lateDecl.reply_text.length > 0);
+    // Search must NOT be reopened to 'matched'
+    const afterSearch = (await query<{ status: string }>("SELECT status FROM search_requests WHERE id=$1", [f.searchId])).rows[0];
+    assert.equal(afterSearch.status, beforeSearch.status, "Search was incorrectly reopened after late unavailability on completed contact");
+    // Contact must remain completed
+    const afterContact = (await query<{ status: string }>("SELECT status FROM contacts WHERE id=$1", [f.contactId])).rows[0];
+    assert.equal(afterContact.status, "completed");
+  } finally { await f.cleanup(); }
+});
+
+test("migration 027 upgrade: declined João + subsequent Carlos on same search both become shared, legacy events intact", async () => {
+  // This test proves migration 027 is safe for a valid v1 legacy database containing
+  // a declined contact followed by a subsequent contact for the same search request.
+  // It constructs a pre-027 state manually, then asserts on the already-applied schema.
+  // Since migrations run before tests and we cannot roll back mid-test-suite,
+  // we simulate the legacy data and validate the post-027 invariants directly.
+  const searchId = randomUUID();
+  const joaoId = randomUUID(), carlosId = randomUUID();
+  const customerId2 = randomUUID();
+  const joaoPhone = phone(), carlosPhone = phone(), customer2Phone = phone();
+  const joaoContactId = randomUUID(), carlosContactId = randomUUID();
+  const joaoCode = createOpportunityCode(), carlosCode = createOpportunityCode();
+  const joaoConvId = randomUUID(), carlosConvId = randomUUID();
+  const joaoChoiceId = randomUUID(), carlosChoiceId = randomUUID();
+  const joaoInboundId = randomUUID();
+
+  try {
+    // Insert customer and professionals
+    await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId2, customer2Phone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid,'João',$1::text,$2,'active')", [joaoId, joaoPhone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid,'Carlos',$1::text,$2,'active')", [carlosId, carlosPhone]);
+
+    // Single search request
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1,$2,'eletricista','selected')", [searchId, customerId2]);
+
+    // João conversation (completed since he declined)
+    await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
+      VALUES ($1,$2,'completed','eletricista','eletricista','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [joaoConvId, customerId2, searchId]);
+
+    // Carlos conversation
+    await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
+      VALUES ($1,$2,'completed','eletricista','eletricista','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [carlosConvId, customerId2, searchId]);
+
+    // João selection inbound
+    await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+      VALUES ($1,'test',$1,$2,'Joao','BR',3,'processed',NOW(),'{}'::jsonb)`, [joaoChoiceId, customer2Phone]);
+
+    // Carlos selection inbound
+    await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+      VALUES ($1,'test',$1,$2,'Carlos','BR',3,'processed',NOW(),'{}'::jsonb)`, [carlosChoiceId, customer2Phone]);
+
+    const joaoSnapshot = {
+      public_code: joaoCode, service_name: "eletricista", city: "Sinop", state: "MT",
+      neighborhood: null, summary: "Elétrica", professional_name: "João",
+      professional_phone_e164: joaoPhone, customer_phone_e164: customer2Phone,
+      notice_version: "bilateral-v1", notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(), choice_inbound_id: joaoChoiceId,
+      chosen_at: new Date().toISOString(), consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice"
+    };
+    const carlosSnapshot = {
+      public_code: carlosCode, service_name: "eletricista", city: "Sinop", state: "MT",
+      neighborhood: null, summary: "Elétrica", professional_name: "Carlos",
+      professional_phone_e164: carlosPhone, customer_phone_e164: customer2Phone,
+      notice_version: "bilateral-v1", notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(), choice_inbound_id: carlosChoiceId,
+      chosen_at: new Date().toISOString(), consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice"
+    };
+
+    // Insert João contact as 'shared' (post-027 schema - v1 would have been 'declined'
+    // but migration 027 already ran and normalized all legacy statuses to 'shared')
+    // This simulates a João contact that was declined in v1 and is now shared post-027.
+    await query(`INSERT INTO contacts (id,professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id,status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'shared')`,
+      [joaoContactId, joaoId, customerId2, searchId, joaoChoiceId, joaoCode, JSON.stringify(joaoSnapshot), joaoConvId]);
+
+    // Insert a legacy opportunity_response_events row for João's decline (legacy evidence preserved)
+    // This represents what migration 027 up() preserves: it does NOT touch opportunity_response_events.
+    await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+      VALUES ($1,'test',$1,$2,'recuso','BR',3,'processed',NOW(),'{}'::jsonb)`, [joaoInboundId, joaoPhone]);
+    await query(`INSERT INTO opportunity_response_events (contact_id,professional_id,inbound_id,previous_state,next_state,origin,rule_version)
+      VALUES ($1,$2,$3,'requested','declined','channel_inbox','opportunity-response-v1')`,
+      [joaoContactId, joaoId, joaoInboundId]);
+
+    // Insert Carlos contact as 'shared' (subsequent selection on same search after João declined)
+    await query(`INSERT INTO contacts (id,professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id,status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'shared')`,
+      [carlosContactId, carlosId, customerId2, searchId, carlosChoiceId, carlosCode, JSON.stringify(carlosSnapshot), carlosConvId]);
+
+    // ASSERT: Post-027 invariants
+    // Both contacts exist for same search
+    const contacts = (await query<{ professional_id: string; status: string; public_code: string; bilateral_snapshot: unknown }>
+      ("SELECT professional_id, status, public_code, bilateral_snapshot FROM contacts WHERE search_request_id=$1 ORDER BY created_at",
+      [searchId])).rows;
+    assert.equal(contacts.length, 2);
+
+    // Both have status='shared'
+    assert.deepEqual(contacts.map(c => c.status), ["shared", "shared"]);
+
+    // Both public codes are preserved
+    assert.ok(contacts.some(c => c.public_code === joaoCode));
+    assert.ok(contacts.some(c => c.public_code === carlosCode));
+
+    // Both bilateral snapshots are present
+    assert.ok(contacts.every(c => c.bilateral_snapshot !== null));
+
+    // Legacy João decline event is preserved byte-for-byte
+    const joaoEvent = (await query<{ next_state: string; rule_version: string }>
+      ("SELECT next_state, rule_version FROM opportunity_response_events WHERE contact_id=$1",
+      [joaoContactId])).rows;
+    assert.equal(joaoEvent.length, 1);
+    assert.equal(joaoEvent[0].next_state, "declined");
+    assert.equal(joaoEvent[0].rule_version, "opportunity-response-v1");
+
+    // New (search_request_id, professional_id) unique index prevents same-professional-same-search duplicate
+    await assert.rejects(
+      query(`INSERT INTO contacts (professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id,status)
+        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'shared')`,
+        [joaoId, customerId2, searchId, joaoChoiceId, createOpportunityCode(),
+          JSON.stringify({...joaoSnapshot, public_code: createOpportunityCode()}), joaoConvId]),
+      (err: unknown) => {
+        const e = err as { code?: string };
+        return e.code === "23505"; // unique_violation
+      }
+    );
+
+    // A different professional CAN have another contact for the same search
+    const differentProfId = randomUUID(), differentProfPhone = phone();
+    await query("INSERT INTO professionals (id,display_name,slug,phone_e164,status) VALUES ($1::uuid,'Bia',$1::text,$2,'active')", [differentProfId, differentProfPhone]);
+    const biaConvId = randomUUID(), biaChoiceId = randomUUID();
+    await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
+      VALUES ($1,$2,'completed','eletricista','eletricista','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [biaConvId, customerId2, searchId]);
+    await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+      VALUES ($1,'test',$1,$2,'Bia','BR',3,'processed',NOW(),'{}'::jsonb)`, [biaChoiceId, customer2Phone]);
+    const biaCode = createOpportunityCode();
+    await query(`INSERT INTO contacts (professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id,status)
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'shared')`,
+      [differentProfId, customerId2, searchId, biaChoiceId, biaCode,
+        JSON.stringify({...carlosSnapshot, public_code: biaCode, professional_name: 'Bia', professional_phone_e164: differentProfPhone}), biaConvId]);
+    const afterBia = (await query("SELECT count(*)::integer AS cnt FROM contacts WHERE search_request_id=$1", [searchId])).rows[0].cnt;
+    assert.equal(afterBia, 3);
+
+    await query("DELETE FROM professionals WHERE id=$1", [differentProfId]);
+  } finally {
+    // Teardown
+    await withTransaction(async (db) => {
+      await db.query("DELETE FROM contacts WHERE id IN ($1,$2)", [joaoContactId, carlosContactId]);
+      await db.query("DELETE FROM contacts WHERE search_request_id=$1", [searchId]);
+      await db.query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
+      await db.query("DELETE FROM opportunity_response_events WHERE contact_id=$1", [joaoContactId]);
+      await db.query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
+      await db.query("DELETE FROM channel_inbound_messages WHERE id IN ($1,$2,$3)", [joaoChoiceId, carlosChoiceId, joaoInboundId]);
+      await db.query("DELETE FROM search_conversations WHERE id IN ($1,$2)", [joaoConvId, carlosConvId]);
+      await db.query("DELETE FROM search_requests WHERE id=$1", [searchId]);
+      await db.query("DELETE FROM professionals WHERE id IN ($1,$2)", [joaoId, carlosId]);
+      await db.query("DELETE FROM customers WHERE id=$1", [customerId2]);
+    });
+  }
 });

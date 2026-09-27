@@ -11,12 +11,8 @@ exports.up = (pgm) => {
       UNIQUE (contact_id)
     );
 
-    CREATE INDEX professional_unavailability_events_contact_idx
-      ON professional_unavailability_events(contact_id, created_at, id);
     CREATE INDEX professional_unavailability_events_prof_idx
       ON professional_unavailability_events(professional_id, created_at, id);
-    CREATE INDEX professional_unavailability_events_inbound_idx
-      ON professional_unavailability_events(inbound_id);
 
     CREATE FUNCTION protect_professional_unavailability_event() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
@@ -39,13 +35,34 @@ exports.up = (pgm) => {
       ON channel_outbound_messages(professional_unavailability_event_id)
       WHERE professional_unavailability_event_id IS NOT NULL;
 
+    -- PREFLIGHT: detect same-search/same-professional duplicates that cannot be
+    -- represented under the new v2 unique index. These are an impossible v1 state
+    -- (migration 015 already prevents same-professional duplicates per search).
+    -- Raise a deterministic error rather than silently violating invariants.
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM contacts
+         WHERE bilateral_snapshot IS NOT NULL
+         GROUP BY search_request_id, professional_id
+        HAVING COUNT(*) > 1
+      ) THEN
+        RAISE EXCEPTION 'CONNECTION_LIFECYCLE_V2_UPGRADE_CONFLICT: same search_request_id + professional_id bilateral contacts detected; manual data reconciliation required before applying migration 027'
+          USING ERRCODE = 'P0027';
+      END IF;
+    END $$;
+
+    -- Drop the legacy partial unique index BEFORE normalizing statuses.
+    -- The legacy index excludes 'declined', so normalizing declined→shared while
+    -- the index still exists would cause 23505 when two contacts for the same
+    -- search exist (e.g. João declined then Carlos requested).
+    DROP INDEX IF EXISTS contacts_bilateral_search_unique_idx;
+    DROP INDEX IF EXISTS contacts_pending_professional_idx;
+
+    -- Now safe to normalize: no legacy unique index is present.
     UPDATE contacts
        SET status = 'shared'
      WHERE bilateral_snapshot IS NOT NULL
        AND status IN ('requested', 'accepted', 'declined');
-
-    DROP INDEX IF EXISTS contacts_bilateral_search_unique_idx;
-    DROP INDEX IF EXISTS contacts_pending_professional_idx;
 
     CREATE UNIQUE INDEX contacts_bilateral_search_professional_unique_idx
       ON contacts(search_request_id, professional_id)

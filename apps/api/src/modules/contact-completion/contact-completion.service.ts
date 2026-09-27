@@ -175,19 +175,6 @@ export class ContactCompletionService {
         });
       }
 
-      const unavailability = await db.query(
-        "SELECT 1 FROM professional_unavailability_events WHERE contact_id = $1",
-        [lockedContact.id]
-      );
-      if (unavailability.rows.length > 0) {
-        return this.finishReply(db, record, {
-          action: "unavailable",
-          replyText: "Essa solicitação foi recusada e não pode ser concluída.",
-          contact: lockedContact,
-          actorRole,
-        });
-      }
-
       // Lock completion aggregate (step 2 in lock order)
       let completion = await this.repository.findCompletionByContactId(db, lockedContact.id, true);
 

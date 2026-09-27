@@ -1352,3 +1352,56 @@ test("Scenario 15: Migration 026 rollback is blocked with P0026 when completion 
     await f.cleanup();
   }
 });
+test("Scenario 16: Professional unavailability does NOT block completion; shared contact remains completion-eligible", async () => {
+  const f = await createFixture();
+  try {
+    // Insert a professional_unavailability_events record for the contact
+    const unavailInboundId = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+       VALUES ($1,'test',$1,$2,'não consigo','BR',3,'processed',NOW(),'{}'::jsonb)`,
+      [unavailInboundId, f.professionalPhone]
+    );
+    // Disable immutability trigger for fixture insertion
+    await query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
+    await query(
+      `INSERT INTO professional_unavailability_events (contact_id,professional_id,inbound_id,origin,rule_version)
+       VALUES ($1,$2,$3,'channel_inbox','connection-v2')`,
+      [f.contactId, f.professionalId, unavailInboundId]
+    );
+    await query("ALTER TABLE professional_unavailability_events ENABLE TRIGGER professional_unavailability_events_immutable");
+
+    // Contact still has status='shared' with an unavailability event
+    const contactBefore = await f.getContact();
+    assert.equal(contactBefore.status, "shared");
+    const unavailCount = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM professional_unavailability_events WHERE contact_id=$1", [f.contactId])).rows[0].cnt;
+    assert.equal(unavailCount, 1);
+
+    // Customer declares completion — must succeed despite unavailability event
+    const declRes = await f.send(`concluído ${f.code}`, f.customerPhone);
+    assert.equal(declRes.result.action, "declared", `Expected 'declared' but got '${declRes.result.action}': ${declRes.reply_text}`);
+    assert.match(declRes.reply_text, /Aguardando confirmação/);
+
+    const completion = await f.getCompletion();
+    assert.ok(completion, "Completion aggregate must be created");
+    assert.equal(completion.state, "pending_confirmation");
+
+    // Professional confirms — must also succeed
+    const confRes = await f.send(`confirmar ${f.code}`, f.professionalPhone);
+    assert.equal(confRes.result.action, "confirmed");
+
+    const contactAfter = await f.getContact();
+    assert.equal(contactAfter.status, "completed");
+
+    // Unavailability event still exists (immutable, not deleted)
+    const unavailCountAfter = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM professional_unavailability_events WHERE contact_id=$1", [f.contactId])).rows[0].cnt;
+    assert.equal(unavailCountAfter, 1, "Unavailability event must remain after completion");
+  } finally {
+    // Additional cleanup for unavailability event inserted above
+    await query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
+    await query("DELETE FROM professional_unavailability_events WHERE contact_id=$1", [f.contactId]);
+    await query("ALTER TABLE professional_unavailability_events ENABLE TRIGGER professional_unavailability_events_immutable");
+    await query("DELETE FROM channel_inbound_messages WHERE phone_e164=$1", [f.professionalPhone]);
+    await f.cleanup();
+  }
+});

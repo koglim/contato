@@ -276,14 +276,22 @@ jobs:
           DO $$ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='027_add_connection_lifecycle_v2')
               OR to_regclass('professional_unavailability_events') IS NULL
-              OR to_regclass('professional_unavailability_events_contact_idx') IS NULL
               OR to_regclass('professional_unavailability_events_prof_idx') IS NULL
-              OR to_regclass('professional_unavailability_events_inbound_idx') IS NULL
               OR to_regclass('contacts_bilateral_search_professional_unique_idx') IS NULL
               OR to_regclass('contacts_active_professional_idx') IS NULL
               OR to_regprocedure('protect_professional_unavailability_event()') IS NULL
               OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_outbound_messages' AND column_name='professional_unavailability_event_id')
               OR to_regclass('channel_outbound_messages_unavailability_event_idx') IS NULL
+              OR NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                 WHERE conrelid='professional_unavailability_events'::regclass
+                   AND contype='u' AND conname='professional_unavailability_events_contact_id_key'
+              )
+              OR NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                 WHERE conrelid='professional_unavailability_events'::regclass
+                   AND contype='u' AND conname='professional_unavailability_events_inbound_id_key'
+              )
             THEN RAISE EXCEPTION 'migration 027 incomplete'; END IF;
           END $$;
           SQL
