@@ -260,8 +260,10 @@ jobs:
             IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='026_add_contact_completions')
               OR to_regclass('contact_completions') IS NULL
               OR to_regclass('contact_completion_events') IS NULL
-              OR to_regclass('contact_completions_contact_id_unique_idx') IS NULL
-              OR to_regclass('contact_completion_events_contact_id_idx') IS NULL
+              OR to_regclass('contact_completions_contact_id_key') IS NULL
+              OR to_regclass('contact_completion_events_contact_idx') IS NULL
+              OR to_regclass('contact_completion_events_completion_idx') IS NULL
+              OR to_regclass('contact_completion_events_inbound_idx') IS NULL
               OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_outbound_messages' AND column_name='completion_event_id')
               OR to_regprocedure('protect_contact_completion_events()') IS NULL
             THEN RAISE EXCEPTION 'migration 026 incomplete'; END IF;
