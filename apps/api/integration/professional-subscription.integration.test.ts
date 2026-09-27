@@ -1038,7 +1038,7 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
       [selectionOutcome.contactId],
     )).rows[0];
     assert.ok(contactRow);
-    assert.equal(contactRow.status, "requested");
+    assert.equal(contactRow.status, "shared");
 
     // Wait for the background revoke to unblock and finish
     assert.ok(revokePromise);

@@ -384,7 +384,7 @@ test("Outbox failure rolls back decision, event and reopening; retry after crash
 test("migration 015 refuses destructive rollback and events cannot be overwritten", async () => {
   const f = await fixture();
   try {
-    await query("INSERT INTO opportunity_response_events (contact_id, professional_id, inbound_id, next_state, rule_version) VALUES ($1, $2, $3, 'accepted', 'v1')", [f.contactId, f.professionalId, f.choiceId]);
+    await query("INSERT INTO opportunity_response_events (contact_id, professional_id, inbound_id, previous_state, next_state, origin, rule_version) VALUES ($1, $2, $3, 'requested', 'accepted', 'channel_inbox', 'v1')", [f.contactId, f.professionalId, f.choiceId]);
     await assert.rejects(query("UPDATE opportunity_response_events SET next_state='declined' WHERE contact_id=$1",[f.contactId]),/append-only/);
     const before = await f.conversations();
     const beforeEvents = await query<{ contact_id: string; next_state: string; rule_version: string }>(
@@ -550,6 +550,8 @@ test("customer selects João; João unavailable; customer returns and selects Ca
     assert.equal(await f.countUnavailabilityEvents(), 1);
   } finally {
     await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164=$1", [carlosPhone]);
+    await query("DELETE FROM contacts WHERE professional_id=$1", [carlosId]);
+    await query("DELETE FROM matches WHERE id=$1", [matchId]);
     await query("DELETE FROM professional_service_areas WHERE professional_id=$1", [carlosId]);
     await query("DELETE FROM professional_services WHERE professional_id=$1", [carlosId]);
     await query("DELETE FROM professionals WHERE id=$1", [carlosId]);

@@ -451,7 +451,7 @@ test("Scenario 1: Customer declares completion, professional confirms -> contact
     assert.equal(completion1.confirmed_at, null);
 
     const contact1 = await f.getContact();
-    assert.equal(contact1.status, "accepted"); // Still accepted until counterpart confirms!
+    assert.equal(contact1.status, "shared"); // Still shared until counterpart confirms!
 
     const events1 = await f.getEvents();
     assert.equal(events1.length, 1);
@@ -962,9 +962,9 @@ test("Scenario 13C: Deterministic concurrency Scenario C — declaration vs cont
     assert.ok(completion?.contested_at);
     assert.equal(completion?.confirmed_at, null); // NOT mixed confirmed + contested!
 
-    // - contact status remains accepted (never completed with contested aggregate)
+    // - contact status remains shared (never completed with contested aggregate)
     const contact = await f.getContact();
-    assert.equal(contact.status, "accepted");
+    assert.equal(contact.status, "shared");
 
     // - no duplicate terminal notifications
     const outbounds = await f.getOutbounds();
