@@ -6,12 +6,12 @@ Documento canônico de arquitetura, ciclo de vida e garantias da funcionalidade 
 
 ## 1. Visão Geral e Propósito
 
-Após a jornada de busca, consentimento, seleção e contato bilateral (`contacts.status = 'accepted'`), o ciclo de vida do atendimento prestado precisava de uma transição auditável e bilateral para o encerramento do serviço.
+Após a jornada de busca, consentimento, seleção e contato bilateral estabelecido diretamente (`contacts.status = 'shared'`), o ciclo de vida do atendimento prestado precisava de uma transição auditável e bilateral para o encerramento do serviço.
 
 O objetivo do módulo **Contact Completion & Confirmation** é:
 - Permitir que qualquer uma das partes (cliente ou profissional) declare a conclusão do serviço;
 - Exigir confirmação da contraparte antes de marcar o contato como `completed` (`contacts.status = 'completed'`);
-- Permitir que a contraparte conteste a conclusão declarada, mantendo o serviço ativo em andamento (`contacts.status = 'accepted'`) e registrando formalmente a disputa;
+- Permitir que a contraparte conteste a conclusão declarada, mantendo o serviço ativo em andamento (`contacts.status = 'shared'`) e registrando formalmente a disputa;
 - Garantir serialização determinística, idempotência e notificações confiáveis via Outbox transacional sem concorrência destrutiva ou interpretação não-determinística.
 
 ---
@@ -27,13 +27,13 @@ stateDiagram-v2
     pending_confirmation --> confirmed: Declaração concorrente da contraparte
     pending_confirmation --> contested: Contestação da contraparte
     confirmed --> [*]: contacts.status = 'completed'
-    contested --> [*]: contacts.status mantido 'accepted'
+    contested --> [*]: contacts.status mantido 'shared'
 ```
 
 ### Estados do Aggregate:
 1. `pending_confirmation`: Uma das partes enviou comando determinístico declarando conclusão do atendimento (ação registrada no ledger como evento `'declared'`). O registro em `contact_completions` é persistido com `state = 'pending_confirmation'`, `declared_by = 'customer' | 'professional'`, `declared_at = NOW()`, e timestamps `confirmed_at` e `contested_at` nulos. A contraparte é notificada via Outbox solicitando confirmação ou contestação.
 2. `confirmed`: A contraparte confirmou explicitamente a declaração (ou ambas as partes declararam de forma independente). O aggregate `contact_completions` transiciona para `state = 'confirmed'` com `confirmed_at = NOW()`. O contato em `contacts` é atualizado atomicamente para `status = 'completed'`. A tabela `contacts` não possui coluna `completed_at`; o timestamp canônico da conclusão é registrado em `contact_completions.confirmed_at`.
-3. `contested`: A contraparte contestou a declaração de conclusão. O aggregate `contact_completions` transiciona para `state = 'contested'` com `contested_at = NOW()`. O contato em `contacts` permanece com `status = 'accepted'`. Nenhum encerramento automático é forçado; o caso é registrado como disputa durável para eventual mediação/suporte.
+3. `contested`: A contraparte contestou a declaração de conclusão. O aggregate `contact_completions` transiciona para `state = 'contested'` com `contested_at = NOW()`. O contato em `contacts` permanece com `status = 'shared'`. Nenhum encerramento automático é forçado; o caso é registrado como disputa durável para eventual mediação/suporte.
 
 ---
 

@@ -1,15 +1,14 @@
 # ADR-004: Direção de Produto para o Ciclo de Conexão Bilateral v2
 
-* **Status:** ACCEPTED / NOT YET IMPLEMENTED
+* **Status:** IMPLEMENTED (PR #17 — Connection Lifecycle v2)
 * **Data:** 2026-09-27
 * **Decisores:** Produto e Arquitetura ContatoCerto
 
 ---
 
-> [!CAUTION]
-> **Aviso de Não Implementação:**
-> Este registro define uma **decisão de produto aprovada para implementação futura**.
-> O código atualmente presente em `main` ainda opera sob o modelo legado (onde o status de aceite profissional participa da semântica de ciclo de vida). Esta ADR documenta a direção a ser implementada na próxima frente técnica, **não devendo ser considerada como código em execução no presente momento**.
+> [!NOTE]
+> **Implementação Concluída:**
+> Esta decisão foi implementada no PR #17 através da Migration 027 (`027_add_connection_lifecycle_v2.js`), estabelecendo a criação direta de contatos como `shared`, telemetria imutável de indisponibilidade via `professional_unavailability_events` e elegibilidade direta para conclusão de serviços.
 
 ---
 

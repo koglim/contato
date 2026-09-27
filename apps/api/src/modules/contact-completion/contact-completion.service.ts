@@ -166,10 +166,23 @@ export class ContactCompletionService {
         });
       }
 
-      if (lockedContact.status !== "accepted") {
+      if (lockedContact.status !== "shared" && lockedContact.status !== "accepted") {
         return this.finishReply(db, record, {
           action: "unavailable",
           replyText: "Essa solicitação não está disponível para conclusão.",
+          contact: lockedContact,
+          actorRole,
+        });
+      }
+
+      const unavailability = await db.query(
+        "SELECT 1 FROM professional_unavailability_events WHERE contact_id = $1",
+        [lockedContact.id]
+      );
+      if (unavailability.rows.length > 0) {
+        return this.finishReply(db, record, {
+          action: "unavailable",
+          replyText: "Essa solicitação foi recusada e não pode ser concluída.",
           contact: lockedContact,
           actorRole,
         });

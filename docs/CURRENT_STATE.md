@@ -29,9 +29,12 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 * **Cobertura Espacial PostGIS:** O PostGIS é utilizado especificamente para a geometria de cobertura dos profissionais na tabela `professional_service_areas` (`center` e `radius_meters`), cálculo de distância via `ST_DWithin` e ordenação do matching. O índice IBGE em si não depende do PostGIS para resolução.
 * **Algoritmo de Matching e Ranking:** Seleção espacial com rotação justa (*fair-v1*), pool máximo de 20 profissionais, paginação de 3 em 3 e teto máximo de apresentação de 6 profissionais por busca.
 
-### Contato Bilateral e Consentimento
-* **Transação Bilateral Atômica:** Criação atômica do registro de contato (`contacts`), snapshot dos dados cadastrais das partes no instante da escolha, vinculação a `matches` e geração de código público `CC-XXXXXXXX`.
-* **Consentimento de Compartilhamento:** A seleção ativa pelo cliente após apresentação dos dados constitui consentimento informado do cliente para o compartilhamento bilateral de telefones via WhatsApp.
+### Contato Bilateral e Consentimento (Ciclo de Conexão v2 — Migration 027)
+* **Transação Bilateral Atômica:** Criação atômica do registro de contato (`contacts`) diretamente no status `shared`, snapshot dos dados cadastrais das partes no instante da escolha, vinculação a `matches` e geração de código público `CC-XXXXXXXX`.
+* **Conexão Imediata sem Segundo Aceite Obrigatório:** O consentimento informado do cliente para o compartilhamento recíproco de dados estabelece a conexão imediatamente. Ambas as partes recebem os contatos via WhatsApp.
+* **Declaração Opcional de Indisponibilidade Profissional:** Respostas de recusa ("não consigo", "recuso", etc.) geram registro imutável em `professional_unavailability_events` (ERRCODE P0027), mantêm o contato como `shared`, reabrem a busca para nova seleção do cliente e notificam o cliente via Outbox.
+* **Múltiplas Conexões por Busca:** O índice único `(search_request_id, professional_id)` permite que o cliente selecione outro profissional caso o primeiro declare indisponibilidade.
+* **Normalização Histórica:** Contatos bilaterais legados em `requested`, `accepted` ou `declined` foram normalizados para `shared` pela Migration 027, preservando o histórico em `opportunity_response_events`.
 
 ### Durabilidade de Mensageria (Tabelas de Fila)
 * **Inbox Durável (`channel_inbound_messages`):** Tabela de persistência idempotente para mensagens recebidas via webhook da borda, com deduplicação e idempotência durável baseadas no par único `(provider, provider_message_id)` via `ON CONFLICT DO NOTHING`. O hashing de evidências do payload é utilizado para detecção de divergência e quarentena de conflitos caso a mesma identidade de mensagem seja recebida com conteúdo conflitante. Possui controle transacional de lease (`CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS=60`) e processamento FIFO.
@@ -49,9 +52,9 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 * **Entitlements para Oportunidades:** Verificação atômica de assinatura ativa durante a seleção do cliente. A transação adquire lock compartilhado de autoridade (`FOR UPDATE OF professionals`) e revalida se o profissional possui assinatura vigente antes de entregar o lead.
 * **Política de Transição Legada:** Profissionais gerenciados por conta (`management_mode = 'account_managed'`) exigem assinatura ativa para receber leads. Perfis legados não reivindicados (`management_mode = 'legacy_unmanaged'`) permanecem temporariamente isentos de assinatura sob a política de compatibilidade legada.
 
-### Conclusão e Confirmação de Atendimentos (PR #15)
-* **Ciclo de Conclusão Bilateral (Migration 026):** Qualquer uma das partes (profissional ou cliente) pode declarar a conclusão do serviço (`concluído CC-XXXXXXXX`).
-* **Confirmação e Contestação Bilateral:** A contraparte (cliente ou profissional) pode confirmar (`confirmar CC-XXXXXXXX`) ou contestar (`contestar CC-XXXXXXXX`). O modelo de estados é `pending_confirmation`, `confirmed` e `contested`.
+### Conclusão e Confirmação de Atendimentos (PR #15 / PR #17)
+* **Ciclo de Conclusão Bilateral (Migration 026 / Migration 027):** Qualquer uma das partes (profissional ou cliente) pode declarar a conclusão do serviço (`concluído CC-XXXXXXXX`). A elegibilidade para conclusão é direta a partir do status `shared`.
+* **Confirmação e Contestação Bilateral:** A contraparte (cliente ou profissional) pode confirmar (`confirmar CC-XXXXXXXX`) ou contestar (`contestar CC-XXXXXXXX`). O modelo de estados de conclusão é `pending_confirmation`, `confirmed` e `contested`. Contestações mantêm o contato no status `shared`.
 * **Comandos Determinísticos com Código Obrigatório:** No código atual, os comandos de conclusão, confirmação e contestação exigem obrigatoriamente a presença do código público `CC-XXXXXXXX` no texto recebido.
 * **Isolamento de Contexto:** Comandos determinísticos de conclusão operam a nível de contato persistido e snapshot bilateral, sem depender de sessão ativa de busca (`search_conversation`).
 
@@ -120,15 +123,10 @@ Com base nos dados fornecidos pelo operador da infraestrutura instalada (EasyPan
 
 ---
 
-## 8. Descompasso Conceitual Conhecido: Ciclo de Conexão (CURRENT vs. TARGET)
+## 8. Ciclo de Conexão Bilateral v2 (Implementado no PR #17 via Migration 027)
 
-> [!CAUTION]
-> **Atenção — Regra Crítica de Governança de Produto:**
-> No código atual em `main`, o ciclo de atendimento ainda contém estados legados como `accepted` e `declined` no enum `contact_status` (`'requested'`, `'shared'`, `'accepted'`, `'declined'`, `'completed'`, `'cancelled'`), exigindo em certas rotas que o profissional aceite o lead.
->
-> **A direção de produto decidida ([ADR-004](decisions/ADR-004-connection-lifecycle-v2-direction.md)) estabelece que:**
-> Participação elegível do profissional + seleção ativa do cliente + consentimento informado do cliente para compartilhamento bilateral dos contatos = **CONEXÃO ESTABELECIDA**.
-> O aceite do profissional **NÃO deve ser obrigatório** para que a oportunidade exista e os telefones sejam trocados.
->
-> **Status:** `ACEITO / NÃO IMPLEMENTADO NO CÓDIGO`.
-> Nenhum desenvolvedor ou agente deve presumir que essa regra já está ativa no código atual. A alteração está planejada para a próxima frente técnica.
+* **Direção Canônica Consolidada ([ADR-004](decisions/ADR-004-connection-lifecycle-v2-direction.md)):**
+  $$\text{Participação elegível do profissional} + \text{Seleção ativa do cliente} + \text{Consentimento informado do cliente para compartilhamento bilateral dos contatos} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
+* **Sem Aceite Obrigatório:** O contato é imediatamente persistido como `shared`. Frases como "aceito" ou "posso atender" atuam como confirmações de cortesia sem alterar o status da conexão.
+* **Indisponibilidade Profissional:** Registrada em `professional_unavailability_events` (tabela append-only imutável com proteção `P0027`). Mantém o contato `shared`, reativa a busca para o cliente escolher outro profissional e notifica o cliente.
+* **Concorrência e Locks Determinísticos:** Locks ordenados em `customers`, `search_conversations`, `search_requests` e `contacts FOR NO KEY UPDATE` evitam deadlocks entre seleções, indisponibilidade e conclusão de atendimento.

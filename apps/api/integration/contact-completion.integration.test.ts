@@ -134,7 +134,7 @@ async function createFixture(options: FixtureOptions = {}) {
     consent_method: "selection_after_notice",
   };
 
-  const contactStatus = options.status ?? "accepted";
+  const contactStatus = options.status ?? "shared";
   await query(
     `INSERT INTO contacts (
        id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
@@ -241,7 +241,7 @@ async function createFixture(options: FixtureOptions = {}) {
       `INSERT INTO contacts (
          id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'accepted')`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'shared')`,
       [cId, pId, customerId, sId, chId, cCode, JSON.stringify(snap), convId]
     );
     return { id: cId, code: cCode, professionalPhone: pPhone };
@@ -301,7 +301,7 @@ async function createFixture(options: FixtureOptions = {}) {
       `INSERT INTO contacts (
          id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'accepted')`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'shared')`,
       [contId, professionalId, cId2, sId, chId, cCode, JSON.stringify(snap), convId]
     );
     return { id: contId, code: cCode, customerPhone: cPhone2 };
@@ -533,9 +533,9 @@ test("Scenario 3: Counterpart contests completion -> contacts.status remains acc
     assert.equal(completion.state, "contested");
     assert.ok(completion.contested_at);
 
-    // Contact status MUST REMAIN accepted
+    // Contact status MUST REMAIN shared
     const contact = await f.getContact();
-    assert.equal(contact.status, "accepted");
+    assert.equal(contact.status, "shared");
 
     const events = await f.getEvents();
     assert.equal(events.length, 2);
@@ -1184,9 +1184,9 @@ test("Scenario 13F: Multi-contact: Customer with multiple historical contacts ta
     const completion1 = await f.getCompletion();
     assert.equal(completion1?.state, "pending_confirmation");
 
-    // Contact 2 must remain strictly accepted with NO completion record
+    // Contact 2 must remain strictly shared with NO completion record
     const contact2Record = (await query<{ status: string }>("SELECT status FROM contacts WHERE id = $1", [contact2.id])).rows[0];
-    assert.equal(contact2Record.status, "accepted");
+    assert.equal(contact2Record.status, "shared");
     const completion2 = (await query("SELECT * FROM contact_completions WHERE contact_id = $1", [contact2.id])).rows;
     assert.equal(completion2.length, 0);
 
@@ -1217,9 +1217,9 @@ test("Scenario 13G: Multi-contact: Professional with multiple accepted opportuni
     const contact1 = await f.getContact();
     assert.equal(contact1.status, "completed");
 
-    // Opportunity 2 must remain accepted with no completion
+    // Opportunity 2 must remain shared with no completion
     const contactBRecord = (await query<{ status: string }>("SELECT status FROM contacts WHERE id = $1", [contactB.id])).rows[0];
-    assert.equal(contactBRecord.status, "accepted");
+    assert.equal(contactBRecord.status, "shared");
     const completionB = (await query("SELECT * FROM contact_completions WHERE contact_id = $1", [contactB.id])).rows;
     assert.equal(completionB.length, 0);
   } finally {

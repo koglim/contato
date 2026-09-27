@@ -38,16 +38,16 @@ flowchart TD
 
 #### 4. Seleção e Consentimento do Cliente para Compartilhamento Bilateral
 * Ao escolher um profissional, o cliente autoriza o compartilhamento do seu número de WhatsApp com o prestador selecionado.
-* **CURRENT:** A transação gera um registro `contacts` e envia o resumo ao cliente com o telefone do profissional e o código público `CC-XXXXXXXX`.
-* **TARGET (Connection Lifecycle v2):**
+* **CURRENT (Connection Lifecycle v2 — Migration 027):**
   $$\text{Participação elegível do profissional} + \text{Seleção ativa do cliente} + \text{Consentimento informado do cliente para compartilhamento bilateral dos contatos} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
-  Não há dependência de um segundo aceite mandatório pelo profissional para a conexão ser considerada real e ativa.
+  A transação cria o registro de contato diretamente com `status = 'shared'` e envia o telefone do profissional ao cliente (com o código `CC-XXXXXXXX`) e os dados do cliente ao profissional via WhatsApp. Não há dependência de um segundo aceite mandatório pelo profissional para a conexão ser considerada real e ativa.
+* Se o profissional declarar indisponibilidade ("não consigo {code}"), a busca do cliente é automaticamente reaberta e o cliente é notificado para escolher outro profissional apresentado ou solicitar "mostrar mais".
 
 #### 5. Execução do Serviço no Mundo Real
 * O cliente e o profissional negociam livremente pelo WhatsApp prazos, orçamentos, visitas técnicas e pagamentos. A plataforma não interfere na transação financeira do serviço.
 
 #### 6. Conclusão e Confirmação
-* **CURRENT:** Qualquer uma das partes pode declarar a conclusão do atendimento enviando `concluído CC-XXXXXXXX`. A contraparte (cliente ou profissional) pode confirmar com `confirmar CC-XXXXXXXX` ou contestar com `contestar CC-XXXXXXXX`. O parser atual exige obrigatoriamente o código público `CC-XXXXXXXX`.
+* **CURRENT:** Qualquer uma das partes pode declarar a conclusão do atendimento enviando `concluído CC-XXXXXXXX`. A elegibilidade para conclusão é direta a partir do status `shared`. A contraparte (cliente ou profissional) pode confirmar com `confirmar CC-XXXXXXXX` ou contestar com `contestar CC-XXXXXXXX`. O parser atual exige obrigatoriamente o código público `CC-XXXXXXXX`.
 * **TARGET:** Resolução contextual proativa que convide o cliente a confirmar se o serviço foi realizado sem exigir a digitação do código quando houver apenas um atendimento ativo na conversa.
 
 ---
@@ -62,7 +62,7 @@ flowchart TD
     P2 --> P3["3. Recebimento da Oportunidade no WhatsApp\n(Dados do cliente, telefone, serviço e local seguro)"]
     P3 --> P4{"Disponibilidade Imediata?"}
     P4 -- "Disponível" --> P5["Contato Direto com o Cliente\n(Conversa no WhatsApp e fechamento)"]
-    P4 -- "Indisponível" --> P6["Declaração Opcional de Indisponibilidade\n(Aviso à plataforma de que não poderá atender)"]
+    P4 -- "Indisponível" --> P6["Declaração Opcional de Indisponibilidade\n(Aviso à plataforma: 'não consigo CC-XXXXXXXX')"]
     P5 --> P7["Conclusão do Atendimento\n(Envio de comando concluído CC-... via WhatsApp)"]
     P7 --> P8["Gestão no Painel Web\n(Acompanhamento de perfil e cobertura)"]
 ```
@@ -80,17 +80,13 @@ flowchart TD
 
 #### 3. Recebimento de Oportunidades (Notificação no WhatsApp)
 * Quando um cliente seleciona o profissional, o sistema despacha imediatamente uma mensagem via Outbox para o WhatsApp do profissional.
-* **Modelo da Mensagem (TARGET):**
-  > *"Olá, [Nome]! Um cliente selecionou você no ContatoCerto para o serviço de [Eletricista].*
-  > *Resumo da necessidade: [Troca de disjuntor].*
-  > *Localização: [Contexto seguro de localização disponível, ex.: Sinop - MT].*
-  > *Telefone do cliente: [+55 66 99999-9999].*
-  > *Por favor, entre em contato com o cliente o mais breve possível para alinhar o atendimento.*
-  > *(Caso você esteja impossibilitado de atender neste momento, responda 'indisponível')".*
+* **CURRENT:** O profissional recebe o resumo do serviço, localização segura, detalhes da solicitação e o telefone do cliente, sendo orientado a fazer contato diretamente se puder atender. Caso não consiga atender, é instruído a responder `não consigo CC-XXXXXXXX`. Não há instrução obrigatória de "aceito".
 
-#### 4. Postura sobre Aceite vs. Conexão (CURRENT vs. TARGET)
-* **CURRENT:** O banco de dados e a API ainda registram transições baseadas em estados legados como `accepted` ou `declined` no enum `contact_status` (`'requested'`, `'shared'`, `'accepted'`, `'declined'`, `'completed'`, `'cancelled'`).
-* **TARGET (ADR-004):** A conexão **já existe** no momento do envio. O profissional não precisa acessar o painel nem enviar comandos de confirmação para poder conversar com o cliente. O comando de recusa/indisponibilidade serve apenas como sinal declaratório de cortesia e telemetria operacional.
+#### 4. Postura sobre Aceite vs. Conexão (CURRENT — ADR-004)
+* A conexão **já existe** no momento da seleção pelo cliente (status `shared`).
+* O profissional não precisa acessar o painel nem enviar comandos de aceite para poder conversar com o cliente.
+* Frases como "aceito" ou "posso atender" atuam como confirmações de cortesia sem mutação transacional do status.
+* O comando de recusa/indisponibilidade ("não consigo", "recuso", etc.) persiste um registro imutável em `professional_unavailability_events` (ERRCODE P0027) e reativa a busca do cliente, sem apagar o fato de que a oportunidade foi entregue.
 
 #### 5. Conclusão de Serviço
 * **CURRENT:** Concluído o trabalho, o profissional pode sinalizar a finalização enviando `concluído CC-XXXXXXXX` via WhatsApp.

@@ -12,7 +12,7 @@ export function parseOpportunityMessage(raw: string) {
   let decision: OpportunityDecision | null = null;
   if (!raw.includes("?") && codes.length <= 1) {
     if (["aceito", "posso atender", "vou atender", "sim consigo", "sim posso atender", "confirmo o atendimento"].includes(bare)) decision = "accepted";
-    if (["nao posso atender", "recuso", "nao tenho disponibilidade", "nao consigo hoje", "nao vou conseguir atender"].includes(bare)) decision = "declined";
+    if (["nao consigo", "nao consigo atender", "nao posso", "nao posso atender", "recuso", "nao tenho disponibilidade", "nao consigo hoje", "nao vou conseguir", "nao vou conseguir atender"].includes(bare)) decision = "declined";
   }
   const resume = !raw.includes("?") && /^(?:quero voltar para|voltar para|quero retomar|retomar|quero voltar|voltar)(?:\s+(.*))?$/u.exec(text);
   const keep = !raw.includes("?") && ["manter atual", "continuar aqui", "continuar a busca atual", "quero manter a atual"].includes(text);

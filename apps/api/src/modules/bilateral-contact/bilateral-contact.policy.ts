@@ -58,7 +58,7 @@ export function presentProfessionalOpportunity(snapshot: BilateralSnapshot) {
     ...(snapshot.neighborhood ? [`Bairro: ${snapshot.neighborhood}`] : []),
     `Solicitação: ${snapshot.summary}`,
     `Telefone do cliente: ${snapshot.customer_phone_e164}`,
-    "Entre em contato para combinar o atendimento solicitado.",
-    `Para responder, envie “aceito ${snapshot.public_code}” ou “recuso ${snapshot.public_code}”.`,
+    "Entre em contato com ele se puder atender.",
+    `Se não conseguir atender, responda: “não consigo ${snapshot.public_code}”.`,
   ].join("\n");
 }

@@ -150,9 +150,9 @@ Para evitar ambiguidades conceituais entre relatórios operacionais e algoritmos
 2. **`persisted match`:** Candidato selecionado pelo algoritmo de matching e persistido na tabela `matches` com rank relativo.
 3. **`shown`:** Profissional efetivamente apresentado em uma mensagem enviada ao cliente (`shown_at` preenchido após confirmação de entrega do bloco de 3).
 4. **`selected`:** Profissional escolhido ativamente pelo cliente através de número, nome ou declaração textual (`selected_at` preenchido).
-5. **`bilateral connection`:** Momento transacional em que os telefones de ambas as partes são compartilhados e o atendimento é registrado.
-6. **`professional-declared unavailable`:** Sinalização opcional do profissional indicando que não poderá realizar o atendimento no momento (declaração unilateral).
-7. **`completion`:** Marcação do atendimento como encerrado, com confirmação ou contestação bilateral registrada (`contact_completions`).
+5. **`bilateral connection`:** Momento transacional em que os telefones de ambas as partes são compartilhados e o atendimento é registrado diretamente como `status = 'shared'` (Migration 027).
+6. **`professional-declared unavailable`:** Sinalização opcional do profissional indicando que não poderá realizar o atendimento no momento (declaração unilateral imutável em `professional_unavailability_events` protegida por `P0027`).
+7. **`completion`:** Marcação do atendimento como encerrado, com confirmação ou contestação bilateral registrada (`contact_completions`). Elegível diretamente a partir do status `shared`.
 8. **`future review`:** Coleta posterior de pontuação e comentário de satisfação.
 
 ---

@@ -5,7 +5,7 @@ import { parseOpportunityMessage } from "./professional-opportunity.parser.js";
 for (const text of ["aceito", "posso atender", "vou atender", "sim, consigo", "aceito a CC-7K4P9Q"]) {
   test(`professional acceptance: ${text}`, () => assert.equal(parseOpportunityMessage(text).decision, "accepted"));
 }
-for (const text of ["não posso atender", "recuso", "não tenho disponibilidade", "não consigo hoje", "recuso a CC-7K4P9Q"]) {
+for (const text of ["não posso atender", "recuso", "não tenho disponibilidade", "não consigo hoje", "não consigo", "não consigo atender", "não posso", "não vou conseguir atender", "recuso a CC-7K4P9Q"]) {
   test(`professional refusal: ${text}`, () => assert.equal(parseOpportunityMessage(text).decision, "declined"));
 }
 for (const text of ["quanto é?", "onde fica?", "talvez", "e se eu aceitar?", "posso responder depois?", "não sei", "eu penso em aceitar", "aceito ou recuso", "aceito?", "aceito CC-23456789 e CC-ABCDEFGH"]) {

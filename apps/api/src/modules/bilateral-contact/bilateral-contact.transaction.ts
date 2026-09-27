@@ -122,7 +122,7 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
     });
     const inserted = await client.query<{ id: string }>(`INSERT INTO contacts
       (search_request_id, customer_id, professional_id, status, selection_key, public_code, bilateral_snapshot, selection_conversation_id)
-      VALUES ($1, $2, $3, 'requested', $4, $5, $6::jsonb, $7)
+      VALUES ($1, $2, $3, 'shared', $4, $5, $6::jsonb, $7)
       ON CONFLICT (lower(public_code)) WHERE public_code IS NOT NULL DO NOTHING RETURNING id`,
     [input.searchRequestId, input.customerId, match.professional_id, input.selectionKey,
       snapshot.public_code, JSON.stringify(snapshot), input.conversationId]);
