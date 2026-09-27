@@ -1,0 +1,172 @@
+# Visão Técnica Geral (Technical Overview)
+
+Este documento apresenta a arquitetura de alto nível do **ContatoCerto**, suas fronteiras de responsabilidade, o modelo de mensageria e contexto de IA, as diretrizes de localização e a taxonomia canônica do funil de dados.
+
+---
+
+## 1. Contexto do Sistema (System Context)
+
+O ContatoCerto opera como um ecossistema conversacional centrado em interações assíncronas e em um portal web para gestão profissional:
+
+```mermaid
+flowchart LR
+    Customer["👤 Cliente"] <-->|"WhatsApp\n(Texto e Áudio)"| Platform["⚙️ ContatoCerto\n(Marketplace Engine)"]
+    Platform <-->|"WhatsApp\n(Notificações e Comandos)"| Pro["🛠️ Profissional"]
+    Pro <-->|"HTTPS (Navegador)\nAutenticação Sem Senha"| WebPortal["💻 Painel Web\n(/dashboard)"]
+    WebPortal <-->|"BFF / API Interna"| Platform
+```
+
+---
+
+## 2. Arquitetura de Contêineres e Fluxo de Mensagens
+
+O fluxo de dados entre os serviços externos e o núcleo da aplicação segue uma separação rigorosa entre transporte, orquestração e autoridade de domínio:
+
+```mermaid
+flowchart TD
+    subgraph CanaisExternos ["Canais Externos"]
+        WA["WhatsApp do Usuário"]
+        Browser["Navegador do Profissional"]
+    end
+
+    subgraph BordaTransporte ["Borda e Transporte"]
+        Evo["Evolution API\n(Instância WhatsApp)"]
+        N8N["n8n Orchestrator\n(Gateways e Subworkflows)"]
+    end
+
+    subgraph CorePlataforma ["Núcleo do ContatoCerto"]
+        WebBFF["Next.js Web / BFF\n(apps/web - Porta 3000)"]
+        FastifyAPI["ContatoCerto API\n(apps/api - Fastify / Porta 3333)"]
+        DB[("PostgreSQL / PostGIS\n(Persistência e Filas Duráveis)")]
+    end
+
+    WA <-->|"Webhook / Envio HTTP"| Evo
+    Evo <-->|"HTTP Webhook / Proxy"| N8N
+    N8N -->|"POST /internal/channel/inbox/webhook"| FastifyAPI
+    FastifyAPI -->|"Transação SQL / Lock"| DB
+    DB -->|"Polling Leased: GET /claim"| N8N
+    N8N -->|"Envio Outbound HTTP"| Evo
+
+    Browser <-->|"HTTPS / Session Cookie"| WebBFF
+    WebBFF <-->|"HTTP Interno + API Key"| FastifyAPI
+```
+
+### Fronteiras de Responsabilidade e Invariantes
+
+* **n8n (Orquestração e Transporte):** Responsável exclusivamente pelo transporte de entrada/saída, conversão de payloads de mensageria e retry de rede. O n8n **não detém lógica de negócio**, não toma decisões de autorização e não é a fonte da verdade de dados.
+* **ContatoCerto API (Autoridade de Negócio e Domínio):** O backend Fastify é a autoridade absoluta sobre resolução de serviços, elegibilidade, criação de buscas, ranking espacial, consentimento, geração de contatos bilaterais e ciclo de vida de atendimentos.
+* **PostgreSQL / PostGIS (Persistência Canônica):** Camada de dados única e centralizada. É a guardiã das transações, tabelas de fila (`channel_inbox`, `channel_outbox`), locks concorrentes (`FOR UPDATE`) e do catálogo geográfico.
+
+---
+
+## 3. Arquitetura de Contexto e Inteligência Artificial
+
+### Princípio da Minimização de Contexto
+Ao contrário de agentes convencionais de chat, o ContatoCerto **NÃO envia o histórico arbitrário e integral de mensagens para modelos LLM por padrão**.
+
+O sistema prioriza a construção e manutenção de um **Estado Conversacional Estruturado**:
+
+```mermaid
+flowchart TD
+    Msg["Mensagem Atual do Usuário"] --> State["Construtor de Contexto Mínimo"]
+    DB_State["Memória Estruturada no Banco:\n- Serviço resolvido\n- Município/UF resolvidos\n- Slot pendente\n- Hipóteses ativas\n- Profissionais já apresentados\n- Contato ativo em andamento"] --> State
+    State --> Engine{"Decisão Rápida\nDeterminística?"}
+    Engine -- "Sim (Número / Comando / Slot Único)" --> FastPath["Fast Path Determinístico\n(Custo Zero de IA / Baixa Latência)"]
+    Engine -- "Não (Dúvida / Comparação Factual)" --> LLM["Chamada OpenAI Mínima\n(Prompt Enxuto com Fatos Cadastrados)"]
+```
+
+### Estado Atual vs. Alvo (Target)
+* **CURRENT:** O motor conversacional B2 utiliza hipóteses estruturadas, memória de slots e fast paths determinísticos para números e comandos. A flag `CONVERSATION_AI_ENABLED=false` mantém as chamadas externas desativadas por padrão.
+* **TARGET (Conversation Intelligence v2):** Auditoria formal e benchmark detalhado de consumo de tokens, custo por conversa, tamanho de prompt, latência percebida e garantia de que o modelo receba apenas as variáveis factuais necessárias para a decisão do momento.
+
+---
+
+## 4. Diretrizes de Localização (Location v2)
+
+### CURRENT (Implementado no Repositório)
+* Resolução determinística baseada na malha municipal do IBGE via PostGIS (`ST_DWithin` / projeções espaciais).
+* Suporte a buscas com cidade e estado expressos no texto.
+* Resolução de ambiguidades com perguntas estruturadas.
+* Fallback geográfico via API Pelias / openrouteservice (HeiGIT).
+
+### TARGET (Location v2 — Planejado)
+* **Estrutura Mínima Obrigatória:** Cidade + Estado (UF).
+* **Níveis Opcionais de Refinamento:** Bairro, CEP, logradouro/número, ponto de referência e coordenadas exatas (latitude/longitude).
+* **Novas Entradas no WhatsApp:**
+  * Mensagens com localização nativa (compartilhamento de pino do WhatsApp);
+  * Eventos de Live Location (quando suportados pelo canal);
+  * Links de mapas (Google Maps / Waze).
+* **Localização Reutilizada (Remembered Location):**
+  * Quando um cliente recorrente inicia uma nova busca, o sistema **NUNCA deve reutilizar silenciosamente a localização anterior**.
+  * A experiência canônica deve solicitar confirmação explícita: *"É para Sinop - MT novamente?"*.
+  * O cliente pode alterar sua localização a qualquer instante.
+  * O histórico de buscas passadas é imutável por requisição.
+
+---
+
+## 5. Portal Web do Profissional (`/dashboard`)
+
+* **Rota Canônica:** `/dashboard` (aplicação Next.js em `apps/web`).
+* **Capacidades Atuais:**
+  * Autenticação passwordless via código OTP enviado por e-mail;
+  * Sessão segura via cookie assinado no BFF (`DASHBOARD_SESSION_SECRET`);
+  * Edição de dados de perfil (nome, telefone de contato);
+  * Seleção de categorias de serviços atendidos e municípios de cobertura;
+  * Consulta do histórico de atendimentos e status de conclusão.
+* **Direção Futura (Dashboard v2):**
+  * Visualização de métricas de conversão e exposição (quantas vezes o perfil foi exibido no WhatsApp);
+  * Gestão de status de verificação e reputação;
+  * Consulta de planos e status da assinatura;
+  * Galeria de fotos de serviços anteriores (portfólio).
+* **Regra Inviolável de Governança:** O painel é uma ferramenta de gestão e autosserviço; o profissional **nunca** depende dele para receber um lead ou atender um cliente.
+
+---
+
+## 6. Vocabulário Canônico do Funil de Métricas (Funnel Canon)
+
+Para evitar ambiguidades conceituais entre relatórios operacionais e algoritmos de recomendação, o ContatoCerto estabelece a seguinte cadeia estrita de eventos:
+
+```
+[candidate] 
+    → [persisted match] 
+    → [shown] 
+    → [selected] 
+    → [bilateral connection] 
+    → [professional-declared unavailable] 
+    → [completion] 
+    → [future review]
+```
+
+1. **`candidate`:** Profissional existente no banco que atende à categoria e ao raio geográfico da busca.
+2. **`persisted match`:** Candidato selecionado pelo algoritmo de matching e persistido na tabela `matches` com rank relativo.
+3. **`shown`:** Profissional efetivamente apresentado em uma mensagem enviada ao cliente (`shown_at` preenchido após confirmação de entrega do bloco de 3).
+4. **`selected`:** Profissional escolhido ativamente pelo cliente através de número, nome ou declaração textual (`selected_at` preenchido).
+5. **`bilateral connection`:** Momento transacional em que os telefones de ambas as partes são compartilhados e o atendimento é registrado.
+6. **`professional-declared unavailable`:** Sinalização opcional do profissional indicando que não poderá realizar o atendimento no momento (declaração unilateral).
+7. **`completion`:** Marcação do atendimento como encerrado, com confirmação ou contestação bilateral registrada (`contact_completions`).
+8. **`future review`:** Coleta posterior de pontuação e comentário de satisfação.
+
+---
+
+## 7. Variáveis de Ambiente e Precedência de Configuração
+
+A tabela a seguir documenta os nomes canônicos e responsabilidades das variáveis de configuração do sistema. **Nenhum valor secreto ou credencial é documentado aqui.**
+
+| Subsistema | Variável de Ambiente | Finalidade / Regra de Precedência |
+| :--- | :--- | :--- |
+| **Banco de Dados** | `DATABASE_URL` | String de conexão com PostgreSQL/PostGIS. |
+| **API Backend** | `API_PORT` | Porta de escuta da API Fastify (padrão: 3333). |
+| **API Backend** | `INTERNAL_API_KEY` | Chave de autenticação para endpoints administrativos internos. |
+| **Catálogo de Serviços** | `SERVICE_RESOLUTION_FUZZY_THRESHOLD` | Limite de calibragem fuzzy para identificação de serviços. |
+| **Geocodificação** | `OPENROUTESERVICE_BASE_URL` | Endpoint da API HeiGIT/Pelias para fallback de municípios. |
+| **Geocodificação** | `OPENROUTESERVICE_API_KEY` | Chave de acesso à API HeiGIT. |
+| **Autenticação Web** | `PROFESSIONAL_AUTH_ENABLED` | Flag booleana que habilita a emissão pública de OTP por e-mail. |
+| **Autenticação Web** | `PROFESSIONAL_AUTH_PEPPER` | Segredo criptográfico (mínimo 32 bytes) para compor o hash do OTP. |
+| **Portal Web / BFF** | `CONTATOCERTO_API_URL` | URL base da API consumida pelo backend do portal web. |
+| **Portal Web / BFF** | `DASHBOARD_SESSION_SECRET` | Segredo utilizado para assinar o cookie de sessão do profissional. |
+| **Fila e Leases** | `CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS` | Tempo de lease para recuperação de mensagens travadas na Inbox. |
+| **Fila e Leases** | `CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS` | Tempo de lease para envio de mensagens pela Outbox via n8n. |
+| **Conversação IA** | `CONVERSATION_AI_ENABLED` | **Flag canônica principal.** Habilita o motor conversacional com IA. |
+| **Conversação IA (Legacy)**| `CONTEXTUAL_CONVERSATION_ENABLED` | *Alias legado.* O código audita ambas as variáveis, e **`CONVERSATION_AI_ENABLED` tem precedência absoluta** caso ambas estejam definidas. |
+| **Modelo de IA** | `OPENAI_CONVERSATION_MODEL` | Nome do modelo LLM homologado para a conversação (ex.: gpt-5.6-luna). *(Tem precedência sobre o alias legado `CONTEXTUAL_CONVERSATION_MODEL`)*. |
+| **Modelo de IA** | `OPENAI_CONVERSATION_TIMEOUT_MS` | Timeout máximo para requisições de modelo (padrão: 20000ms). |

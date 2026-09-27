@@ -1,5 +1,9 @@
 # Revisão cumulativa para integração em desenvolvimento
 
+> [!NOTE]
+> **Registro Histórico de Revisão:** Este documento preserva a auditoria e revisão cumulativa de código realizada em 10/09/2026.
+> Para as regras vigentes e arquitetura atual, consulte [docs/README.md](README.md), [PROJECT.md](PROJECT.md) e [CURRENT_STATE.md](CURRENT_STATE.md).
+
 Data: 2026-09-10. Branch: `codex/marketplace-v1-completion`.
 Base `main`: `5c20bd92cb13d8867ca21bcc819104dbf76ce1ff`.
 HEAD inicial revisado: `7edcbc05cac97b391405c3aa3eac101decce947f`.

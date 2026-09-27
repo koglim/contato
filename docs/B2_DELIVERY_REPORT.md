@@ -1,5 +1,9 @@
 # B2 — entrega técnica e continuidade
 
+> [!NOTE]
+> **Relatório Histórico de Entrega B2:** Este documento preserva a evidência técnica da entrega do motor conversacional B2 em 10/09/2026.
+> Para a visão técnica consolidada e estado atual, consulte [docs/README.md](README.md), [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) e [CURRENT_STATE.md](CURRENT_STATE.md).
+
 Data: 10/09/2026. Branch: `codex/marketplace-v1-completion`.
 Base preservada: `3ee8bc4584bb4bb6420f63ae730dd7dfa156afe9`.
 Código principal B2.2 validado: `883544c79872ca87d08f385fc4847ab89bf97fe9`.

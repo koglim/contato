@@ -1,5 +1,9 @@
 # Matriz de aceite V1 — estabilização e B2
 
+> [!NOTE]
+> **Matriz Histórica de Aceite V1:** Este documento registra a matriz de critérios de aceitação formal utilizada durante a estabilização da V1 original.
+> Para o estado atual do sistema e roadmap de evolução, consulte [docs/README.md](README.md), [CURRENT_STATE.md](CURRENT_STATE.md) e [ROADMAP.md](ROADMAP.md).
+
 IDs do plano fornecido por Ricardo. **Aprovado (automatizado)** significa teste
 do escopo descrito, não homologação de n8n/WhatsApp nem aprovação comercial.
 **Parcial** identifica prova disponível e critério restante. **Não executado**
