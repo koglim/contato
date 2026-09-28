@@ -576,41 +576,63 @@ test("customer selects João; João unavailable; customer returns and selects Ca
   }
 });
 
-test("unavailability vs completion declaration concurrency is deterministic with no deadlocks", async () => {
+test("unavailability vs completion declaration concurrency is deterministic with no deadlocks and requires both facts", async () => {
   const f = await fixture();
   try {
     const results = await Promise.all([
       f.send(`recuso ${f.code}`, f.professionalPhone),
       f.send(`concluído ${f.code}`, f.customerPhone),
     ]);
-    // Exactly one unavailability event must exist regardless of ordering
-    assert.equal(await f.countUnavailabilityEvents(), 1);
+
+    // Both declarations produced responses (neither declaration was lost)
+    assert.ok(results.every((r) => r.reply_text && r.reply_text.length > 0), "A declaration produced no reply text");
+
+    // Contact remains 'shared' (awaiting professional confirmation of completion)
     const contact = (await query<{ status: string }>("SELECT status FROM contacts WHERE id=$1", [f.contactId])).rows[0];
-    // Contact must be in a definite terminal state: either shared (completion not yet finalized)
-    // or completed (completion was confirmed bilaterally); never lost or deadlocked
-    assert.ok(["shared", "completed"].includes(contact.status), `Unexpected status: ${contact.status}`);
-    // Both declarations must have produced a response (no lost declaration)
-    assert.ok(results.every(r => r.reply_text && r.reply_text.length > 0), "A declaration produced no reply text");
-    // Unavailability declaration must have produced exactly one professional_reply outbound
-    const profReplies = (await query<{ purpose: string }>(
-      "SELECT purpose FROM channel_outbound_messages WHERE professional_unavailability_event_id IN (SELECT id FROM professional_unavailability_events WHERE contact_id=$1)",
-      [f.contactId]
-    )).rows;
-    assert.ok(profReplies.length >= 1, "Unavailability event must have at least one linked outbound");
-    // If completion went through, there must be exactly one completion aggregate
-    if (contact.status === "completed") {
-      const completions = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id=$1", [f.contactId])).rows;
-      assert.equal(completions.length, 1);
-      assert.ok(["confirmed", "pending_confirmation"].includes(completions[0].state));
-    }
+    assert.equal(contact.status, "shared", "Contact status must remain shared prior to professional confirmation");
+
+    // Exactly one unavailability event exists
+    assert.equal(await f.countUnavailabilityEvents(), 1, "Exactly 1 unavailability event must be created");
+
+    // Exactly one completion aggregate exists in pending_confirmation state
+    const completions = (await query<{ state: string; declared_by: string }>("SELECT state, declared_by FROM contact_completions WHERE contact_id=$1", [f.contactId])).rows;
+    assert.equal(completions.length, 1, "Exactly 1 completion aggregate must be created");
+    assert.equal(completions[0].state, "pending_confirmation");
+    assert.equal(completions[0].declared_by, "customer");
+
+    // Exactly one completion event exists (action='declared')
+    const completionEvents = (await query<{ action: string; actor_role: string }>("SELECT action, actor_role FROM contact_completion_events WHERE contact_id=$1", [f.contactId])).rows;
+    assert.equal(completionEvents.length, 1);
+    assert.equal(completionEvents[0].action, "declared");
+    assert.equal(completionEvents[0].actor_role, "customer");
+
     // No duplicate outbound notifications for the same business_key
-    const outbounds = (await query<{ business_key: string; cnt: number }>(
+    const duplicates = (await query<{ business_key: string; cnt: number }>(
       `SELECT business_key, count(*)::integer AS cnt FROM channel_outbound_messages
        WHERE recipient_phone_e164 IN ($1,$2) AND business_key IS NOT NULL
        GROUP BY business_key HAVING count(*) > 1`,
       [f.customerPhone, f.professionalPhone]
     )).rows;
-    assert.equal(outbounds.length, 0, `Duplicate outbound business_keys found: ${JSON.stringify(outbounds)}`);
+    assert.equal(duplicates.length, 0, `Duplicate outbound business_keys found: ${JSON.stringify(duplicates)}`);
+
+    // --- COMPLETE THE FLOW ---
+    // Professional sends "confirmar CC-X"
+    const confirmRes = await f.send(`confirmar ${f.code}`, f.professionalPhone);
+    assert.ok(confirmRes.reply_text && confirmRes.reply_text.length > 0);
+
+    // Assert final state after bilateral confirmation
+    const finalContact = (await query<{ status: string }>("SELECT status FROM contacts WHERE id=$1", [f.contactId])).rows[0];
+    assert.equal(finalContact.status, "completed", "Contact status must transition to completed after professional confirmation");
+
+    const finalCompletions = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id=$1", [f.contactId])).rows;
+    assert.equal(finalCompletions.length, 1);
+    assert.equal(finalCompletions[0].state, "confirmed");
+
+    // Both historical facts coexist!
+    assert.equal(await f.countUnavailabilityEvents(), 1, "Unavailability event must remain intact after completion confirmation");
+    const finalCompletionEvents = (await query<{ action: string }>("SELECT action FROM contact_completion_events WHERE contact_id=$1 ORDER BY created_at", [f.contactId])).rows;
+    assert.equal(finalCompletionEvents.length, 2);
+    assert.deepEqual(finalCompletionEvents.map((e) => e.action), ["declared", "confirmed"]);
   } finally {
     // Clean up contact completions before fixture cleanup to avoid FK violations on inbound messages
     await withTransaction(async (db) => {

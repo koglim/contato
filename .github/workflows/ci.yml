@@ -325,6 +325,28 @@ jobs:
           echo "$rollback_output" | grep -q 'P0027'
           psql -v ON_ERROR_STOP=1 'postgresql://contatocerto:contatocerto-test@localhost:5432/postgres' -c 'DROP DATABASE contatocerto_027_protected'
 
+      - name: Verify migration 027 native v2 protected rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_027_v2_protected'
+          v2_protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_027_v2_protected'
+          DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+          psql -v ON_ERROR_STOP=1 "$v2_protected_url" <<'SQL'
+          INSERT INTO customers (id, phone_e164) VALUES ('00000000-0000-0000-0027-000000000010', '+5566900000030');
+          INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ('00000000-0000-0000-0027-000000000011', '00000000-0000-0000-0027-000000000010', 'eletricista', 'selected');
+          INSERT INTO professionals (id, display_name, slug, phone_e164) VALUES ('00000000-0000-0000-0027-000000000012', 'V2 Fixture', 'v2-fixture-027', '+5566900000031');
+          INSERT INTO contacts (id, search_request_id, professional_id, status, bilateral_snapshot)
+          VALUES ('00000000-0000-0000-0027-000000000013', '00000000-0000-0000-0027-000000000011', '00000000-0000-0000-0027-000000000012', 'shared', '{"public_code":"CC-02700002","connection_rule_version":"connection-v2"}'::jsonb);
+          SQL
+          set +e
+          rollback_output=$(DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_status=$?
+          set -e
+          echo "$rollback_output"
+          test "$rollback_status" -ne 0
+          echo "$rollback_output" | grep -q 'CONNECTION_LIFECYCLE_V2_ROLLBACK_BLOCKED'
+          echo "$rollback_output" | grep -q 'P0027'
+          psql -v ON_ERROR_STOP=1 'postgresql://contatocerto:contatocerto-test@localhost:5432/postgres' -c 'DROP DATABASE contatocerto_027_v2_protected'
+
       - name: Roll back migration 027 with compatible data
         run: |
           node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL

@@ -47,6 +47,7 @@ export const bilateralSnapshotSchema = z.object({
   chosen_at: z.string().datetime(),
   consented_at: z.string().datetime(),
   consent_method: z.enum(["selection_after_notice", "legacy_confirmation"]),
+  connection_rule_version: z.literal("connection-v2").optional(),
 }).strict();
 export type BilateralSnapshot = z.infer<typeof bilateralSnapshotSchema>;
 

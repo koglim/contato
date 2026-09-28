@@ -101,6 +101,9 @@ export class ProfessionalOpportunityService {
       FOR NO KEY UPDATE OF contacts`, [found.id, record.phoneE164])).rows[0];
     if (!contact) return this.finish(db, record, "unavailable", "Não consegui identificar essa oportunidade para você.");
     const snapshot = bilateralSnapshotSchema.parse(contact.bilateral_snapshot);
+    if (contact.status === "completed") {
+      return this.finish(db, record, "unavailable", `Esta solicitação de ${safeOpportunityText(snapshot.service_name, 120)}, código ${contact.public_code}, já foi concluída.`, contact.public_code);
+    }
     const existingUnavailability = (await db.query<{ id: string }>(
       "SELECT id FROM professional_unavailability_events WHERE contact_id = $1",
       [contact.id]

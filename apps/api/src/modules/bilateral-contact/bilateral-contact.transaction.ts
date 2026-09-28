@@ -119,6 +119,7 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
       notice_version: BILATERAL_NOTICE_VERSION, notice_outbound_id: context.noticeId,
       notice_sent_at: context.noticeSentAt.toISOString(), choice_inbound_id: context.choiceKey,
       chosen_at: context.chosenAt, consented_at: selectedAt.toISOString(), consent_method: context.method,
+      connection_rule_version: "connection-v2",
     });
     const inserted = await client.query<{ id: string }>(`INSERT INTO contacts
       (search_request_id, customer_id, professional_id, status, selection_key, public_code, bilateral_snapshot, selection_conversation_id)

@@ -79,16 +79,36 @@ exports.down = (pgm) => {
     LOCK TABLE contacts, professional_unavailability_events, channel_outbound_messages IN ACCESS EXCLUSIVE MODE;
 
     DO $$ BEGIN
+      -- 1. Block rollback if native v2 bilateral contacts exist (recorded in snapshot provenance)
+      IF EXISTS (
+        SELECT 1 FROM contacts
+         WHERE bilateral_snapshot IS NOT NULL
+           AND bilateral_snapshot->>'connection_rule_version' = 'connection-v2'
+      ) THEN
+        RAISE EXCEPTION 'CONNECTION_LIFECYCLE_V2_ROLLBACK_BLOCKED: native v2 bilateral contacts exist' USING ERRCODE = 'P0027';
+      END IF;
+
+      -- 2. Block rollback if professional unavailability events exist
       IF EXISTS (SELECT 1 FROM professional_unavailability_events)
          OR EXISTS (SELECT 1 FROM channel_outbound_messages WHERE professional_unavailability_event_id IS NOT NULL)
-         OR EXISTS (
-           SELECT 1 FROM contacts
-            WHERE bilateral_snapshot IS NOT NULL
-            GROUP BY search_request_id
-           HAVING COUNT(*) > 1
-         )
       THEN
-        RAISE EXCEPTION 'CONNECTION_LIFECYCLE_V2_ROLLBACK_BLOCKED' USING ERRCODE = 'P0027';
+        RAISE EXCEPTION 'CONNECTION_LIFECYCLE_V2_ROLLBACK_BLOCKED: professional unavailability events exist' USING ERRCODE = 'P0027';
+      END IF;
+
+      -- 3. Block rollback if restoring legacy statuses would violate legacy partial unique index
+      -- (i.e. if there are > 1 contacts for the same search_request_id whose restored legacy status IS NOT 'declined')
+      IF EXISTS (
+        SELECT 1 FROM (
+          SELECT c.search_request_id,
+                 COALESCE((SELECT ore.next_state FROM opportunity_response_events ore WHERE ore.contact_id = c.id), 'requested') AS reconstructed_status
+            FROM contacts c
+           WHERE c.bilateral_snapshot IS NOT NULL
+        ) sub
+        WHERE reconstructed_status <> 'declined'
+        GROUP BY search_request_id
+        HAVING COUNT(*) > 1
+      ) THEN
+        RAISE EXCEPTION 'CONNECTION_LIFECYCLE_V2_ROLLBACK_BLOCKED: reconstructed legacy statuses contain duplicate non-declined contacts for search_request_id' USING ERRCODE = 'P0027';
       END IF;
     END $$;
 
