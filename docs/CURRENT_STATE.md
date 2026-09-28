@@ -85,14 +85,33 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 
 ---
 
-## 3. Estado Instalado / Remoto Verificado (Checkpoint A & A.2 — 2026-09-28)
+## 3. Estado Instalado / Remoto Verificado (Checkpoint A — 2026-09-28)
 
-Auditoria remota read-only dos endpoints de homologação/produção (detalhada em [`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)):
-* **Evolution API (`https://evo.koglim.com.br/`):** Verificada e ativa na versão **`v2.3.7`** (`whatsappWebVersion: 2.3000.1048663002`, `clientName: evolution_exchange`).
-* **n8n (`https://n8n.koglim.com.br/`):** Verificado e ativo na versão **`v1.123.21`** (endpoints protegidos por autenticação).
-* **ContatoCerto API (`contatocerto-api`):** Ativa no EasyPanel (`/health` → `200`, `/health/db` → `200` com banco de dados conectado). `PROFESSIONAL_AUTH_ENABLED` verificado como `false` (rotas de auth não registradas).
-* **ContatoCerto Web (`contatocerto-web`):** Ativo no EasyPanel (`/dashboard` redireciona para `/dashboard/access` com formulário de senha temporária e `passwordless: false`).
-* **Workflows n8n instalados:** Gateway, Consumer, Recovery e Dispatcher ativos no ambiente remoto; `shared-delivery.json` instalado necessita de reimportação para suportar `professional_auth_challenge` antes de qualquer ativação de OTP.
+Auditoria remota read-only e reconciliação de evidências (detalhada em [`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)):
+
+### A. Verificado Remotamente (Sondagem HTTP Direta)
+* **ContatoCerto API (`contatocerto-api`):** Ativa no EasyPanel (`https://minimenu-contatocerto-api.gdxvyl.easypanel.host/`), respondendo HTTP 200 em `/health` e `/health/db` com banco de dados conectado (`{"database":"connected"}`).
+* **ContatoCerto Web (`contatocerto-web`):** Ativo no EasyPanel (`https://minimenu-contatocerto-web.gdxvyl.easypanel.host/`), `/dashboard` redireciona para `/dashboard/access` com formulário de senha temporária e `passwordless: false`.
+* **n8n:** Ativo em `https://n8n.koglim.com.br/`, versão verificada **`v1.123.21`** (endpoints de gestão protegidos por autenticação).
+* **Evolution API:** Ativa em `https://evo.koglim.com.br/`, versão verificada **`v2.3.7`** (`whatsappWebVersion: 2.3000.1048663002`, `clientName: evolution_exchange`).
+
+### B. Evidência de Export dos Workflows Instalados (Fornecido pelo Operador)
+* **Status de Execução:** `WhatsApp Gateway` (ativo), `Outbox Dispatcher` (ativo), `Inbox Recovery` (ativo), `Durable Audio Consumer` (ativo) e `Shared Outbox Delivery` (inativo, conforme esperado para subworkflow).
+* **Drift de Propósitos:** O `Shared Outbox Delivery` instalado suporta apenas `customer_reply`, `professional_contact_notification`, `professional_reply`, `customer_contact_update` e `channel_notice`. **Não contém** `professional_auth_challenge` (presente em `main`).
+* **Drift Funcional no Gateway:** O `WhatsApp Gateway` instalado contém o nó `Acknowledge Inbox` com `disabled: true` (no repositório canônico está ativo).
+* **Drift de Configuração:** Workflows instalados possuem URLs e IDs hardcoded em nós em vez de utilizar `$vars` canônicas.
+
+### C. Evidência de Variáveis de Ambiente do EasyPanel (Fornecido pelo Operador)
+* **Conversação Contextual IA:** `CONVERSATION_AI_ENABLED=true` com modelo `gpt-5.6-terra` (timeout 20s). Por regra de precedência, sobrepõe o alias legado `CONTEXTUAL_CONVERSATION_ENABLED=false`.
+* **Fallback de Interpretação:** `MESSAGE_INTERPRETATION_FALLBACK_ENABLED=true` com modelo `gpt-5-mini` (timeout 5s).
+* **Autenticação OTP:** `PROFESSIONAL_AUTH_ENABLED` desativado (`false`).
+* **Áudio:** O pipeline de transcrição opera via credentials do n8n (`ContatoCerto Groq` e `ContatoCerto OpenAI`), independente da variável `GROK_API_KEY` listada no EasyPanel.
+
+### D. Ainda Requer Verificação Autenticada de Runtime
+* Nível de migração no banco de dados de produção (confirmação da Migration 027).
+* SHA exato do commit das imagens da API e Web em execução no EasyPanel.
+* Estado de pareamento e sessão ativa do WhatsApp na Evolution API.
+* Contadores ao vivo de filas de mensagens (`/internal/channel/inbound/queue-status`).
 
 ---
 

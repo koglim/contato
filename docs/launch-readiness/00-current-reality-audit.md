@@ -1,4 +1,4 @@
-# Checkpoint A & A.2 — Current Reality & Remote Runtime Audit
+# Checkpoint A — Current Reality Audit & Evidence Reconciliation
 
 **Data de Execução:** 2026-09-28
 **Fase:** Launch Readiness / Homologação
@@ -6,26 +6,23 @@
 **Branch de auditoria:** `audit/launch-readiness-current-reality`
 
 > [!IMPORTANT]
-> Este documento registra o estado atual verificado de forma **estritamente read-only**. Nenhuma modificação foi feita em código de produção, banco de dados, n8n, Evolution API, EasyPanel ou variáveis de ambiente de produção. Nenhum deploy ou reinício de serviço foi executado.
+> Este documento consolida a auditoria da realidade atual combinando verificação remota direta dos endpoints públicos, evidências documentais dos exports do n8n instalado fornecidos pelo operador e o conjunto efetivo de variáveis de ambiente do EasyPanel.
+> Nenhuma modificação foi feita em código de produção, banco de dados, n8n, Evolution API, EasyPanel ou variáveis de ambiente de produção. Nenhum deploy ou reinício de serviço foi executado.
 
 ---
 
-## Classificação de Evidências
+## Hierarquia Canônica de Evidências
 
-Cada fato é classificado como:
+Cada fato documentado nesta auditoria é explicitamente classificado por sua fonte de autoridade:
 
-| Símbolo | Significado |
-| :---: | :--- |
-| ✅ `VERIFIED` | Verificado diretamente a partir da fonte de autoridade ou endpoint ativo |
-| ⚠️ `DRIFT` | Divergência identificada entre esperado e verificado |
-| ❌ `MISSING` | Componente esperado ausente |
-| 🔒 `NEEDS AUTHENTICATED ACCESS` | Endpoint ativo e protegido por autenticação (não expõe dados sem credencial) |
-| ❓ `UNKNOWN / NOT TRACEABLE` | Não foi possível rastrear/verificar com os dados públicos disponíveis |
-| 🔒 `NOT CONFIGURED` | Componente presente mas com feature desativada (`false`) |
+1. **✅ `VERIFIED REMOTELY NOW`:** Verificado empiricamente através de sondagem HTTP direta nos endpoints de produção (`minimenu-contatocerto-api`, `minimenu-contatocerto-web`, `n8n.koglim.com.br`, `evo.koglim.com.br`).
+2. **📋 `OPERATOR-PROVIDED INSTALLED EXPORT EVIDENCE`:** Extraído dos arquivos exportados dos workflows instalados no n8n remoto fornecidos pelo operador.
+3. **⚙️ `OPERATOR-PROVIDED CURRENT EASYPANEL ENV`:** Extraído da listagem de variáveis de ambiente configuradas no EasyPanel para o serviço `contatocerto-api`.
+4. **🔒 `STILL REQUIRING AUTHENTICATED RUNTIME VERIFICATION`:** Requer sessão autenticada de operador no EasyPanel, psql de produção ou chave administrativa restrita.
 
 ---
 
-## Seção A — Baseline do GitHub
+## Seção A — Baseline do GitHub (`main`)
 
 ### A.1 SHA Canônico de main
 
@@ -69,7 +66,7 @@ Cada fato é classificado como:
 
 ---
 
-## Seção B — Inventário da Arquitetura Versionada (main)
+## Seção B — Inventário da Arquitetura Versionada (`main`)
 
 ### B.1 Estrutura do Monorepo
 
@@ -81,9 +78,9 @@ Cada fato é classificado como:
 | Workflows n8n | `workflows/n8n/` | 5 arquivos JSON exportados |
 | Migrations | `database/migrations/` | node-pg-migrate (001–027) |
 
-### B.2 Inventário dos Workflows n8n Versionados
+### B.2 Inventário dos Workflows n8n Versionados (GitHub `main`)
 
-| Arquivo | Nome do Workflow | `active` | Nós | Responsabilidade |
+| Arquivo | Nome do Workflow | `active` no Repo | Nós | Responsabilidade |
 | :--- | :--- | :---: | :---: | :--- |
 | `gateway.json` | ContatoCerto - WhatsApp Gateway | `false` | 14 | Webhook JWT, roteamento texto/áudio, Inbox, claim por ID |
 | `inbox-recovery.json` | ContatoCerto - Inbox Recovery | `false` | 4 | Recuperação de mensagens com lease expirado |
@@ -91,100 +88,125 @@ Cada fato é classificado como:
 | `media-consumer.json` | ContatoCerto - Durable Audio Consumer | `false` | 12 | Claim de mídia, transcrição Groq/OpenAI, persistência |
 | `shared-delivery.json` | ContatoCerto - Shared Outbox Delivery | `false` | 11 | Entrega de negócio via Evolution, gate de propósito, sent/failed/hold |
 
-### B.3 Suporte a `professional_auth_challenge` no shared-delivery.json
-
-| Item | Verificação | Status |
-| :--- | :--- | :---: |
-| String `professional_auth_challenge` no `shared-delivery.json` (repo) | **SIM** — nó "Validate claim" | ✅ `VERIFIED` |
-
 ---
 
-## Seção C — n8n Instalado (Auditoria Remota)
+## Seção C — n8n: Estado Instalado e Matriz de Drift
 
-**Endpoint Verificado:** `https://n8n.koglim.com.br/`
+**Endpoint Verificado Remotamente:** `https://n8n.koglim.com.br/` (HTTP 200, versão `n8n 1.123.21` ✅ `VERIFIED REMOTELY NOW`).
 
-### C.1 Estado da Instância n8n
+### C.1 Estado Ativo dos Workflows Instalados (Evidência de Export do Operador)
 
-| Item | Verificação Real | Status |
-| :--- | :--- | :---: |
-| Acessibilidade HTTP | `GET /` → HTTP 200, `GET /healthz` → HTTP 200 `{"status":"ok"}` | ✅ `VERIFIED` |
-| Versão instalada | `n8n 1.123.21` (extraída via tag Sentry `n8n@1.123.21`) | ✅ `VERIFIED` |
-| API REST de Workflows | `GET /rest/workflows` → HTTP 401 Unauthorized (protegida) | 🔒 `NEEDS AUTHENTICATED ACCESS` |
+| Workflow Instalado | `active` no Export | Observação |
+| :--- | :---: | :--- |
+| ContatoCerto - WhatsApp Gateway | `true` | Ativo recebendo mensagens de entrada |
+| ContatoCerto - Outbox Dispatcher | `true` | Ativo processando fila de saída |
+| ContatoCerto - Inbox Recovery | `true` | Ativo recuperando leases expirados |
+| ContatoCerto - Durable Audio Consumer | `true` | Ativo transcrevendo mensagens de áudio |
+| ContatoCerto - Shared Outbox Delivery | `false` | **Esperado:** invocado como subworkflow pelo Dispatcher/Gateway |
 
-### C.2 Matriz de Workflows n8n
+### C.2 Matriz de Drift Detalhada: Instalado vs GitHub `main`
 
-| Workflow GitHub (main) | Workflow Instalado | Classificação | Evidência / Ação |
-| :--- | :--- | :---: | :--- |
-| `gateway.json` (14 nós) | Ativo no ambiente remoto | ❓ `NEEDS AUTHENTICATED ACCESS` | Protegido por login n8n |
-| `inbox-recovery.json` (4 nós) | Ativo no ambiente remoto | ❓ `NEEDS AUTHENTICATED ACCESS` | Protegido por login n8n |
-| `outbox-dispatcher.json` (5 nós) | Ativo no ambiente remoto | ❓ `NEEDS AUTHENTICATED ACCESS` | Protegido por login n8n |
-| `media-consumer.json` (12 nós) | Ativo no ambiente remoto | ❓ `NEEDS AUTHENTICATED ACCESS` | Protegido por login n8n |
-| `shared-delivery.json` (com auth_challenge) | Instalado sem auth_challenge | ⚠️ `DRIFT` (evidência de export) | Reimportar antes de ativar OTP |
+| Componente | Instalado (Export Operador) | GitHub `main @ b9e48582` | Classificação do Drift | Impacto no Lançamento |
+| :--- | :--- | :--- | :---: | :--- |
+| **Shared Delivery: Propósitos Autorizados** | `customer_reply`, `professional_contact_notification`, `professional_reply`, `customer_contact_update`, `channel_notice` | Inclui adicionalmente **`professional_auth_challenge`** | ⚠️ **CONFIRMED DRIFT** | Bloqueia entrega de desafios OTP via WhatsApp se `PROFESSIONAL_AUTH_ENABLED=true` |
+| **Estratégia de Configuração** | URLs e IDs de instâncias/workflows hardcoded diretamente nos nós | Parametrizado via `$vars` canônicas (`CONTATOCERTO_API_BASE_URL`, `EVOLUTION_API_BASE_URL`, etc.) | ⚠️ **CONFIGURATION DRIFT** | Débito de configuração; não impede execução enquanto URLs hardcoded apontarem para os hosts corretos |
+| **WhatsApp Gateway: Acknowledge Inbox** | Nó `Acknowledge Inbox` com **`disabled: true`** | Nó `Acknowledge Inbox` **ativo** (sem `disabled`) | ⚠️ **FUNCTIONAL DRIFT** | Exige reconciliação antes da homologação final de ponta a ponta |
 
 ---
 
 ## Seção D — Evolution API Instalada (Auditoria Remota)
 
-**Endpoint Verificado:** `https://evo.koglim.com.br/`
+**Endpoint Verificado Remotamente:** `https://evo.koglim.com.br/` (HTTP 200 ✅ `VERIFIED REMOTELY NOW`).
 
-### D.1 Estado da Instância Evolution API
-
-| Item | Verificação Real | Status |
+| Item | Valor Verificado | Fonte |
 | :--- | :--- | :---: |
-| Acessibilidade HTTP | `GET /` → HTTP 200 | ✅ `VERIFIED` |
-| Versão instalada | **`2.3.7`** (payload: `{"status":200,"version":"2.3.7"}`) | ✅ `VERIFIED` |
-| Nome do cliente / manager | `clientName: "evolution_exchange"`, `manager: "http://evo.koglim.com.br/manager"` | ✅ `VERIFIED` |
-| Versão WhatsApp Web | `whatsappWebVersion: "2.3000.1048663002"` | ✅ `VERIFIED` |
-| Consulta de instâncias | `GET /instance/fetchInstances` → HTTP 401 Unauthorized (protegida por API Key) | 🔒 `NEEDS AUTHENTICATED ACCESS` |
-| Conexão ativa com WhatsApp | Requer chave de API da Evolution para consultar `/instance/fetchInstances` | 🔒 `NEEDS AUTHENTICATED ACCESS` |
+| Versão Instalada | **`2.3.7`** | ✅ `VERIFIED REMOTELY NOW` (payload raiz) |
+| Client Name | `evolution_exchange` | ✅ `VERIFIED REMOTELY NOW` |
+| Versão WhatsApp Web | `2.3000.1048663002` | ✅ `VERIFIED REMOTELY NOW` |
+| Manager URL | `http://evo.koglim.com.br/manager` | ✅ `VERIFIED REMOTELY NOW` |
+| Endpoint `/instance/fetchInstances` | HTTP 401 Unauthorized (guard de API Key ativo) | ✅ `VERIFIED REMOTELY NOW` |
+| Sessão WhatsApp Ativa (QR / Conexão) | Requer chave de API da Evolution para consulta | 🔒 `STILL REQUIRING AUTHENTICATED VERIFICATION` |
 
 ---
 
 ## Seção E — EasyPanel / Estado da Aplicação Instalada
 
-**Endpoints Verificados:**
+**Endpoints Verificados Remotamente:**
 * EasyPanel Painel: `https://easy.koglim.com.br/projects/minimenu/app/contatocerto-web` (Projeto `minimenu`)
 * API: `https://minimenu-contatocerto-api.gdxvyl.easypanel.host/`
 * Web: `https://minimenu-contatocerto-web.gdxvyl.easypanel.host/`
 
 ### E.1 Serviços do Projeto `minimenu`
 
-| Serviço | Endpoint | Estado HTTP | Banco Conectado? |
-| :--- | :--- | :---: | :---: |
-| `contatocerto-api` | `https://minimenu-contatocerto-api.gdxvyl.easypanel.host/` | HTTP 200 em `/health` e `/health/db` | ✅ **SIM** (`{"database":"connected"}`) |
-| `contatocerto-web` | `https://minimenu-contatocerto-web.gdxvyl.easypanel.host/` | HTTP 200 em `/`, HTTP 307 em `/dashboard` | N/A (BFF) |
-| EasyPanel SPA | `https://easy.koglim.com.br/` | HTTP 200 (Login SPA) | 🔒 Requer sessão |
+| Serviço | Endpoint | Estado HTTP | Banco Conectado? | Fonte |
+| :--- | :--- | :---: | :---: | :---: |
+| `contatocerto-api` | `https://minimenu-contatocerto-api.gdxvyl.easypanel.host/` | HTTP 200 em `/health` e `/health/db` | ✅ **SIM** (`{"database":"connected"}`) | ✅ `VERIFIED REMOTELY NOW` |
+| `contatocerto-web` | `https://minimenu-contatocerto-web.gdxvyl.easypanel.host/` | HTTP 200 em `/`, HTTP 307 em `/dashboard` | N/A (BFF) | ✅ `VERIFIED REMOTELY NOW` |
+| EasyPanel SPA | `https://easy.koglim.com.br/` | HTTP 200 (Login SPA) | 🔒 Requer sessão | ✅ `VERIFIED REMOTELY NOW` |
 
-### E.2 Rastreabilidade da Versão Deployada
+### E.2 Rastreabilidade de Versão Deployada
 
-| Item | Verificação | Classificação |
+| Item | Situação | Classificação |
 | :--- | :--- | :---: |
 | API SHA rastreável | API responde `/health` e `/health/db`, mas não expõe SHA em headers públicos | ❓ `NOT TRACEABLE` sem acesso EasyPanel |
 | Web SHA rastreável | Web responde com Next.js Build ID `j4BJIPFFooQA5Oij0z0-V` | ❓ `NOT TRACEABLE` sem acesso EasyPanel |
 
 ---
 
-## Seção F — Feature Flags e Configuração de Produção
+## Seção F — Variáveis de Ambiente do EasyPanel e Feature Flags
 
-### F.1 Matriz de Feature Flags
+**Fonte de Evidência:** ⚙️ `OPERATOR-PROVIDED CURRENT EASYPANEL ENV`
 
-| Feature Flag | Padrão no Código | Valor Verificado em Produção | Método de Verificação |
-| :--- | :---: | :---: | :--- |
-| `PROFESSIONAL_AUTH_ENABLED` | `false` | **`false`** | ✅ `VERIFIED` — API retorna 404 em `/internal/professional-auth/session` (plugin não registrado) e Web renderiza `passwordless: false` |
-| `CONVERSATION_AI_ENABLED` | `false` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Código default `false`; requer `INTERNAL_API_KEY` ou EasyPanel para ler env |
-| `CONTEXTUAL_CONVERSATION_ENABLED` | `false` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Alias legado |
-| `MESSAGE_INTERPRETATION_FALLBACK_ENABLED` | `false` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Código default `false` |
+### F.1 Variáveis Não-Secretas do `contatocerto-api` em Produção
 
-### F.2 Matriz de Dependências de Segredos (PRESENT / MISSING)
+```env
+SERVICE_RESOLUTION_FUZZY_THRESHOLD=0.53
+SERVICE_RESOLUTION_FUZZY_AMBIGUITY_GAP=0.10
+OPENROUTESERVICE_BASE_URL=https://api.heigit.org/pelias/v1
+LOCATION_RESOLUTION_CONFIDENCE_THRESHOLD=0.85
+LOCATION_RESOLUTION_AMBIGUITY_GAP=0.10
+MESSAGE_INTERPRETATION_FALLBACK_ENABLED=true
+MESSAGE_INTERPRETATION_FALLBACK_MODEL=gpt-5-mini
+MESSAGE_INTERPRETATION_FALLBACK_TIMEOUT_MS=5000
+OPENAI_CONVERSATION_MODEL=gpt-5.6-terra
+SEARCH_CONVERSATION_TTL_MINUTES=30
+SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS=60
+CHANNEL_INBOUND_PROCESSING_LEASE_SECONDS=60
+CHANNEL_OUTBOUND_PROCESSING_LEASE_SECONDS=60
+OPENAI_CONVERSATION_TIMEOUT_MS=20000
+CONTEXTUAL_CONVERSATION_ENABLED=false
+CONVERSATION_AI_ENABLED=true
+```
 
-| Segredo / Credencial | Presença em Produção | Evidência |
+### F.2 Matriz Corrigida de Feature Flags em Produção
+
+| Feature Flag | Padrão no Código | Valor no EasyPanel (Operador) | Estado Efetivo | Regra de Precedência / Observação |
+| :--- | :---: | :---: | :---: | :--- |
+| **`CONVERSATION_AI_ENABLED`** | `false` | **`true`** | **`ENABLED`** | Precedência absoluta sobre `CONTEXTUAL_CONVERSATION_ENABLED`. Modelo ativo: `gpt-5.6-terra`. |
+| **`CONTEXTUAL_CONVERSATION_ENABLED`** | `false` | `false` | `false` | Alias legado sobreposto por `CONVERSATION_AI_ENABLED`. |
+| **`MESSAGE_INTERPRETATION_FALLBACK_ENABLED`** | `false` | **`true`** | **`ENABLED`** | Fallback para extração de localização ativo com modelo `gpt-5-mini` (timeout 5s). |
+| **`PROFESSIONAL_AUTH_ENABLED`** | `false` | *(não definido / ausente)* | **`DISABLED` (`false`)** | Confirmado por `GET /internal/professional-auth/session` retornando 404 (rotas não registradas) e Web com `passwordless: false`. |
+
+### F.3 Matriz de Presença de Segredos (Apenas `PRESENT` / `MISSING`)
+
+| Segredo / Credencial | Presença em Produção | Observação de Governança |
 | :--- | :---: | :--- |
-| `INTERNAL_API_KEY` | **PRESENT** | ✅ API retorna 401 Unauthorized em `/internal/channel/inbound/queue-status` (guard ativo) |
-| `DASHBOARD_SESSION_SECRET` | **PRESENT** | ✅ Next.js BFF operacional com cookies de sessão |
-| Evolution API Key | **PRESENT** | ✅ Evolution API retorna 401 Unauthorized em `/instance/fetchInstances` |
-| `PROFESSIONAL_AUTH_PEPPER` | **NÃO NECESSÁRIO NO MOMENTO** | Feature desativada (`PROFESSIONAL_AUTH_ENABLED=false`) |
-| `OPENAI_API_KEY` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Requer leitura de env via EasyPanel |
-| `GROQ_API_KEY` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Requer leitura de env/n8n credentials |
+| `DATABASE_URL` | **PRESENT** | ✅ Confirmado por `/health/db` conectado |
+| `INTERNAL_API_KEY` | **PRESENT** | ✅ Confirmado por `/internal/channel/inbound/queue-status` retornando 401 |
+| `DASHBOARD_SESSION_SECRET` | **PRESENT** | ✅ Confirmado por Next.js BFF ativo |
+| `OPENAI_API_KEY` | **PRESENT** | Necessário para `CONVERSATION_AI_ENABLED=true` e fallback |
+| `OPENROUTESERVICE_API_KEY` | **PRESENT** | Utilizado pelo geocodificador Pelias |
+| `GROK_API_KEY` *(nome no ENV do EasyPanel)* | **PRESENT** | *(Ver nota de áudio abaixo)* |
+| `PROFESSIONAL_AUTH_PEPPER` | **NÃO APLICÁVEL** | Feature desativada (`PROFESSIONAL_AUTH_ENABLED=false`) |
+
+### F.4 Nota Arquitetural sobre Groq e Áudio
+
+O ambiente do EasyPanel contém uma variável nomeada como `GROK_API_KEY`.
+**Análise de impacto:** O workflow de transcrição de áudio instalado (`Durable Audio Consumer`) executa no n8n e consome diretamente as credentials do n8n:
+- Credential Groq: `ContatoCerto Groq`
+- Credential OpenAI (fallback): `ContatoCerto OpenAI`
+
+Portanto, a grafia da variável no EasyPanel **não é um bloqueador** do pipeline de áudio, uma vez que a autenticação de transcrição é gerenciada internamente pelo n8n.
 
 ---
 
@@ -192,50 +214,29 @@ Cada fato é classificado como:
 
 | Item | Verificação | Status |
 | :--- | :--- | :---: |
-| Conectividade PostgreSQL | `GET /health/db` na API remota retorna `{"status":"ok","database":"connected"}` | ✅ `VERIFIED` |
-| Versão PostgreSQL / PostGIS | Conexão direta ao banco de produção é restrita à rede Docker | 🔒 `NEEDS AUTHENTICATED ACCESS` |
-| Migration mais alta em produção | Requer console EasyPanel ou psql direto | 🔒 `NEEDS AUTHENTICATED ACCESS` |
-| Migration 027 em produção | Requer verificação via console | 🔒 `NEEDS AUTHENTICATED ACCESS` |
-| Migration 028 | Inexistente em todo o repositório | ✅ `VERIFIED` (não existe) |
+| Conectividade PostgreSQL | `GET /health/db` na API remota retorna `{"status":"ok","database":"connected"}` | ✅ `VERIFIED REMOTELY NOW` |
+| Versão PostgreSQL / PostGIS em Prod | Conexão restrita à rede Docker | 🔒 `STILL REQUIRING AUTHENTICATED VERIFICATION` |
+| Migration 027 em Produção | Requer consulta à tabela `pgmigrations` via psql/console | 🔒 `STILL REQUIRING AUTHENTICATED VERIFICATION` |
+| Migration 028 | Inexistente em todo o repositório e histórico de migrações | ✅ `VERIFIED` (não existe) |
 
 ---
 
-## Seção H — Filas de Mensagens e Saúde Operacional
-
-| Endpoint | Resultado HTTP | Significado |
-| :--- | :---: | :--- |
-| `GET /internal/channel/inbound/queue-status` | HTTP 401 Unauthorized | ✅ Rota ativa e protegida por `x-internal-key` |
-| `GET /internal/channel/outbound/queue-status` | HTTP 401 Unauthorized | ✅ Rota ativa e protegida por `x-internal-key` |
-| Contagens detalhadas de fila | 🔒 Requer envio de `x-internal-key` de produção | 🔒 `NEEDS AUTHENTICATED ACCESS` |
-
----
-
-## Seção I — Portal Web do Profissional
+## Seção H — Portal Web do Profissional
 
 **Base URL:** `https://minimenu-contatocerto-web.gdxvyl.easypanel.host/`
 
 | Rota / Capacidade | Verificação Real | Status |
 | :--- | :--- | :---: |
-| Home (`/`) | HTTP 200 — Next.js HTML renderizado | ✅ `VERIFIED` |
-| `/dashboard` | HTTP 307 → redireciona para `/dashboard/access` | ✅ `VERIFIED` |
-| `/dashboard/access` | HTTP 200 — página de acesso profissional renderizada | ✅ `VERIFIED` |
-| Formulário de Acesso | Renderiza campo de senha temporária (`<input type="password" name="password"/>`) | ✅ `VERIFIED` |
-| Modo Passwordless (OTP) | `passwordless: false` no payload SSR do Next.js | ✅ `VERIFIED` (`false`) |
-| Disparo de OTP | **NÃO executado** (conforme diretriz estrita de homologação) | ✅ PRESERVADO |
+| Home (`/`) | HTTP 200 — Next.js HTML renderizado | ✅ `VERIFIED REMOTELY NOW` |
+| `/dashboard` | HTTP 307 → redireciona para `/dashboard/access` | ✅ `VERIFIED REMOTELY NOW` |
+| `/dashboard/access` | HTTP 200 — página de acesso profissional renderizada | ✅ `VERIFIED REMOTELY NOW` |
+| Formulário de Acesso | Renderiza campo de senha temporária (`<input type="password" name="password"/>`) | ✅ `VERIFIED REMOTELY NOW` |
+| Modo Passwordless (OTP) | `passwordless: false` no payload SSR do Next.js | ✅ `VERIFIED REMOTELY NOW` |
+| Disparo de OTP | **NÃO executado** (preservado conforme diretriz estrita de homologação) | ✅ PRESERVADO |
 
 ---
 
-## Seção J — Inteligência Artificial / Modelos
-
-| Item | Estado Verificado |
-| :--- | :--- |
-| `CONVERSATION_AI_ENABLED` | Padrão no código: `false`. Se ativado pelo operador, opera sob B2 (Fast Paths determinísticos com 0 chamadas de IA e apresentadores determinísticos) |
-| `OPENAI_CONVERSATION_MODEL` | Padrão no código: variável de ambiente |
-| `MESSAGE_INTERPRETATION_FALLBACK_MODEL` | Padrão: `"gpt-5.6-luna"` com timeout de 5.000ms |
-
----
-
-## Seção K — Matriz de Decisão e Prontidão de Lançamento
+## Seção I — Matriz de Decisão e Prontidão de Lançamento
 
 ### 1. Prontidão E2E: Fluxo de Atendimento do Cliente (WhatsApp)
 
@@ -245,8 +246,9 @@ Cada fato é classificado como:
 | :--- | :---: | :--- |
 | API Backend (`contatocerto-api`) | ✅ Running / DB Conectado | **Pronto** |
 | Evolution API (`evo.koglim.com.br`) | ✅ Running v2.3.7 | **Pronto** (confirmar pareamento WhatsApp) |
-| n8n (`n8n.koglim.com.br`) | ✅ Running v1.123.21 | **Pronto** (confirmar webhook ativo) |
+| n8n (`n8n.koglim.com.br`) | ✅ Running v1.123.21 / Workflows ativos | **Pronto** (confirmar webhook ativo) |
 | Banco de Dados | ✅ Conectado | **Pronto** |
+| Conversação IA | ✅ `CONVERSATION_AI_ENABLED=true` com `gpt-5.6-terra` | **Pronto** sob motor B2 |
 | **Bloqueio para E2E do Cliente:** | **NENHUM BLOQUEIO DE CÓDIGO** | Prerequisito operacional: verificar WhatsApp conectado |
 
 ### 2. Prontidão: Portal Web do Profissional & Autenticação OTP
@@ -259,26 +261,28 @@ Cada fato é classificado como:
 
 ---
 
-## Seção L — Classificação Consolidada de Pendências
+## Seção J — Classificação Consolidada de Pendências
 
 | Classificação | Item | Ação Necessária |
 | :--- | :--- | :--- |
-| `BLOCKER TO E2E` | Nenhum defeito de código identificado | Apenas confirmação de pareamento da instância WhatsApp pelo operador |
+| `BLOCKER TO E2E` | Nenhum defeito de código identificado | Confirmação operacional de pareamento WhatsApp na Evolution API |
 | `REQUIRED BEFORE LAUNCH` | n8n `shared-delivery.json` sem suporte a OTP | Reimportar workflow versionado antes de virar flag `PROFESSIONAL_AUTH_ENABLED=true` |
+| `REQUIRED BEFORE LAUNCH` | n8n `gateway.json` com `Acknowledge Inbox` desativado | Reconciliar export com GitHub main antes do tráfego real de lançamento |
 | `REQUIRED BEFORE LAUNCH` | Confirmação de SHA no EasyPanel | Operador checar tag/commit no EasyPanel para certificar `b9e48582` |
 | `REQUIRED BEFORE LAUNCH` | Confirmação de Migration 027 em prod DB | Operador checar tabela `pgmigrations` no banco de produção |
 | `NON-BLOCKING` | Reviews & Ratings, Location v2, Admin UI | Escopos futuros do roadmap |
-| `NEEDS AUTHENTICATED ACCESS` | Queue status detalhado, env vars de prod, n8n workflows internos | Consultar com chaves de operador |
+| `STILL REQUIRING AUTHENTICATED ACCESS` | Queue counters ao vivo, logs internos, pareamento WhatsApp | Consultar com chaves de operador |
 
 ---
 
-## Conclusão do Checkpoint A / A.2
+## Conclusão do Checkpoint A / A.2 / Reconciliação
 
 1. **Repositório GitHub (`main @ b9e48582`):** Íntegro, CI verde, PR #18 mergeado com sucesso.
 2. **Ambiente Remoto:** Todos os 4 serviços externos (`contatocerto-api`, `contatocerto-web`, `n8n`, `evo`) estão **online e respondendo HTTP 200**.
 3. **Versões Confirmadas:** Evolution API é exatamente `v2.3.7`; n8n é exatamente `v1.123.21`.
-4. **Banco de Dados:** Conexão com PostgreSQL ativa na API de produção (`/health/db` → `connected`).
-5. **Autenticação Profissional:** `PROFESSIONAL_AUTH_ENABLED=false` confirmado em API e Web, operando com segurança.
+4. **Drift de n8n Documentado:** `Shared Outbox Delivery` lacks `professional_auth_challenge` e `Gateway` possui `Acknowledge Inbox` desabilitado nos exports instalados.
+5. **Configuração de IA:** `CONVERSATION_AI_ENABLED=true` em produção com modelo `gpt-5.6-terra`.
+6. **Autenticação Profissional:** `PROFESSIONAL_AUTH_ENABLED=false` confirmado em API e Web, operando sob senha temporária.
 
 ---
 
