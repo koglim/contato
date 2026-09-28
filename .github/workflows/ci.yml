@@ -333,13 +333,13 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$v2_protected_url" <<'SQL'
           INSERT INTO customers (id, phone_e164) VALUES ('00000000-0000-0000-0027-000000000010', '+5566900000030');
           INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ('00000000-0000-0000-0027-000000000011', '00000000-0000-0000-0027-000000000010', 'eletricista', 'selected');
-          INSERT INTO search_conversations (id, customer_id, search_request_id, status, original_raw_text, service_text, country_code, limit_value, expires_at)
-          VALUES ('00000000-0000-0000-0027-000000000014', '00000000-0000-0000-0027-000000000010', '00000000-0000-0000-0027-000000000011', 'active', 'eletricista', 'eletricista', 'BR', 3, NOW() + INTERVAL '1 hour');
+          INSERT INTO search_conversations (id, customer_id, search_request_id, status, original_raw_text, service_text, country_code, limit_value, expires_at, completed_at)
+          VALUES ('00000000-0000-0000-0027-000000000014', '00000000-0000-0000-0027-000000000010', '00000000-0000-0000-0027-000000000011', 'completed', 'eletricista', 'eletricista', 'BR', 3, NOW() + INTERVAL '1 hour', NOW());
           INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
           VALUES ('00000000-0000-0000-0027-000000000015', 'test', 'msg-027-v2', '+5566900000030', '1');
           INSERT INTO professionals (id, display_name, slug, phone_e164) VALUES ('00000000-0000-0000-0027-000000000012', 'V2 Fixture', 'v2-fixture-027', '+5566900000031');
           INSERT INTO contacts (id, search_request_id, customer_id, professional_id, status, selection_key, public_code, selection_conversation_id, bilateral_snapshot)
-          VALUES ('00000000-0000-0000-0027-000000000013', '00000000-0000-0000-0027-000000000011', '00000000-0000-0000-0027-000000000010', '00000000-0000-0000-0027-000000000012', 'shared', '00000000-0000-0000-0027-000000000015', 'CC-02700002', '00000000-0000-0000-0027-000000000014', '{"public_code":"CC-02700002","connection_rule_version":"connection-v2"}'::jsonb);
+          VALUES ('00000000-0000-0000-0027-000000000013', '00000000-0000-0000-0027-000000000011', '00000000-0000-0000-0027-000000000010', '00000000-0000-0000-0027-000000000012', 'shared', '00000000-0000-0000-0027-000000000015', 'CC-22222227', '00000000-0000-0000-0027-000000000014', '{"public_code":"CC-22222227","connection_rule_version":"connection-v2"}'::jsonb);
           SQL
           set +e
           rollback_output=$(DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
