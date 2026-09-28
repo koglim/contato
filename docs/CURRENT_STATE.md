@@ -2,6 +2,9 @@
 
 Este documento registra a realidade técnica, funcional e operacional do **ContatoCerto** com base no histórico canônico do branch `main` (validado através do PR #18 / histórico canônico do main).
 
+> [!NOTE]
+> **Fase atual: Launch Readiness / Homologação.** O Checkpoint A de auditoria da realidade atual foi executado em 2026-09-28 e seu resultado detalhado encontra-se em [`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md).
+
 ---
 
 ## 🧭 Visão Geral por Status de Entrega
@@ -82,9 +85,9 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 
 ---
 
-## 3. Estado Instalado / Externo Conhecido (Evidência do Operador)
+## 3. Estado Instalado / Externo Conhecido (Evidência do Operador — Não Reverificada no Checkpoint A)
 
-Com base nos dados fornecidos pelo operador da infraestrutura instalada (EasyPanel, n8n v1.123.21 e Evolution API v2.3.7):
+Com base nos dados fornecidos pelo operador da infraestrutura instalada em checkpoint anterior (EasyPanel, n8n v1.123.21 e Evolution API v2.3.7):
 * **WhatsApp Gateway:** Ativo no n8n remoto (recebendo webhooks da Evolution API e repassando para a API do ContatoCerto).
 * **Durable Audio Consumer:** Ativo no n8n remoto (reivindicando mídias de áudio, orquestrando transcrição via Groq com fallback para OpenAI e persistindo o resultado).
 * **Inbox Recovery:** Ativo no n8n remoto (cron recuperando mensagens da tabela `channel_inbound_messages` travadas com lease expirado).
