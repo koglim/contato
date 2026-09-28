@@ -672,6 +672,7 @@ test("migration 027 upgrade: declined João + subsequent Carlos on same search b
   const joaoConvId = randomUUID(), carlosConvId = randomUUID();
   const joaoChoiceId = randomUUID(), carlosChoiceId = randomUUID();
   const joaoInboundId = randomUUID();
+  let differentProfId: string | null = null;
 
   try {
     // Insert customer and professionals
@@ -775,7 +776,8 @@ test("migration 027 upgrade: declined João + subsequent Carlos on same search b
     );
 
     // A different professional CAN have another contact for the same search
-    const differentProfId = randomUUID(), differentProfPhone = phone();
+    differentProfId = randomUUID();
+    const differentProfPhone = phone();
     await query("INSERT INTO professionals (id,display_name,slug,phone_e164,status) VALUES ($1::uuid,'Bia',$1::text,$2,'active')", [differentProfId, differentProfPhone]);
     const biaConvId = randomUUID(), biaChoiceId = randomUUID();
     await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
@@ -800,7 +802,10 @@ test("migration 027 upgrade: declined João + subsequent Carlos on same search b
       await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [customer2Phone]);
       await db.query("DELETE FROM search_conversations WHERE search_request_id = $1", [searchId]);
       await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
-      await db.query("DELETE FROM professionals WHERE id = $1 OR id = $2 OR id = $3", [joaoId, carlosId, differentProfId]);
+      await db.query("DELETE FROM professionals WHERE id = $1 OR id = $2", [joaoId, carlosId]);
+      if (differentProfId) {
+        await db.query("DELETE FROM professionals WHERE id = $1", [differentProfId]);
+      }
       await db.query("DELETE FROM customers WHERE id = $1", [customerId2]);
     });
   }
