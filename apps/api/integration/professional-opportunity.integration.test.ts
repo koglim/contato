@@ -611,7 +611,17 @@ test("unavailability vs completion declaration concurrency is deterministic with
       [f.customerPhone, f.professionalPhone]
     )).rows;
     assert.equal(outbounds.length, 0, `Duplicate outbound business_keys found: ${JSON.stringify(outbounds)}`);
-  } finally { await f.cleanup(); }
+  } finally {
+    // Clean up contact completions before fixture cleanup to avoid FK violations on inbound messages
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completion_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completions WHERE contact_id = $1", [f.contactId]);
+    });
+    await f.cleanup();
+  }
 });
 
 test("completed contact: late professional unavailability declaration is neutral and does not reopen search", async () => {
@@ -634,7 +644,17 @@ test("completed contact: late professional unavailability declaration is neutral
     // Contact must remain completed
     const afterContact = (await query<{ status: string }>("SELECT status FROM contacts WHERE id=$1", [f.contactId])).rows[0];
     assert.equal(afterContact.status, "completed");
-  } finally { await f.cleanup(); }
+  } finally {
+    // Clean up contact completions before fixture cleanup to avoid FK violations on inbound messages
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completion_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completions WHERE contact_id = $1", [f.contactId]);
+    });
+    await f.cleanup();
+  }
 });
 
 test("migration 027 upgrade: declined João + subsequent Carlos on same search both become shared, legacy events intact", async () => {
@@ -774,16 +794,17 @@ test("migration 027 upgrade: declined João + subsequent Carlos on same search b
   } finally {
     // Teardown
     await withTransaction(async (db) => {
-      await db.query("DELETE FROM contacts WHERE id IN ($1,$2)", [joaoContactId, carlosContactId]);
-      await db.query("DELETE FROM contacts WHERE search_request_id=$1", [searchId]);
+      await db.query("DELETE FROM contacts WHERE search_request_id = $1", [searchId]);
       await db.query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
-      await db.query("DELETE FROM opportunity_response_events WHERE contact_id=$1", [joaoContactId]);
+      await db.query("DELETE FROM opportunity_response_events WHERE contact_id = $1", [joaoContactId]);
       await db.query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
-      await db.query("DELETE FROM channel_inbound_messages WHERE id IN ($1,$2,$3)", [joaoChoiceId, carlosChoiceId, joaoInboundId]);
-      await db.query("DELETE FROM search_conversations WHERE id IN ($1,$2)", [joaoConvId, carlosConvId]);
-      await db.query("DELETE FROM search_requests WHERE id=$1", [searchId]);
-      await db.query("DELETE FROM professionals WHERE id IN ($1,$2)", [joaoId, carlosId]);
-      await db.query("DELETE FROM customers WHERE id=$1", [customerId2]);
+      await db.query("DELETE FROM channel_inbound_messages WHERE id = $1 OR id = $2 OR id = $3", [joaoChoiceId, carlosChoiceId, joaoInboundId]);
+      await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [customer2Phone]);
+      await db.query("DELETE FROM search_conversations WHERE search_request_id = $1", [searchId]);
+      await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
+      await db.query("DELETE FROM professionals WHERE id = $1", [joaoId]);
+      await db.query("DELETE FROM professionals WHERE id = $1", [carlosId]);
+      await db.query("DELETE FROM customers WHERE id = $1", [customerId2]);
     });
   }
 });

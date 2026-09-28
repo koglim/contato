@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
 import { buildApp } from "../src/app.js";
-import { closeDatabaseConnection, query, type DatabaseClient } from "../src/database/connection.js";
+import { closeDatabaseConnection, query, withTransaction, type DatabaseClient } from "../src/database/connection.js";
 import { createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
 import { ContactCompletionService } from "../src/modules/contact-completion/contact-completion.service.js";
 import { PostgresContactCompletionRepository } from "../src/modules/contact-completion/contact-completion.repository.js";
@@ -1397,11 +1397,17 @@ test("Scenario 16: Professional unavailability does NOT block completion; shared
     const unavailCountAfter = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM professional_unavailability_events WHERE contact_id=$1", [f.contactId])).rows[0].cnt;
     assert.equal(unavailCountAfter, 1, "Unavailability event must remain after completion");
   } finally {
-    // Additional cleanup for unavailability event inserted above
-    await query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
-    await query("DELETE FROM professional_unavailability_events WHERE contact_id=$1", [f.contactId]);
-    await query("ALTER TABLE professional_unavailability_events ENABLE TRIGGER professional_unavailability_events_immutable");
-    await query("DELETE FROM channel_inbound_messages WHERE phone_e164=$1", [f.professionalPhone]);
+    // Clean up completion events and unavailability events before f.cleanup (which deletes inbound messages)
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completion_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completions WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
+      await db.query("DELETE FROM professional_unavailability_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE professional_unavailability_events ENABLE TRIGGER professional_unavailability_events_immutable");
+    });
     await f.cleanup();
   }
 });
