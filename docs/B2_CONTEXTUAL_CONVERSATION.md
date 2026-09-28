@@ -129,11 +129,7 @@ Paráfrases de comandos sensíveis não reconhecidas são esclarecidas, nunca
 executadas pela confiança do modelo. Catálogo acima de 100 serviços requer
 estratégia de recuperação avaliada; não declarar cobertura ilimitada.
 
-O contexto enviado ao modelo contém somente a mensagem atual já sanitizada,
-serviço/localização confirmados, slot pendente, até três nomes de hipóteses e até
-100 itens do catálogo com descrições truncadas. Não contém telefone, IDs de
-cliente/profissional, tokens, preços, coordenadas nem histórico bruto. A Responses
-API usa `store:false`; memória confirmada e hipóteses continuam no PostgreSQL.
+No estágio de resolução de serviço (`pending="service"` ou `"location"`), o contexto enviado ao modelo contém a mensagem atual sanitizada, serviço/localização confirmados, slot pendente, até três nomes de hipóteses e até 100 itens do catálogo com descrições truncadas. No estágio de seleção (`pending="selection"`), o catálogo é enviado VAZIO (0 itens) e entram exclusivamente até 6 candidatos exibidos (`shownCandidates`, até 6 profissionais da página 1/2) com atributos sem PII (`position`, `displayName`, `serviceName`, `summary`, `distanceMeters`, `priceMode`, `priceFromCents`, `priceToCents`, `isVerified`, `availability`). Não contém telefone, IDs de cliente/profissional, tokens, coordenadas brutas nem histórico bruto. A Responses API usa `store:false`; memória confirmada e hipóteses continuam no PostgreSQL.
 
 Cada turno B2 registra, sem mensagem bruta ou telefone, a decisão do controlador,
 o método de evidência de serviço, a presença de hipótese anterior, a existência de

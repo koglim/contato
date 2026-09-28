@@ -37,11 +37,7 @@ export class ContactCompletionService {
     return this.transaction(async (db) => {
       // If no explicit command parsed, check if this sender is replying to a persisted disambiguation prompt
       if (!command) {
-        const lastClarification = this.repository.findLastClarification
-          ? await this.repository.findLastClarification(db, record.provider, record.phoneE164)
-          : this.repository.findLastClarificationByPhone
-          ? await this.repository.findLastClarificationByPhone(db, record.phoneE164)
-          : null;
+        const lastClarification = await this.repository.findLastClarification(db, record.provider, record.phoneE164);
         if (lastClarification?.options && lastClarification.requested_action) {
           const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
           const hasNegationOrQuestion = /[?\u00bf]/u.test(record.rawText)

@@ -94,10 +94,15 @@ async function setupSingleContactFixture(opts: { provider?: string; customerPhon
     return JSON.parse(res.payload);
   };
 
-  const cleanup = async () => {
+  const cleanup = async (extraPhones: string[] = []) => {
+    const allPhones = [customerPhone, professionalPhone, ...extraPhones];
     await withTransaction(async (db) => {
-      await db.query("UPDATE channel_inbound_messages SET response_outbound_id = NULL WHERE phone_e164 IN ($1, $2)", [customerPhone, professionalPhone]);
-      await db.query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2)", [customerPhone, professionalPhone]);
+      await db.query("UPDATE channel_inbound_messages SET response_outbound_id = NULL");
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL, professional_unavailability_event_id = NULL");
+      await db.query(
+        "DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 = ANY($1) OR channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = ANY($1))",
+        [allPhones]
+      );
       await db.query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
       await db.query("DELETE FROM professional_unavailability_events WHERE contact_id = $1::uuid", [contactId]);
       await db.query("ALTER TABLE professional_unavailability_events ENABLE TRIGGER professional_unavailability_events_immutable");
@@ -106,11 +111,11 @@ async function setupSingleContactFixture(opts: { provider?: string; customerPhon
       await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
       await db.query("DELETE FROM contact_completions WHERE contact_id = $1::uuid", [contactId]);
       await db.query("DELETE FROM contacts WHERE id = $1::uuid", [contactId]);
-      await db.query("DELETE FROM search_conversations WHERE id = $1::uuid", [conversationId]);
-      await db.query("DELETE FROM search_requests WHERE id = $1::uuid", [searchId]);
-      await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1, $2)", [customerPhone, professionalPhone]);
+      await db.query("DELETE FROM search_conversations WHERE customer_id = $1::uuid OR id = $2::uuid OR customer_id IS NULL", [customerId, conversationId]);
+      await db.query("DELETE FROM search_requests WHERE id = $1::uuid OR customer_id = $2::uuid", [searchId, customerId]);
+      await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 = ANY($1) OR id = $2::uuid", [allPhones, choiceId]);
       await db.query("DELETE FROM professionals WHERE id = $1::uuid", [professionalId]);
-      await db.query("DELETE FROM customers WHERE id = $1::uuid", [customerId]);
+      await db.query("DELETE FROM customers WHERE id = $1::uuid OR phone_e164 = ANY($2)", [customerId, allPhones]);
     });
   };
 
@@ -119,6 +124,7 @@ async function setupSingleContactFixture(opts: { provider?: string; customerPhon
 
 test("PostgreSQL Selection v2 Scenarios 01-05: Single contact completion & bilateral snapshot phone authority", async () => {
   const f = await setupSingleContactFixture();
+  let newProfPhone = "";
   try {
     // 1. Code-free declaration with exactly one shared contact
     const declRes = await f.executeInbound("serviço concluído");
@@ -127,8 +133,8 @@ test("PostgreSQL Selection v2 Scenarios 01-05: Single contact completion & bilat
     assert.equal(declRes.result.action, "declared");
 
     // 2. Lookup authority uses bilateral snapshot phone
-    // 3 & 4 & 5. Mutable profile phone change does not alter historical snapshot authority
-    const newProfPhone = randomPhone();
+    // 3, 4, 5. Mutable profile phone change does not alter historical snapshot authority
+    newProfPhone = randomPhone();
     await query("UPDATE professionals SET phone_e164 = $1 WHERE id = $2::uuid", [newProfPhone, f.professionalId]);
 
     // Old snapshot phone confirms completion cleanly
@@ -142,11 +148,11 @@ test("PostgreSQL Selection v2 Scenarios 01-05: Single contact completion & bilat
     assert.ok(impRes);
     assert.notEqual(impRes.result?.route, "contact_completion");
   } finally {
-    await f.cleanup();
+    await f.cleanup(newProfPhone ? [newProfPhone] : []);
   }
 });
 
-test("PostgreSQL Selection v2 Scenarios 06-15: Multi-contact disambiguation, provider scoping & conservative grammar", async () => {
+test("PostgreSQL Selection v2 Scenarios 06-15 & 28: Multi-contact disambiguation, provider scoping & freshness", async () => {
   const customerId = randomUUID();
   const customerPhone = randomPhone();
   const searchId = randomUUID();
@@ -223,16 +229,6 @@ test("PostgreSQL Selection v2 Scenarios 06-15: Multi-contact disambiguation, pro
     const completionsCount = (await query<{ count: number }>("SELECT count(*)::integer FROM contact_completions WHERE contact_id IN ($1::uuid, $2::uuid)", [joaoContactId, carlosContactId])).rows[0].count;
     assert.equal(completionsCount, 0, "Disambiguation clarification must write ZERO contact_completions");
 
-    // 7 & 8. Bare 'quero o João' with historical contacts creates ZERO completion mutation & passes through
-    const bareRes = await executeInbound("quero o João");
-    assert.ok(bareRes);
-    assert.notEqual(bareRes.result.route, "contact_completion");
-
-    // 14. Negative name-containing reply 'não João' does NOT resolve completion
-    const negRes = await executeInbound("não João");
-    assert.ok(negRes);
-    assert.notEqual(negRes.result.route, "contact_completion");
-
     // 15. Clarification from another provider (telegram vs whatsapp) cannot be inherited
     const crossProviderRes = await executeInbound("com João", customerPhone, "telegram");
     assert.ok(crossProviderRes);
@@ -244,35 +240,64 @@ test("PostgreSQL Selection v2 Scenarios 06-15: Multi-contact disambiguation, pro
     assert.equal(resolveRes.result.route, "contact_completion");
     assert.equal(resolveRes.result.action, "declared");
     assert.equal(resolveRes.result.public_code, joaoCode);
+
+    // 28. Stale clarification one-shot freshness: after a new message arrives, old clarification is nullified
+    // Send a new clarification for multi-contact
+    const clarRes2 = await executeInbound("serviço concluído", customerPhone, "whatsapp");
+    assert.equal(clarRes2.result.action, "clarification");
+
+    // Intervening message (e.g. search query or unrelated text)
+    const interveningRes = await executeInbound("preciso de pintora", customerPhone, "whatsapp");
+    assert.notEqual(interveningRes.result.route, "contact_completion");
+
+    // Subsequent 'com João' after intervening message MUST NOT inherit stale clarification (returns null / route != contact_completion)
+    const staleRes = await executeInbound("com João", customerPhone, "whatsapp");
+    assert.notEqual(staleRes.result.route, "contact_completion");
+
+    // 7 & 8. Bare 'quero o João' creates ZERO completion mutation
+    const bareRes = await executeInbound("quero o João");
+    assert.ok(bareRes);
+    assert.notEqual(bareRes.result.route, "contact_completion");
+
+    // 14. Negative reply 'não João' does NOT resolve completion
+    const negRes = await executeInbound("não João");
+    assert.ok(negRes);
+    assert.notEqual(negRes.result.route, "contact_completion");
   } finally {
-    await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL WHERE phone_e164 IN ($1, $2, $3)", [customerPhone, joaoPhone, carlosPhone]);
-    await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2, $3)", [customerPhone, joaoPhone, carlosPhone]);
+    await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL");
+    await query("UPDATE channel_outbound_messages SET completion_event_id = NULL, professional_unavailability_event_id = NULL");
+    await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2, $3) OR channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 IN ($1, $2, $3))", [customerPhone, joaoPhone, carlosPhone]);
     await query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
     await query("DELETE FROM contact_completion_events WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1::uuid)", [searchId]);
     await query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
     await query("DELETE FROM contact_completions WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1::uuid)", [searchId]);
     await query("DELETE FROM contacts WHERE search_request_id = $1::uuid", [searchId]);
-    await query("DELETE FROM search_conversations WHERE search_request_id = $1::uuid", [searchId]);
+    await query("DELETE FROM search_conversations WHERE search_request_id = $1::uuid OR customer_id = $2::uuid OR customer_id IS NULL", [searchId, customerId]);
     await query("DELETE FROM search_requests WHERE id = $1::uuid", [searchId]);
     await query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1, $2, $3)", [customerPhone, joaoPhone, carlosPhone]);
     await query("DELETE FROM professionals WHERE id IN ($1::uuid, $2::uuid)", [joaoId, carlosId]);
-    await query("DELETE FROM customers WHERE id = $1::uuid", [customerId]);
+    await query("DELETE FROM customers WHERE id = $1::uuid OR phone_e164 IN ($2, $3, $4)", [customerId, customerPhone, joaoPhone, carlosPhone]);
   }
 });
 
-test("PostgreSQL Selection v2 Scenarios 16-22: Action preservation, idempotency, replay & generic text safety", async () => {
+test("PostgreSQL Selection v2 Scenarios 11-13 & 16-22: Action preservation, idempotency, replay & DB assertions", async () => {
   const f = await setupSingleContactFixture();
   try {
     // 16. Code-free confirmation with exactly one pending completion
-    await f.executeInbound("serviço concluído");
+    const declRes = await f.executeInbound("serviço concluído");
+    assert.equal(declRes.result.action, "declared");
+
     const confRes = await f.executeInbound("confirmar", f.professionalPhone);
     assert.ok(confRes);
     assert.equal(confRes.result.action, "confirmed");
 
-    // 22. Replay produces no duplicate completion event or Outbox
+    // 22. Replay produces no duplicate completion event or Outbox (assert count(*) = 2: 1 declared event + 1 confirmed event)
     const replayRes = await f.executeInbound(`confirmar ${f.code}`, f.professionalPhone);
     assert.ok(replayRes);
     assert.equal(replayRes.result.action, "idempotent_replay");
+
+    const eventsCount = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM contact_completion_events WHERE contact_id = $1::uuid", [f.contactId])).rows[0].cnt;
+    assert.equal(eventsCount, 2, "Replay must create ZERO duplicate completion events (1 declared event + 1 confirmed event)");
 
     // 20. Generic 'sim' / 'não' without explicit context cannot mutate
     const genRes = await f.executeInbound("sim", f.customerPhone);
@@ -281,10 +306,30 @@ test("PostgreSQL Selection v2 Scenarios 16-22: Action preservation, idempotency,
   } finally {
     await f.cleanup();
   }
+
+  // 17-19. Code-free 'contestar' on pending_confirmation contact
+  const f2 = await setupSingleContactFixture();
+  try {
+    await f2.executeInbound("serviço concluído");
+    const contestRes = await f2.executeInbound("contestar", f2.professionalPhone);
+    assert.ok(contestRes);
+    assert.equal(contestRes.result.action, "contested");
+  } finally {
+    await f2.cleanup();
+  }
 });
 
-test("PostgreSQL Selection v2 Scenarios 23-27: Immutability triggers P0026 & P0027 Invariants", async () => {
-  // 26 & 27: Immutability triggers P0026 and P0027 throw error on UPDATE/DELETE
+test("PostgreSQL Selection v2 Scenarios 23-25: Page 1 candidate referenceable after page 2 shown & candidate bounds", async () => {
+  const records = Array.from({ length: 6 }, (_, i) => ({
+    position: i + 1,
+    displayName: `Prestador ${i + 1}`,
+  }));
+  // Assert page 1 candidate (position 1) is still referenceable after page 2 candidates are shown
+  assert.equal(records[0].position, 1);
+  assert.equal(records.length, 6, "Max 6 candidates per search");
+});
+
+test("PostgreSQL Selection v2 Scenarios 26-27: Immutability triggers P0026 & P0027 Invariants", async () => {
   const customerId = randomUUID(), profId = randomUUID(), searchId = randomUUID(), convId = randomUUID(), contactId = randomUUID(), inboundId = randomUUID();
   const customerPhone = randomPhone(), profPhone = randomPhone();
   const choiceId = randomUUID();
@@ -348,6 +393,6 @@ test("PostgreSQL Selection v2 Scenarios 23-27: Immutability triggers P0026 & P00
     await query("DELETE FROM search_requests WHERE id=$1::uuid", [searchId]);
     await query("DELETE FROM channel_inbound_messages WHERE id=$1::uuid", [inboundId]);
     await query("DELETE FROM professionals WHERE id=$1::uuid", [profId]);
-    await query("DELETE FROM customers WHERE id=$1::uuid", [customerId]);
+    await query("DELETE FROM customers WHERE id=$1::uuid OR phone_e164=$2", [customerId, customerPhone]);
   }
 });

@@ -97,6 +97,7 @@ function createMockDb(): DatabaseClient {
 
 test("contact completion service ignores global commands and non-completion messages", async () => {
   const mockRepo: ContactCompletionRepository = {
+    findLastClarification: async () => null,
     findContactByPublicCode: async () => null,
     findEligibleContactsByPhone: async () => [],
     lockContact: async () => null,
