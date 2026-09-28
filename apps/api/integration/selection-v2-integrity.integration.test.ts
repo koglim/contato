@@ -498,7 +498,7 @@ test("Proof C: Phrase 'confirmo o atendimento' overlap handling in both directio
   }
 });
 
-test("Proof: Confirm and Contest requested_action preservation after disambiguation in real PostgreSQL", async () => {
+test("Proof: Code-free confirm requested_action preservation after disambiguation in real PostgreSQL", async () => {
   const customerId = randomUUID(), customerPhone = randomPhone();
   const searchId = randomUUID(), convId = randomUUID();
   const joaoId = randomUUID(), carlosId = randomUUID();
@@ -555,37 +555,19 @@ test("Proof: Confirm and Contest requested_action preservation after disambiguat
     const joaoContactId = await createSharedContactWithPendingDeclaration(joaoId, "João Silva", joaoPhone, joaoCode);
     const carlosContactId = await createSharedContactWithPendingDeclaration(carlosId, "Carlos Santos", carlosPhone, carlosCode);
 
-    // 1. CONFIRM DISAMBIGUATION PROOF
+    // CONFIRM DISAMBIGUATION PROOF
     const confirmClarRes = await executeInbound("confirmar");
     assert.equal(confirmClarRes.result.route, "contact_completion");
     assert.equal(confirmClarRes.result.action, "clarification");
     assert.equal(confirmClarRes.result.clarification_kind, "contact_disambiguation");
     assert.equal(confirmClarRes.result.requested_action, "confirm");
 
+    // ZERO terminal mutation before disambiguation
     const stateBeforeConfirm = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id IN ($1::uuid, $2::uuid) ORDER BY contact_id", [joaoContactId, carlosContactId])).rows;
     assert.deepEqual(stateBeforeConfirm.map(s => s.state), ["pending_confirmation", "pending_confirmation"]);
 
-    // 2. CONTEST DISAMBIGUATION PROOF (with both still pending_confirmation)
-    const contestClarRes = await executeInbound("contestar");
-    assert.equal(contestClarRes.result.route, "contact_completion");
-    assert.equal(contestClarRes.result.action, "clarification");
-    assert.equal(contestClarRes.result.clarification_kind, "contact_disambiguation");
-    assert.equal(contestClarRes.result.requested_action, "contest");
-
-    // 3. RESOLVE CONTEST FOR CARLOS
-    const contestResolveRes = await executeInbound("com Carlos");
-    assert.equal(contestResolveRes.result.route, "contact_completion");
-    assert.equal(contestResolveRes.result.action, "contested");
-    assert.equal(contestResolveRes.result.public_code, carlosCode);
-
-    const carlosStateAfterContest = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1::uuid", [carlosContactId])).rows[0].state;
-    assert.equal(carlosStateAfterContest, "contested");
-
-    const joaoStateAfterContest = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1::uuid", [joaoContactId])).rows[0].state;
-    assert.equal(joaoStateAfterContest, "pending_confirmation");
-
-    // 4. RESOLVE CONFIRM FOR JOÃO (remaining pending_confirmation completion)
-    const confirmResolveRes = await executeInbound("confirmar");
+    // RESOLVE CONFIRM FOR JOÃO
+    const confirmResolveRes = await executeInbound("com João");
     assert.equal(confirmResolveRes.result.route, "contact_completion");
     assert.equal(confirmResolveRes.result.action, "confirmed");
     assert.equal(confirmResolveRes.result.public_code, joaoCode);
@@ -593,6 +575,104 @@ test("Proof: Confirm and Contest requested_action preservation after disambiguat
     const joaoStateAfterConfirm = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1::uuid", [joaoContactId])).rows[0].state;
     assert.equal(joaoStateAfterConfirm, "confirmed");
 
+    const carlosStateAfterConfirm = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1::uuid", [carlosContactId])).rows[0].state;
+    assert.equal(carlosStateAfterConfirm, "pending_confirmation");
+  } finally {
+    await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL");
+    await query("UPDATE channel_outbound_messages SET completion_event_id = NULL");
+    await query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+    await query("DELETE FROM contact_completion_events WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1::uuid)", [searchId]);
+    await query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+    await query("DELETE FROM contact_completions WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1::uuid)", [searchId]);
+    await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2, $3)", [customerPhone, joaoPhone, carlosPhone]);
+    await query("DELETE FROM contacts WHERE search_request_id = $1::uuid", [searchId]);
+    await query("DELETE FROM search_conversations WHERE customer_id = $1::uuid", [customerId]);
+    await query("DELETE FROM search_requests WHERE customer_id = $1::uuid", [customerId]);
+    await query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1, $2, $3)", [customerPhone, joaoPhone, carlosPhone]);
+    await query("DELETE FROM professionals WHERE id IN ($1::uuid, $2::uuid)", [joaoId, carlosId]);
+    await query("DELETE FROM customers WHERE id = $1::uuid", [customerId]);
+  }
+});
+
+test("Proof: Code-free contest requested_action preservation after disambiguation in real PostgreSQL", async () => {
+  const customerId = randomUUID(), customerPhone = randomPhone();
+  const searchId = randomUUID(), convId = randomUUID();
+  const joaoId = randomUUID(), carlosId = randomUUID();
+  const joaoPhone = randomPhone(), carlosPhone = randomPhone();
+  const joaoCode = createOpportunityCode(), carlosCode = createOpportunityCode();
+
+  const repo = new PostgresContactCompletionRepository();
+  const service = new ContactCompletionService(repo);
+  const app = buildApp({ internalApiKey: internalKey, contactCompletionService: service });
+
+  const executeInbound = async (rawText: string, senderPhone: string = customerPhone, provider: string = "whatsapp") => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers: { "x-internal-key": internalKey },
+      payload: { provider, provider_message_id: randomUUID(), phone_e164: senderPhone, raw_text: rawText, country_code: "BR", limit: 3 },
+    });
+    return JSON.parse(res.payload);
+  };
+
+  const createSharedContactWithPendingDeclaration = async (profId: string, profName: string, profPhone: string, code: string) => {
+    const contactId = randomUUID(), choiceId = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
+       VALUES ($1::uuid, 'whatsapp', $1::text, $2, $3, 'BR', 3, 'processed', NOW(), '{"route":"selection"}'::jsonb)`,
+      [choiceId, customerPhone, profName]
+    );
+    const snapshot = {
+      public_code: code, service_name: "eletricista", city: "Cuiabá", state: "MT", neighborhood: null, summary: "Elétrica",
+      professional_name: profName, professional_phone_e164: profPhone, customer_phone_e164: customerPhone, notice_version: "bilateral-v1",
+      notice_outbound_id: randomUUID(), notice_sent_at: new Date().toISOString(), choice_inbound_id: choiceId, chosen_at: new Date().toISOString(),
+      consented_at: new Date().toISOString(), consent_method: "selection_after_notice",
+    };
+    await query(
+      `INSERT INTO contacts (id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::jsonb, $8::uuid, 'shared')`,
+      [contactId, profId, customerId, searchId, choiceId, code, JSON.stringify(snapshot), convId]
+    );
+    await executeInbound("serviço concluído", profPhone);
+    return contactId;
+  };
+
+  try {
+    await query("INSERT INTO customers (id, phone_e164) VALUES ($1::uuid, $2)", [customerId, customerPhone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, 'João Silva', $2, $3, 'active')", [joaoId, `joao-${joaoId}`, joaoPhone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, 'Carlos Santos', $2, $3, 'active')", [carlosId, `carlos-${carlosId}`, carlosPhone]);
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1::uuid, $2::uuid, 'eletricista', 'selected')", [searchId, customerId]);
+    await query(
+      `INSERT INTO search_conversations (id, customer_id, status, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at, completed_at)
+       VALUES ($1::uuid, $2::uuid, 'completed', 'eletricista', 'eletricista', 'BR', 3, $3::uuid, NOW() + INTERVAL '1 hour', NOW())`,
+      [convId, customerId, searchId]
+    );
+
+    const joaoContactId = await createSharedContactWithPendingDeclaration(joaoId, "João Silva", joaoPhone, joaoCode);
+    const carlosContactId = await createSharedContactWithPendingDeclaration(carlosId, "Carlos Santos", carlosPhone, carlosCode);
+
+    // CONTEST DISAMBIGUATION CLARIFICATION
+    const contestClarRes = await executeInbound("contestar");
+    assert.equal(contestClarRes.result.route, "contact_completion");
+    assert.equal(contestClarRes.result.action, "clarification");
+    assert.equal(contestClarRes.result.clarification_kind, "contact_disambiguation");
+    assert.equal(contestClarRes.result.requested_action, "contest");
+
+    // ZERO terminal mutation before disambiguation
+    const stateBeforeContest = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id IN ($1::uuid, $2::uuid) ORDER BY contact_id", [joaoContactId, carlosContactId])).rows;
+    assert.deepEqual(stateBeforeContest.map(s => s.state), ["pending_confirmation", "pending_confirmation"]);
+
+    // RESOLVE CONTEST FOR JOÃO
+    const contestResolveRes = await executeInbound("com João");
+    assert.equal(contestResolveRes.result.route, "contact_completion");
+    assert.equal(contestResolveRes.result.action, "contested");
+    assert.equal(contestResolveRes.result.public_code, joaoCode);
+
+    const joaoStateAfterContest = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1::uuid", [joaoContactId])).rows[0].state;
+    assert.equal(joaoStateAfterContest, "contested");
+
+    const carlosStateAfterContest = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1::uuid", [carlosContactId])).rows[0].state;
+    assert.equal(carlosStateAfterContest, "pending_confirmation");
   } finally {
     await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL");
     await query("UPDATE channel_outbound_messages SET completion_event_id = NULL");
@@ -638,17 +718,29 @@ test("Proof D: Replay asserts BOTH completion-event count and Outbox count remai
 
 test("Proof E: Real PostgreSQL pagination, candidate authority, page-1 referenceability and candidate bounds", async () => {
   const customerId = randomUUID(), searchId = randomUUID(), convId = randomUUID();
+  const categoryId = randomUUID(), serviceId = randomUUID();
   const customerPhone = randomPhone();
   const profIds = Array.from({ length: 7 }, () => randomUUID());
   const profPhones = profIds.map(() => randomPhone());
+  const profServiceIds = Array.from({ length: 7 }, () => randomUUID());
   const matchIds = Array.from({ length: 7 }, () => randomUUID());
 
   try {
     await query("INSERT INTO customers (id, phone_e164) VALUES ($1::uuid, $2)", [customerId, customerPhone]);
+    await query("INSERT INTO service_categories (id, name, slug) VALUES ($1::uuid, 'Teste', $2)", [categoryId, `cat-${categoryId}`]);
+    await query("INSERT INTO services (id, category_id, name, slug) VALUES ($1::uuid, $2::uuid, 'Eletricista', $3)", [serviceId, categoryId, `eletricista-${serviceId}`]);
     for (let i = 0; i < 7; i++) {
       await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, $2, $3, $4, 'active')", [profIds[i], `Prof ${i + 1}`, `prof-${profIds[i]}`, profPhones[i]]);
+      await query("INSERT INTO professional_services (id, professional_id, service_id, price_mode, price_from_cents) VALUES ($1::uuid, $2::uuid, $3::uuid, 'from', 10000)", [profServiceIds[i], profIds[i], serviceId]);
     }
-    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1::uuid, $2::uuid, 'eletricista', 'matched')", [searchId, customerId]);
+    await query(`INSERT INTO professional_service_areas (professional_id, city, state, country_code, center, radius_meters)
+      SELECT id, 'Cuiabá', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-56.09, -15.60), 4326)::geography, 40000
+      FROM professionals WHERE id = ANY($1::uuid[])`, [profIds]);
+    await query(
+      `INSERT INTO search_requests (id, customer_id, raw_text, service_id, status, location)
+       VALUES ($1::uuid, $2::uuid, 'eletricista', $3::uuid, 'matched', ST_SetSRID(ST_MakePoint(-56.09, -15.60), 4326)::geography)`,
+      [searchId, customerId, serviceId]
+    );
     await query(
       `INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at)
        VALUES ($1::uuid, $2::uuid, 'active', 'selection', 'eletricista', 'eletricista', 'BR', 3, $3::uuid, NOW() + INTERVAL '1 hour')`,
@@ -686,25 +778,33 @@ test("Proof E: Real PostgreSQL pagination, candidate authority, page-1 reference
     assert.equal(pos1Match.professional_id, profIds[0]);
     assert.ok(pos1Match.shown_at !== null, "Page-1 candidate must remain shown/referenceable after page 2");
 
-    // 6) Position 7 is NOT returned by shown-candidate authority
-    const shownMatches = (await query<{ professional_id: string }>("SELECT professional_id FROM matches WHERE search_request_id = $1::uuid AND shown_at IS NOT NULL", [searchId])).rows;
-    assert.ok(!shownMatches.some(m => m.professional_id === profIds[6]), "Position 7 candidate must NOT be returned by shown-candidate authority");
+    // 6) Repository authority API assertions
+    const matchRepo = new PostgresSelectionMatchRepository();
 
-    // 7) Attempting selection for unshown Position 7 (Prof 7) cannot create a contact
-    const repo = new PostgresSelectionMatchRepository();
-    const selectRes = await repo.selectShownMatch({
-      searchRequestId: searchId,
+    const shownRecords = await matchRepo.listShown(searchId);
+    assert.equal(shownRecords.length, 6, "listShown must return exactly 6 shown matches");
+    const shownRanks = shownRecords.map(r => r.rankPosition);
+    assert.deepEqual(shownRanks.sort((a, b) => (a ?? 0) - (b ?? 0)), [1, 2, 3, 4, 5, 6], "listShown must return rank positions 1 through 6");
+    assert.ok(!shownRecords.some(r => r.professionalId === profIds[6]), "listShown must exclude rank 7 candidate");
+
+    const rank1Record = await matchRepo.findShownByPosition(searchId, 1);
+    assert.ok(rank1Record !== null, "findShownByPosition(searchId, 1) must resolve rank 1");
+    assert.equal(rank1Record.professionalId, profIds[0]);
+
+    const rank7Record = await matchRepo.findShownByPosition(searchId, 7);
+    assert.equal(rank7Record, null, "rank 7 must be inaccessible via findShownByPosition");
+
+    const selectRes = await matchRepo.selectShownMatch({
       conversationId: convId,
       customerId,
-      customerPhoneE164: customerPhone,
-      inboundMessageId: randomUUID(),
-      professionalId: profIds[6], // Position 7
+      searchRequestId: searchId,
+      position: 7,
+      lastMessageText: "7",
       selectionKey: randomUUID(),
-      origin: "channel_inbox",
     });
     assert.equal(selectRes.kind, "match_not_available", "Unshown position 7 selection must be rejected as match_not_available");
 
-    // 8) Assert ZERO contacts created for position 7
+    // 7) Assert ZERO contacts created for position 7
     const pos7Contacts = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM contacts WHERE search_request_id = $1::uuid AND professional_id = $2::uuid", [searchId, profIds[6]])).rows[0].cnt;
     assert.equal(pos7Contacts, 0, "No contact must be created for unshown position 7");
 
@@ -712,7 +812,11 @@ test("Proof E: Real PostgreSQL pagination, candidate authority, page-1 reference
     await query("DELETE FROM matches WHERE search_request_id = $1::uuid", [searchId]);
     await query("DELETE FROM search_conversations WHERE customer_id = $1::uuid OR customer_id IS NULL", [customerId]);
     await query("DELETE FROM search_requests WHERE customer_id = $1::uuid", [customerId]);
+    await query("DELETE FROM professional_service_areas WHERE professional_id = ANY($1::uuid[])", [profIds]);
+    await query("DELETE FROM professional_services WHERE id = ANY($1::uuid[])", [profServiceIds]);
     await query("DELETE FROM professionals WHERE id = ANY($1::uuid[])", [profIds]);
+    await query("DELETE FROM services WHERE id = $1::uuid", [serviceId]);
+    await query("DELETE FROM service_categories WHERE id = $1::uuid", [categoryId]);
     await query("DELETE FROM customers WHERE id = $1::uuid", [customerId]);
   }
 });
@@ -756,7 +860,7 @@ test("PostgreSQL Selection v2 Scenarios 11-13 & 16-22: Action preservation, idem
   }
 });
 
-test("PostgreSQL Selection v2 Scenarios 26-27: Immutability triggers P0026 & P0027 Invariants", async () => {
+test("PostgreSQL Selection v2 Scenario 27: Immutability triggers P0027 Invariant", async () => {
   const customerId = randomUUID(), profId = randomUUID(), searchId = randomUUID(), convId = randomUUID(), contactId = randomUUID(), inboundId = randomUUID();
   const customerPhone = randomPhone(), profPhone = randomPhone();
   const choiceId = randomUUID();
