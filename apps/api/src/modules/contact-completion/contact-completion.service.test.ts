@@ -96,7 +96,23 @@ function createMockDb(): DatabaseClient {
 }
 
 test("contact completion service ignores global commands and non-completion messages", async () => {
-  const service = new ContactCompletionService();
+  const mockRepo: ContactCompletionRepository = {
+    findContactByPublicCode: async () => null,
+    findEligibleContactsByPhone: async () => [],
+    lockContact: async () => null,
+    findCompletionByContactId: async () => null,
+    createCompletion: async () => { throw new Error("not called"); },
+    updateCompletionState: async () => { throw new Error("not called"); },
+    createEvent: async () => { throw new Error("not called"); },
+    updateContactStatus: async () => {},
+    insertOutboundReply: async () => randomUUID(),
+    insertOutboundNotification: async () => randomUUID(),
+    markInboundProcessed: async () => {},
+  };
+  const service = new ContactCompletionService(
+    mockRepo,
+    async (fn) => fn(createMockDb())
+  );
   const globalRecord = createInboundRecord({ rawText: "cancelar" });
   assert.equal(await service.handle(globalRecord), null);
 
