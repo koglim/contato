@@ -692,11 +692,11 @@ test("migration 027 upgrade: declined João + subsequent Carlos on same search b
 
     // João selection inbound
     await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
-      VALUES ($1,'test',$1,$2,'Joao','BR',3,'processed',NOW(),'{}'::jsonb)`, [joaoChoiceId, customer2Phone]);
+      VALUES ($1::uuid,'test',$1::text,$2,'Joao','BR',3,'processed',NOW(),'{}'::jsonb)`, [joaoChoiceId, customer2Phone]);
 
     // Carlos selection inbound
     await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
-      VALUES ($1,'test',$1,$2,'Carlos','BR',3,'processed',NOW(),'{}'::jsonb)`, [carlosChoiceId, customer2Phone]);
+      VALUES ($1::uuid,'test',$1::text,$2,'Carlos','BR',3,'processed',NOW(),'{}'::jsonb)`, [carlosChoiceId, customer2Phone]);
 
     const joaoSnapshot = {
       public_code: joaoCode, service_name: "eletricista", city: "Sinop", state: "MT",
@@ -727,7 +727,7 @@ test("migration 027 upgrade: declined João + subsequent Carlos on same search b
     // Insert a legacy opportunity_response_events row for João's decline (legacy evidence preserved)
     // This represents what migration 027 up() preserves: it does NOT touch opportunity_response_events.
     await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
-      VALUES ($1,'test',$1,$2,'recuso','BR',3,'processed',NOW(),'{}'::jsonb)`, [joaoInboundId, joaoPhone]);
+      VALUES ($1::uuid,'test',$1::text,$2,'recuso','BR',3,'processed',NOW(),'{}'::jsonb)`, [joaoInboundId, joaoPhone]);
     await query(`INSERT INTO opportunity_response_events (contact_id,professional_id,inbound_id,previous_state,next_state,origin,rule_version)
       VALUES ($1,$2,$3,'requested','declined','channel_inbox','opportunity-response-v1')`,
       [joaoContactId, joaoId, joaoInboundId]);
@@ -781,7 +781,7 @@ test("migration 027 upgrade: declined João + subsequent Carlos on same search b
     await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
       VALUES ($1,$2,'completed','eletricista','eletricista','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [biaConvId, customerId2, searchId]);
     await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
-      VALUES ($1,'test',$1,$2,'Bia','BR',3,'processed',NOW(),'{}'::jsonb)`, [biaChoiceId, customer2Phone]);
+      VALUES ($1::uuid,'test',$1::text,$2,'Bia','BR',3,'processed',NOW(),'{}'::jsonb)`, [biaChoiceId, customer2Phone]);
     const biaCode = createOpportunityCode();
     await query(`INSERT INTO contacts (professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id,status)
       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'shared')`,

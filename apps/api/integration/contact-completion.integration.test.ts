@@ -1359,7 +1359,7 @@ test("Scenario 16: Professional unavailability does NOT block completion; shared
     const unavailInboundId = randomUUID();
     await query(
       `INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
-       VALUES ($1,'test',$1,$2,'não consigo','BR',3,'processed',NOW(),'{}'::jsonb)`,
+       VALUES ($1::uuid,'test',$1::text,$2,'não consigo','BR',3,'processed',NOW(),'{}'::jsonb)`,
       [unavailInboundId, f.professionalPhone]
     );
     // Disable immutability trigger for fixture insertion
