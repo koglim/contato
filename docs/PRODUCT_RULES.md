@@ -12,12 +12,12 @@ A Inteligência Artificial (LLMs) desempenha um papel fundamental de tradução 
 * Interpretar a intenção do usuário a partir de textos informais ou áudios transcritos.
 * Identificar termos candidatos a serviços do catálogo e menções a cidades/estados.
 * Formular respostas empáticas, esclarecimentos e perguntas de desambiguação em linguagem natural.
-* Explicar atributos factuais cadastrados dos profissionais apresentados.
+* Explicar e interpretar dúvidas ou comparações do cliente sobre os profissionais apresentados (Selection Intelligence v2), sem autoridade transacional.
 
 ### 🚫 O que a IA NUNCA PODE Fazer (Privilégio Exclusivo do Domínio Determinístico):
 * **Identidade e Posse de Telefone:** A IA não autentica quem é o usuário nem valida posse de número E.164.
 * **Consentimento de Compartilhamento:** A IA não infere consentimento implícito; o consentimento exige uma ação transacional auditada.
-* **Mutação de Ranking e Seleção:** A IA não escolhe quem vence a busca nem altera posições de ranking arbitrariamente.
+* **Mutação de Ranking e Seleção:** A IA não escolhe quem vence a busca nem altera posições de ranking arbitrariamente. Perguntas sobre candidatos (`inquire_candidate`, `compare_candidates`) nunca selecionam nem mutam o domínio (ADR-002).
 * **Criação e Conclusão de Contatos:** A IA não gera registros de `contacts` nem altera status de atendimentos sem comandos validados pelo motor de regras determinístico.
 * **Assinaturas e Finanças:** A IA não concede planos, isenções ou altera direitos de acesso (*entitlements*).
 
@@ -26,15 +26,15 @@ A Inteligência Artificial (LLMs) desempenha um papel fundamental de tradução 
 ## 2. Experiência do Cliente: Linguagem Natural em Primeiro Lugar
 
 * **Sem Fricção Técnica:** O cliente nunca deve ser forçado a decorar termos técnicos de categorias, preencher IDs ou navegar por comandos rígidos quando o texto natural for claro.
-* **Interpretação Contextual Flexível:** O sistema deve aceitar comandos por número da opção (`"1"`), pelo primeiro nome do profissional (`"quero falar com o Carlos"`) ou por indicações contextuais claras (`"o primeiro da lista"`).
+* **Interpretação Contextual Flexível:** O sistema aceita escolhas por número da opção (`"1"`), primeiro nome (`"quero falar com o Carlos"`), frases de linguagem natural ou **perguntas de esclarecimento/comparação** sobre a lista (`"qual é o mais barato?"`, `"me fale mais do João"`).
+* **0 Chamadas de Composição de IA para Perguntas de Candidatos:** Respostas a dúvidas sobre prestadores exibidos usam exclusivamente dados factuais cadastrados formatados pelo `SelectionInquiryPresenter` ou fast paths de cálculo determinístico (distância/preço), garantindo custo zero de IA para composição e resposta 100% factual.
 
 ---
 
 ## 3. Código Público de Contato (`CC-XXXXXXXX`)
 
 * **Finalidade Canônica:** O código público (ex.: `CC-AB12CD34`) é uma chave durável de referência bilateral para auditoria, rastreabilidade e **desambiguação**.
-* **Comportamento Atual (CURRENT):** O parser determinístico atual de conclusão, confirmação e contestação (PR #15) exige estritamente a presença do código público `CC-XXXXXXXX` na mensagem recebida.
-* **Direção Futura de UX (TARGET):** No âmbito do Conversation Intelligence v2, o código não deve ser exigido do usuário quando houver contexto suficiente e unívoco na conversa (ex.: quando existir apenas um atendimento ativo). Caso haja múltiplos atendimentos simultâneos, o código continua atuando como ferramenta definitiva de desempate.
+* **Comportamento Atual (CURRENT — Code-Free Contact Completion — PR #18):** O parser determinístico de conclusão, confirmação e contestação permite frases em linguagem natural sem código (ex.: `"já terminei"`, `"serviço concluído"`, `"confirmo o atendimento"`) quando existir **exatamente 1 contato elegível único** para o número de WhatsApp do remetente. O código `CC-XXXXXXXX` permanece obrigatoriamente exigido como ferramenta definitiva de desempate quando houver múltiplos contatos elegíveis simultâneos.
 
 ---
 

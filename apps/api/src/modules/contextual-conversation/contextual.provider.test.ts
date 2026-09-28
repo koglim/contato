@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import OpenAI, { APIConnectionTimeoutError, InternalServerError, type ClientOptions } from "openai";
+import { zodTextFormat } from "openai/helpers/zod";
 import { ConversationAIProviderError, OpenAIContextualProvider } from "./contextual.provider.js";
-import type { ContextualInput } from "./contextual.contract.js";
+import { contextualInterpretationSchema, type ContextualInput } from "./contextual.contract.js";
 
 const input: ContextualInput = {
   message: "oi",
@@ -38,6 +39,7 @@ function record(value: unknown): Record<string, unknown> {
 
 test("OpenAI conversation provider uses Responses Structured Outputs without tools or persisted OpenAI memory", async () => {
   const output = { intent: "greeting", speech_act: "information", services: [], location: null,
+    target_candidates: null, inquiry_type: null,
     natural_reply: "Olá! Como posso ajudar?", confidence: "high", uncertain: false };
   const context = fakeProvider(output);
   assert.deepEqual(await context.provider.interpret(input), output);
@@ -61,6 +63,7 @@ test("OpenAI conversation provider uses Responses Structured Outputs without too
 
 test("Terra interpretation sends explicit medium reasoning with unchanged request limits", async () => {
   const output = { intent: "greeting", speech_act: "information", services: [], location: null,
+    target_candidates: null, inquiry_type: null,
     natural_reply: "Olá! Como posso ajudar?", confidence: "high", uncertain: false };
   const context = fakeProvider(output, "completed", undefined, {}, "gpt-5.6-terra");
   assert.deepEqual(await context.provider.interpret(input), output);
@@ -74,6 +77,7 @@ test("Terra interpretation sends explicit medium reasoning with unchanged reques
 
 test("Mini interpretation omits Terra reasoning policy for rollback compatibility", async () => {
   const output = { intent: "greeting", speech_act: "information", services: [], location: null,
+    target_candidates: null, inquiry_type: null,
     natural_reply: "Olá! Como posso ajudar?", confidence: "high", uncertain: false };
   const context = fakeProvider(output, "completed", undefined, {}, "gpt-5-mini-2025-08-07");
   assert.deepEqual(await context.provider.interpret(input), output);
@@ -98,13 +102,14 @@ test("Terra composition keeps its existing request shape without a new reasoning
 
 test("OpenAI conversation provider accepts strict structured output from output_text", async () => {
   const output = { intent: "search", speech_act: "request", services: [{ key: "tomada", evidence: "tomada" }],
-    location: { text: "Cuiabá", evidence: "Cuiabá" }, natural_reply: null, confidence: "high", uncertain: false };
+    location: { text: "Cuiabá", evidence: "Cuiabá" }, target_candidates: null, inquiry_type: null, natural_reply: null, confidence: "high", uncertain: false };
   const context = fakeProvider(undefined, "completed", undefined, { output_text: JSON.stringify(output) });
   assert.deepEqual(await context.provider.interpret(input), output);
 });
 
 test("OpenAI conversation provider reads a structured content part when convenience fields are absent", async () => {
   const output = { intent: "greeting", speech_act: "information", services: [], location: null,
+    target_candidates: null, inquiry_type: null,
     natural_reply: "Olá! Como posso ajudar?", confidence: "high", uncertain: false };
   const context = fakeProvider(undefined, "completed", undefined, {
     output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }],
@@ -114,7 +119,7 @@ test("OpenAI conversation provider reads a structured content part when convenie
 
 test("OpenAI conversation provider accepts free catalog evidence such as tomada from output_parsed", async () => {
   const output = { intent: "search", speech_act: "request", services: [{ key: "tomada", evidence: "tomada" }],
-    location: { text: "Cuiabá", evidence: "Cuiabá" }, natural_reply: null, confidence: "high", uncertain: false };
+    location: { text: "Cuiabá", evidence: "Cuiabá" }, target_candidates: null, inquiry_type: null, natural_reply: null, confidence: "high", uncertain: false };
   assert.deepEqual(await fakeProvider(output).provider.interpret(input), output);
 });
 
@@ -122,8 +127,8 @@ test("OpenAI conversation provider rejects incomplete and schema-invalid output"
   for (const context of [
     fakeProvider(null),
     fakeProvider({ intent: "greeting", natural_reply: "Olá" }),
-    fakeProvider({ intent: "greeting", speech_act: "information", services: [], location: null, natural_reply: "Olá", confidence: "high", uncertain: false, phone: "+5566999999999" }),
-    fakeProvider({ intent: "greeting", speech_act: "information", services: [], location: null, natural_reply: "Olá", confidence: "high", uncertain: false }, "incomplete"),
+    fakeProvider({ intent: "greeting", speech_act: "information", services: [], location: null, target_candidates: null, inquiry_type: null, natural_reply: "Olá", confidence: "high", uncertain: false, phone: "+5566999999999" }),
+    fakeProvider({ intent: "greeting", speech_act: "information", services: [], location: null, target_candidates: null, inquiry_type: null, natural_reply: "Olá", confidence: "high", uncertain: false }, "incomplete"),
   ]) await assert.rejects(() => context.provider.interpret(input));
 });
 
@@ -145,6 +150,7 @@ test("invalid structured output retains safe response-shape metadata", async () 
 
 test("incomplete and refusal responses are not parsed as successful output", async () => {
   const output = { intent: "greeting", speech_act: "information", services: [], location: null,
+    target_candidates: null, inquiry_type: null,
     natural_reply: "Olá!", confidence: "high", uncertain: false };
   for (const context of [
     fakeProvider(undefined, "incomplete", undefined, { output_text: JSON.stringify(output), incomplete_details: { reason: "max_output_tokens" } }),
@@ -209,4 +215,35 @@ test("OpenAI conversation provider classifies timeout, provider and structured o
       return true;
     });
   }
+});
+
+test("OpenAI zodTextFormat generated schema for contextualInterpretationSchema strictly requires target_candidates and inquiry_type as nullable fields", () => {
+  const format = zodTextFormat(contextualInterpretationSchema, "contextual_interpretation");
+  assert.equal(format.type, "json_schema");
+  assert.equal(format.strict, true);
+  assert.equal(format.name, "contextual_interpretation");
+
+  const jsonSchema = format.schema as Record<string, unknown>;
+  assert.equal(jsonSchema.type, "object");
+  const required = jsonSchema.required as string[];
+  assert.ok(Array.isArray(required), "required must be an array");
+  assert.ok(required.includes("target_candidates"), "required must include target_candidates");
+  assert.ok(required.includes("inquiry_type"), "required must include inquiry_type");
+  assert.ok(required.includes("intent"));
+  assert.ok(required.includes("speech_act"));
+  assert.ok(required.includes("services"));
+  assert.ok(required.includes("location"));
+  assert.ok(required.includes("natural_reply"));
+  assert.ok(required.includes("confidence"));
+  assert.ok(required.includes("uncertain"));
+
+  const props = jsonSchema.properties as Record<string, Record<string, unknown>>;
+  assert.ok(props.target_candidates, "target_candidates property must exist");
+  assert.ok(props.inquiry_type, "inquiry_type property must exist");
+
+  const targetCandidatesStr = JSON.stringify(props.target_candidates);
+  assert.ok(targetCandidatesStr.includes("null"), "target_candidates must permit null");
+
+  const inquiryTypeStr = JSON.stringify(props.inquiry_type);
+  assert.ok(inquiryTypeStr.includes("null"), "inquiry_type must permit null");
 });

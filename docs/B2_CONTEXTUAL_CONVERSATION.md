@@ -12,8 +12,7 @@ desligada e usa o texto persistido na Outbox, sem regeneração.
 
 A interpretação usa Responses/Structured Outputs, schema estrito e catálogo
 ativo real limitado a 100 serviços, com descrições limitadas a 200 caracteres.
-Sem ferramentas, histórico integral, telefone, IDs de clientes/profissionais,
-preços ou credenciais no contexto. Mensagem e descrições são dados não confiáveis.
+Sem ferramentas, histórico integral, telefone, IDs de clientes/profissionais ou credenciais no contexto. No estágio de resolução de serviço (`pending="service"` ou `"location"`), também não há preços nem dados de candidatos no contexto. No estágio de seleção (`pending="selection"`), o catálogo é enviado vazio (0 itens) e entram exclusivamente os candidatos exibidos (até 6 profissionais da página 1/2) com atributos sem PII, incluindo fatos de preço determinísticos (`price_formatted`, `priceMode`). Mensagem e descrições são dados não confiáveis.
 Evidências/localidade devem corresponder a trechos completos da mensagem original.
 Uma profissão explicitamente reconhecida pode ser confirmada; uma associação
 semântica sugerida pelo modelo permanece hipótese até confirmação do cliente.
@@ -30,9 +29,10 @@ Em b2.3, o mesmo Structured Output passou a exigir `confidence` (`high`,
 `greeting` e `small_talk`. `natural_reply` só é utilizável para saudação,
 conversa breve, esclarecimento ou retorno de fora de escopo. A API limita o
 texto a 320 caracteres e rejeita telefone, e-mail, link, preço, disponibilidade,
-distância, prazo, credenciais e alegações de ações concluídas. Resposta rejeitada
-é substituída por texto determinístico. Confiança baixa não altera memória nem
+Texto de resposta rejeitada é substituído por texto determinístico. Confiança baixa não altera memória nem
 inicia busca sem uma evidência de domínio suficiente.
+
+Em PR #18 (Selection Intelligence v2), a interpretação aceita `inquire_candidate`, `compare_candidates` e `show_more` quando a conversa aguarda seleção (`pending="selection"`). Apenas os candidatos apresentados da busca ativa (`shownCandidates`, até 6 profissionais exibidos) entram no contexto do modelo com atributos não PII. Perguntas sobre candidatos nunca efetuam a seleção nem mutam o domínio (ADR-002) e são respondidas exclusivamente via `SelectionInquiryPresenter` ou fast path determinístico (distância/preço) com 0 chamadas de composição. Comandos de conclusão sem código ("já terminei", "confirmo") são resolvidos deterministicamente para 1 contato elegível único.
 
 Na orquestração adaptativa v1, o controlador separa `speech_act`, evidência de
 serviço, localização e ação seguinte. Um match de catálogo `exact`/`phrase` é
@@ -128,11 +128,7 @@ Paráfrases de comandos sensíveis não reconhecidas são esclarecidas, nunca
 executadas pela confiança do modelo. Catálogo acima de 100 serviços requer
 estratégia de recuperação avaliada; não declarar cobertura ilimitada.
 
-O contexto enviado ao modelo contém somente a mensagem atual já sanitizada,
-serviço/localização confirmados, slot pendente, até três nomes de hipóteses e até
-100 itens do catálogo com descrições truncadas. Não contém telefone, IDs de
-cliente/profissional, tokens, preços, coordenadas nem histórico bruto. A Responses
-API usa `store:false`; memória confirmada e hipóteses continuam no PostgreSQL.
+No estágio de resolução de serviço (`pending="service"` ou `"location"`), o contexto enviado ao modelo contém a mensagem atual sanitizada, serviço/localização confirmados, slot pendente, até três nomes de hipóteses e até 100 itens do catálogo com descrições truncadas. No estágio de seleção (`pending="selection"`), o catálogo é enviado VAZIO (0 itens) e entram exclusivamente até 6 candidatos exibidos (`shownCandidates`, até 6 profissionais da página 1/2) com atributos sem PII (`position`, `displayName`, `serviceName`, `summary`, `distanceMeters`, `priceMode`, `priceFromCents`, `priceToCents`, `isVerified`, `availability`). Não contém telefone, IDs de cliente/profissional, tokens, coordenadas brutas nem histórico bruto. A Responses API usa `store:false`; memória confirmada e hipóteses continuam no PostgreSQL.
 
 Cada turno B2 registra, sem mensagem bruta ou telefone, a decisão do controlador,
 o método de evidência de serviço, a presença de hipótese anterior, a existência de

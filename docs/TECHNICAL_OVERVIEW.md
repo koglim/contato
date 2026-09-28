@@ -83,8 +83,12 @@ flowchart TD
 ```
 
 ### Estado Atual vs. Alvo (Target)
-* **CURRENT:** O motor conversacional B2 utiliza hipóteses estruturadas, memória de slots e fast paths determinísticos para números e comandos. O padrão de código é `CONVERSATION_AI_ENABLED=false` (embora o snapshot de ambiente instalado do operador reporte `true`).
-* **TARGET (Conversation Intelligence v2):** Auditoria formal e benchmark detalhado de consumo de tokens, custo por conversa, tamanho de prompt, latência percebida e garantia de que o modelo receba apenas as variáveis factuais necessárias para a decisão do momento.
+* **CURRENT (Conversation Intelligence & Selection v2 — PR #18):** O motor conversacional B2 aceita perguntas e comparações do cliente sobre prestadores apresentados na fase de seleção (`pending="selection"`). O pipeline opera com as seguintes garantias arquiteturais:
+  * **Minimização Estrita de Contexto:** Apenas os candidatos apresentados na página ativa (`shownCandidates`, até 3 profissionais) são enviados como contexto estruturado seguro (sem números de telefone, sem transcrição bruta e sem PII de cliente).
+  * **Fast Paths Determinísticos (0 IA):** Perguntas diretas de distância (*"qual o mais perto?"*) e de preço (*"qual o mais barato?"*) são resolvidas via `contextual.fast-path.ts` sem nenhuma chamada a modelos LLM.
+  * **Apresentador Factual Determinístico (0 Composição):** Dúvidas interpretadas pela IA sobre candidatos (`inquire_candidate`, `compare_candidates`) são formatadas exclusivamente via `SelectionInquiryPresenter` com base em dados reais do banco, executando **0 chamadas de composição de IA**.
+  * **Resolução de Conclusão Sem Código:** O módulo de conclusão resolve frases em linguagem natural (*"já terminei"*, *"confirmo"*) para 1 contato elegível único via parser determinístico sem chamadas a LLMs.
+* **TARGET:** Expansão da inteligência conversacional para gestão proativa de reagendamentos e acompanhamento pós-conclusão.
 
 ---
 

@@ -11,6 +11,73 @@ import type {
 } from "./contact-completion.types.js";
 
 export class PostgresContactCompletionRepository implements ContactCompletionRepository {
+  async findEligibleContactsByPhone(db: DatabaseClient, phoneE164: string): Promise<ContactRow[]> {
+    const res = await db.query<ContactRow>(
+      `SELECT c.id, c.customer_id, c.professional_id, c.search_request_id, c.selection_conversation_id, c.public_code, c.status, c.bilateral_snapshot
+       FROM contacts c
+       WHERE c.bilateral_snapshot IS NOT NULL
+         AND (c.bilateral_snapshot->>'customer_phone_e164' = $1 OR c.bilateral_snapshot->>'professional_phone_e164' = $1)
+         AND c.status IN ('shared', 'accepted')
+       ORDER BY c.created_at DESC`,
+      [phoneE164]
+    );
+    return res.rows;
+  }
+
+  async findPendingCompletionsByPhone(db: DatabaseClient, phoneE164: string): Promise<{ contact: ContactRow; completion: ContactCompletionRow }[]> {
+    const res = await db.query<ContactRow & { completion_id: string; state: ContactCompletionState; declared_by: ContactCompletionActorRole; declared_at: Date; confirmed_at: Date | null; contested_at: Date | null; completion_created_at: Date; completion_updated_at: Date }>(
+      `SELECT c.id, c.customer_id, c.professional_id, c.search_request_id, c.selection_conversation_id, c.public_code, c.status, c.bilateral_snapshot,
+              cc.id AS completion_id, cc.state, cc.declared_by, cc.declared_at, cc.confirmed_at, cc.contested_at, cc.created_at AS completion_created_at, cc.updated_at AS completion_updated_at
+       FROM contacts c
+       JOIN contact_completions cc ON cc.contact_id = c.id
+       WHERE c.bilateral_snapshot IS NOT NULL
+         AND (c.bilateral_snapshot->>'customer_phone_e164' = $1 OR c.bilateral_snapshot->>'professional_phone_e164' = $1)
+         AND cc.state = 'pending_confirmation'
+       ORDER BY cc.created_at DESC`,
+      [phoneE164]
+    );
+    return res.rows.map((row) => ({
+      contact: {
+        id: row.id,
+        customer_id: row.customer_id,
+        professional_id: row.professional_id,
+        search_request_id: row.search_request_id,
+        selection_conversation_id: row.selection_conversation_id,
+        public_code: row.public_code,
+        status: row.status,
+        bilateral_snapshot: row.bilateral_snapshot,
+      },
+      completion: {
+        id: row.completion_id,
+        contact_id: row.id,
+        state: row.state,
+        declared_by: row.declared_by,
+        declared_at: row.declared_at,
+        confirmed_at: row.confirmed_at,
+        contested_at: row.contested_at,
+        created_at: row.completion_created_at,
+        updated_at: row.completion_updated_at,
+      },
+    }));
+  }
+
+  async findLastClarification(db: DatabaseClient, provider: string, phoneE164: string): Promise<ContactCompletionMessage | null> {
+    const res = await db.query<{ result: unknown }>(
+      `SELECT result
+       FROM channel_inbound_messages
+       WHERE provider = $1 AND phone_e164 = $2 AND status = 'processed'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [provider, phoneE164]
+    );
+    if (!res.rows[0]?.result) return null;
+    const msg = res.rows[0].result as ContactCompletionMessage;
+    if (msg && msg.route === "contact_completion" && msg.action === "clarification" && msg.clarification_kind === "contact_disambiguation") {
+      return msg;
+    }
+    return null;
+  }
+
   async findContactByPublicCode(db: DatabaseClient, code: string): Promise<ContactRow | null> {
     const res = await db.query<ContactRow>(
       `SELECT id, customer_id, professional_id, search_request_id, selection_conversation_id, public_code, status, bilateral_snapshot

@@ -64,6 +64,7 @@ function normalizeOracle(value: unknown, category = ""): ContextualProposal {
     : category === "hypothesis" ? "hypothetical"
       : category === "injection" || category === "ambiguity" ? "unclear" : "request";
   return contextualInterpretationSchema.parse({
+    target_candidates: null, inquiry_type: null,
     speech_act: legacySpeechAct, natural_reply: null, confidence: raw.uncertain ? "low" : "high", ...raw,
   });
 }

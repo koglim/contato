@@ -120,7 +120,7 @@ function validateFixtures(): void {
   const correction = cases.find(item => item.id === "correction-context")!;
   assert.equal(readiness.cases.find(item => item.id === correction.sourceCase)?.message, correction.input.message);
   for (const sample of cases) {
-    contextualInterpretationSchema.parse(sample.oracle);
+    contextualInterpretationSchema.parse({ target_candidates: null, inquiry_type: null, ...sample.oracle });
     assert.equal(semanticAgreement(sample, sample.oracle), true, sample.id);
   }
 }

@@ -6,12 +6,22 @@ export const CONTEXTUAL_POLICY = Object.freeze({ maxOutputTokens: 900, maxCatalo
 const speechActSchema = z.enum(["request", "information", "hypothetical", "negated", "unclear"]);
 const confidenceSchema = z.enum(["high", "medium", "low"]);
 const naturalReplySchema = z.string().trim().min(2).max(320).nullable();
+export const selectionInquiryTypeSchema = z.enum([
+  "details", "distance", "price", "availability", "verification", "best_recommendation", "address", "comparison", "unshown", "other",
+]);
+export type SelectionInquiryType = z.infer<typeof selectionInquiryTypeSchema>;
+
 export const contextualProposalSchema = z.object({
-  intent: z.enum(["greeting", "small_talk", "search", "correct_location", "correct_service", "catalog_info", "selection", "faq_cost", "out_of_scope", "clarify"]),
+  intent: z.enum([
+    "greeting", "small_talk", "search", "correct_location", "correct_service", "catalog_info", "selection", "faq_cost", "out_of_scope", "clarify",
+    "inquire_candidate", "compare_candidates", "show_more",
+  ]),
   // Optional only for persisted b2.1 proposals. New model responses require this field.
   speech_act: speechActSchema.optional(),
   services: z.array(z.object({ key: z.string().max(80), evidence: z.string().min(1).max(160) }).strict()).max(3),
   location: z.object({ text: z.string().min(1).max(160), evidence: z.string().min(1).max(160) }).strict().nullable(),
+  target_candidates: z.array(z.number().int().min(1).max(6)).max(6).nullable().optional(),
+  inquiry_type: selectionInquiryTypeSchema.nullable().optional(),
   // Optional only for proposals persisted before the conversation orchestrator.
   natural_reply: naturalReplySchema.optional(),
   confidence: confidenceSchema.optional(),
@@ -21,6 +31,8 @@ export const contextualInterpretationSchema = contextualProposalSchema.extend({
   speech_act: speechActSchema,
   natural_reply: naturalReplySchema,
   confidence: confidenceSchema,
+  target_candidates: z.array(z.number().int().min(1).max(6)).max(6).nullable(),
+  inquiry_type: selectionInquiryTypeSchema.nullable(),
 });
 export type ContextualProposal = z.infer<typeof contextualProposalSchema>;
 const slotSchema = z.object({ value: z.string().min(1).max(200), source: z.enum(["user_explicit", "user_confirmation", "domain"]), inboundId: z.string().uuid() }).strict();
@@ -32,7 +44,25 @@ export const contextualMemorySchema = z.object({
 export type ContextualMemory = z.infer<typeof contextualMemorySchema>;
 export const emptyMemory = (): ContextualMemory => ({ conversationId: null, service: null, location: null, hypotheses: [] });
 export type ContextualCatalogItem = { key: string; name: string; description: string | null };
-export type ContextualInput = { message: string; service: string | null; location: string | null; pending: string | null; hypotheses: string[]; catalog: ContextualCatalogItem[] };
+export type ContextualShownCandidate = {
+  position: number;
+  name: string;
+  distance_km: number | null;
+  price_mode: "fixed" | "range" | "from" | "quote" | null;
+  price_formatted: string;
+  verified: boolean;
+  availability: "now" | "schedule" | "unstated";
+  summary: string | null;
+};
+export type ContextualInput = {
+  message: string;
+  service: string | null;
+  location: string | null;
+  pending: string | null;
+  hypotheses: string[];
+  catalog: ContextualCatalogItem[];
+  shownCandidates?: ContextualShownCandidate[];
+};
 export type ContextualReplyContext = { target: "service" | "location" | "service_confirmation"; services: string[]; location: string | null; reason: "missing" | "ambiguous" };
 export const contextualQuestionSchema = z.object({ question: z.string().trim().min(5).max(240) }).strict();
 export const contextualCompositionSchema = contextualQuestionSchema.extend({ target: z.enum(["service", "location", "service_confirmation"]) });
@@ -64,7 +94,16 @@ export function hasTrailingNonGeographicModifier(location: string): boolean {
   return /(?:^| )(?:por favor|por gentileza|urgente|agora|hoje|amanha|mesmo)$/u.test(normalizeContextualText(location));
 }
 
-export type ContextualDecision = { kind: "delegate" | "search" | "clarify" | "greeting" | "small_talk" | "faq_cost" | "catalog_info" | "out_of_scope"; memory: ContextualMemory; correction: boolean; catalogServices?: string[]; naturalReply?: string };
+export type ContextualDecision = {
+  kind: "delegate" | "search" | "clarify" | "greeting" | "small_talk" | "faq_cost" | "catalog_info" | "out_of_scope" | "selection_inquiry";
+  memory: ContextualMemory;
+  correction: boolean;
+  catalogServices?: string[];
+  naturalReply?: string;
+  inquiryType?: SelectionInquiryType;
+  targetPositions?: number[];
+  selectionPosition?: number;
+};
 
 export function validateNaturalReply(value: unknown): string {
   const text = z.string().trim().min(2).max(320).parse(value);
@@ -114,7 +153,19 @@ export function controlContextualProposal(raw: string, inboundId: string, value:
   const compatibleHypothesis = requestSpeechAct && !unsafeRequestContext && memory.hypotheses.some(hypothesis =>
     proposal.services.some(service => service.key === hypothesis.key && evidenceExists(service.evidence) && catalog.some(item => item.key === service.key)),
   );
-  if (proposal.intent === "selection") return { kind: "delegate", memory, correction: false };
+  if (proposal.intent === "selection" || proposal.intent === "show_more") {
+    const pos = proposal.target_candidates && proposal.target_candidates.length === 1 ? proposal.target_candidates[0] : undefined;
+    return { kind: "delegate", memory, correction: false, selectionPosition: pos };
+  }
+  if (proposal.intent === "inquire_candidate" || proposal.intent === "compare_candidates") {
+    return {
+      kind: "selection_inquiry",
+      memory,
+      correction: false,
+      inquiryType: proposal.inquiry_type ?? (proposal.intent === "compare_candidates" ? "comparison" : "details"),
+      targetPositions: proposal.target_candidates ?? [],
+    };
+  }
   const safeNaturalReply = () => {
     if (!proposal.natural_reply) return undefined;
     try { return validateNaturalReply(proposal.natural_reply); } catch { return undefined; }
