@@ -518,7 +518,7 @@ test("Scenario 2: Professional declares completion, customer confirms -> contact
   }
 });
 
-test("Scenario 3: Counterpart contests completion -> contacts.status remains accepted and auditable dispute is recorded", async () => {
+test("Scenario 3: Counterpart contests completion -> contacts.status remains shared and auditable dispute is recorded", async () => {
   const f = await createFixture();
   try {
     // 1. Customer declares completion
@@ -1201,7 +1201,7 @@ test("Scenario 13F: Multi-contact: Customer with multiple historical contacts ta
   }
 });
 
-test("Scenario 13G: Multi-contact: Professional with multiple accepted opportunities targets exact public code without affecting others", async () => {
+test("Scenario 13G: Multi-contact: Professional with multiple shared opportunities targets exact public code without affecting others", async () => {
   const f = await createFixture();
   // Professional Carlos has opportunity 1 (f.code) and opportunity 2 (contactB.code)
   const contactB = await f.addOpportunityForPro("marceneiro");
@@ -1230,7 +1230,7 @@ test("Scenario 13G: Multi-contact: Professional with multiple accepted opportuni
 test("Scenario 13H: Decoupled context: Active search conversation changing after inbound claim does NOT fail completion with InboxContextChangedError", async () => {
   const f = await createFixture({ hasActiveSearch: true });
   try {
-    // 1. Customer has accepted contact A and active search conversation B
+    // 1. Customer has shared contact A and active search conversation B
     const activeConv = (await query<{ status: string; pending_slot: string }>(
       "SELECT status, pending_slot FROM search_conversations WHERE id = $1",
       [f.activeConversationId]

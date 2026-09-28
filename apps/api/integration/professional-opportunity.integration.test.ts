@@ -679,7 +679,7 @@ test("completed contact: late professional unavailability declaration is neutral
   }
 });
 
-test("migration 027 upgrade: declined João + subsequent Carlos on same search both become shared, legacy events intact", async () => {
+test("post-027 lifecycle: João unavailable then Carlos connection preserves both shared contacts and legacy evidence", async () => {
   // This test proves migration 027 is safe for a valid v1 legacy database containing
   // a declined contact followed by a subsequent contact for the same search request.
   // It constructs a pre-027 state manually, then asserts on the already-applied schema.

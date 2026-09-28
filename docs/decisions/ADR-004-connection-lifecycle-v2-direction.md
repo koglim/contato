@@ -14,7 +14,7 @@
 
 ## Contexto
 
-No modelo original e na base atual de código do ContatoCerto, após a escolha do profissional pelo cliente, o registro de contato (`contacts`) transita por estados onde a resposta profissional (`accepted` ou `declined` dentro do enum `contact_status`: `'requested'`, `'shared'`, `'accepted'`, `'declined'`, `'completed'`, `'cancelled'`) participa do ciclo de vida.
+No modelo original e na base de código anterior ao PR #17, após a escolha do profissional pelo cliente, o registro de contato (`contacts`) transitava por estados onde a resposta profissional (`accepted` ou `declined` dentro do enum `contact_status`: `'requested'`, `'shared'`, `'accepted'`, `'declined'`, `'completed'`, `'cancelled'`) participava do ciclo de vida.
 
 Na prática de um marketplace conversacional de serviços locais:
 1. O cliente procura um profissional com urgência e espera contato imediato.

@@ -24,6 +24,7 @@ async function migrateUp(count?: number) {
   ];
   return promisify(execFile)(process.execPath, args, {
     cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+    env: process.env,
   });
 }
 
@@ -40,6 +41,7 @@ async function migrateDown(count = 1) {
   ];
   return promisify(execFile)(process.execPath, args, {
     cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+    env: process.env,
   });
 }
 
@@ -342,6 +344,213 @@ test("Scenario G: Professional unavailability event blocks rollback with P0027",
       await db.query("DELETE FROM search_conversations WHERE id = $1", [conversationId]);
       await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
       await db.query("DELETE FROM professionals WHERE id = $1", [professionalId]);
+      await db.query("DELETE FROM customers WHERE id = $1", [customerId]);
+    });
+    await migrateUp();
+  }
+});
+
+test("Item 1: Explicit legacy requested round-trip proof (schema 026 requested -> 027 shared -> 027 down requested)", async () => {
+  // Serial real-schema 026->027 migration proof in the PostgreSQL integration suite.
+  await rollbackThrough("027_add_connection_lifecycle_v2");
+
+  const searchId = randomUUID();
+  const profId = randomUUID();
+  const customerId = randomUUID();
+  const profPhone = phone(), customerPhone = phone();
+  const contactId = randomUUID();
+  const code = createOpportunityCode();
+  const convId = randomUUID();
+  const choiceId = randomUUID();
+
+  try {
+    // Populate genuine legacy v1 requested contact under schema 026
+    await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, customerPhone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid,'Req Pro',$1::text,$2,'active')", [profId, profPhone]);
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1,$2,'pintor','selected')", [searchId, customerId]);
+    await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
+      VALUES ($1,$2,'completed','pintor','pintor','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [convId, customerId, searchId]);
+    await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+      VALUES ($1::uuid,'test',$1::text,$2,'Choice','BR',3,'processed',NOW(),'{}'::jsonb)`, [choiceId, customerPhone]);
+
+    const snapshot = {
+      public_code: code, service_name: "pintor", city: "Sinop", state: "MT",
+      neighborhood: null, summary: "Pintura", professional_name: "Req Pro",
+      professional_phone_e164: profPhone, customer_phone_e164: customerPhone,
+      notice_version: "bilateral-v1", notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(), choice_inbound_id: choiceId,
+      chosen_at: new Date().toISOString(), consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice"
+    };
+
+    // Insert as 'requested' without any native v2 provenance and WITHOUT any opportunity_response_events
+    await query(`INSERT INTO contacts (id,professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id,status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'requested')`,
+      [contactId, profId, customerId, searchId, choiceId, code, JSON.stringify(snapshot), convId]);
+
+    // ASSERT: Verify NO opportunity_response_events exists for this contact
+    const eventCountBefore = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM opportunity_response_events WHERE contact_id = $1",
+      [contactId]
+    )).rows[0].cnt;
+    assert.equal(eventCountBefore, 0, "No opportunity_response_events must exist before migration");
+
+    // Execute actual Migration 027 up
+    await migrateUp(1);
+
+    // ASSERT: Contact becomes 'shared'
+    const contactAfterUp = (await query<{ status: string; public_code: string; bilateral_snapshot: unknown }>(
+      "SELECT status, public_code, bilateral_snapshot FROM contacts WHERE id = $1",
+      [contactId]
+    )).rows[0];
+    assert.equal(contactAfterUp.status, "shared", "Migration 027 up must normalize requested contact to shared");
+    assert.equal(contactAfterUp.public_code, code, "Public code must remain unchanged");
+    assert.deepEqual(contactAfterUp.bilateral_snapshot, snapshot, "Snapshot must remain unchanged");
+
+    // Execute actual Migration 027 down
+    await migrateDown(1);
+
+    // ASSERT: Contact becomes 'requested'
+    const contactAfterDown = (await query<{ status: string }>(
+      "SELECT status FROM contacts WHERE id = $1",
+      [contactId]
+    )).rows[0];
+    assert.equal(contactAfterDown.status, "requested", "Migration 027 down must restore status to requested when no legacy response event exists");
+
+    // ASSERT: Verify NO opportunity_response_events was fabricated
+    const eventCountAfterDown = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM opportunity_response_events WHERE contact_id = $1",
+      [contactId]
+    )).rows[0].cnt;
+    assert.equal(eventCountAfterDown, 0, "No opportunity_response_events must be fabricated on down");
+
+    // ASSERT: Old legacy index is restored
+    const oldIdxRestored = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM pg_indexes WHERE indexname = 'contacts_bilateral_search_unique_idx'"
+    )).rows[0].cnt;
+    assert.equal(oldIdxRestored, 1, "contacts_bilateral_search_unique_idx must be restored on down");
+
+  } finally {
+    await withTransaction(async (db) => {
+      await db.query("DELETE FROM contacts WHERE id = $1", [contactId]);
+      await db.query("DELETE FROM channel_inbound_messages WHERE id = $1", [choiceId]);
+      await db.query("DELETE FROM search_conversations WHERE id = $1", [convId]);
+      await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
+      await db.query("DELETE FROM professionals WHERE id = $1", [profId]);
+      await db.query("DELETE FROM customers WHERE id = $1", [customerId]);
+    });
+    await migrateUp();
+  }
+});
+
+test("Item 2: Migration 027 up preflight conflict blocks migration with P0027 and preserves schema 026", async () => {
+  // Serial real-schema 026->027 migration proof in the PostgreSQL integration suite.
+  await rollbackThrough("027_add_connection_lifecycle_v2");
+
+  // Assert schema starts at 026 and 027 is NOT applied
+  const is027Applied = (await query<{ cnt: number }>(
+    "SELECT count(*)::int AS cnt FROM pgmigrations WHERE name = '027_add_connection_lifecycle_v2'"
+  )).rows[0].cnt;
+  assert.equal(is027Applied, 0, "027_add_connection_lifecycle_v2 must NOT be applied initially");
+
+  const searchId = randomUUID();
+  const profId = randomUUID();
+  const customerId = randomUUID();
+  const profPhone = phone(), customerPhone = phone();
+  const contactId1 = randomUUID(), contactId2 = randomUUID();
+  const code1 = createOpportunityCode(), code2 = createOpportunityCode();
+  const convId1 = randomUUID(), convId2 = randomUUID();
+  const choiceId1 = randomUUID(), choiceId2 = randomUUID();
+
+  try {
+    await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, customerPhone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid,'Dup Pro',$1::text,$2,'active')", [profId, profPhone]);
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1,$2,'marceneiro','selected')", [searchId, customerId]);
+
+    await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
+      VALUES ($1,$2,'completed','marceneiro','marceneiro','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [convId1, customerId, searchId]);
+    await query(`INSERT INTO search_conversations (id,customer_id,status,original_raw_text,service_text,country_code,limit_value,search_request_id,expires_at,completed_at)
+      VALUES ($1,$2,'completed','marceneiro','marceneiro','BR',3,$3,NOW()+INTERVAL '1 hour',NOW())`, [convId2, customerId, searchId]);
+
+    await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+      VALUES ($1::uuid,'test',$1::text,$2,'Choice 1','BR',3,'processed',NOW(),'{}'::jsonb)`, [choiceId1, customerPhone]);
+    await query(`INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+      VALUES ($1::uuid,'test',$1::text,$2,'Choice 2','BR',3,'processed',NOW(),'{}'::jsonb)`, [choiceId2, customerPhone]);
+
+    const snapshot1 = {
+      public_code: code1, service_name: "marceneiro", city: "Sinop", state: "MT",
+      neighborhood: null, summary: "Marcenaria", professional_name: "Dup Pro",
+      professional_phone_e164: profPhone, customer_phone_e164: customerPhone,
+      notice_version: "bilateral-v1", notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(), choice_inbound_id: choiceId1,
+      chosen_at: new Date().toISOString(), consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice"
+    };
+    const snapshot2 = {
+      public_code: code2, service_name: "marceneiro", city: "Sinop", state: "MT",
+      neighborhood: null, summary: "Marcenaria", professional_name: "Dup Pro",
+      professional_phone_e164: profPhone, customer_phone_e164: customerPhone,
+      notice_version: "bilateral-v1", notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(), choice_inbound_id: choiceId2,
+      chosen_at: new Date().toISOString(), consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice"
+    };
+
+    // Insert TWO bilateral contacts under schema 026 for the SAME search_request_id AND SAME professional_id (corrupted v1 data)
+    // Contact 1: status = 'declined'
+    await query(`INSERT INTO contacts (id,professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id,status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'declined')`,
+      [contactId1, profId, customerId, searchId, choiceId1, code1, JSON.stringify(snapshot1), convId1]);
+
+    // Contact 2: status = 'declined' (both declined, allowed under schema 026 because contacts_bilateral_search_unique_idx excludes status = 'declined')
+    await query(`INSERT INTO contacts (id,professional_id,customer_id,search_request_id,selection_key,public_code,bilateral_snapshot,selection_conversation_id,status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'declined')`,
+      [contactId2, profId, customerId, searchId, choiceId2, code2, JSON.stringify(snapshot2), convId2]);
+
+    // Execute actual Migration 027 up — must fail with SQLSTATE P0027 and preflight error message!
+    await assert.rejects(
+      () => migrateUp(1),
+      (err: unknown) => {
+        const e = err as { stderr?: string; message?: string };
+        const msg = String(e.stderr || e.message);
+        return /CONNECTION_LIFECYCLE_V2_UPGRADE_CONFLICT|P0027/u.test(msg);
+      }
+    );
+
+    // ASSERT: 027_add_connection_lifecycle_v2 is NOT recorded in pgmigrations
+    const is027Recorded = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM pgmigrations WHERE name = '027_add_connection_lifecycle_v2'"
+    )).rows[0].cnt;
+    assert.equal(is027Recorded, 0, "027_add_connection_lifecycle_v2 must NOT be recorded in pgmigrations after failure");
+
+    // ASSERT: Old contacts_bilateral_search_unique_idx still exists after failed migration
+    const oldIdxSurvives = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM pg_indexes WHERE indexname = 'contacts_bilateral_search_unique_idx'"
+    )).rows[0].cnt;
+    assert.equal(oldIdxSurvives, 1, "contacts_bilateral_search_unique_idx must survive failed migration attempt");
+
+    // ASSERT: professional_unavailability_events table does NOT remain after failed migration
+    const unavailTableSurvives = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM information_schema.tables WHERE table_name = 'professional_unavailability_events'"
+    )).rows[0].cnt;
+    assert.equal(unavailTableSurvives, 0, "professional_unavailability_events table must NOT remain after failed migration");
+
+    // ASSERT: Original contact statuses/snapshots remain unchanged
+    const contactsAfterFail = (await query<{ id: string; status: string }>(
+      "SELECT id, status FROM contacts WHERE search_request_id = $1 ORDER BY id",
+      [searchId]
+    )).rows;
+    assert.equal(contactsAfterFail.length, 2);
+    assert.equal(contactsAfterFail[0].status, "declined");
+    assert.equal(contactsAfterFail[1].status, "declined");
+
+  } finally {
+    await withTransaction(async (db) => {
+      await db.query("DELETE FROM contacts WHERE search_request_id = $1", [searchId]);
+      await db.query("DELETE FROM channel_inbound_messages WHERE id = $1 OR id = $2", [choiceId1, choiceId2]);
+      await db.query("DELETE FROM search_conversations WHERE search_request_id = $1", [searchId]);
+      await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
+      await db.query("DELETE FROM professionals WHERE id = $1", [profId]);
       await db.query("DELETE FROM customers WHERE id = $1", [customerId]);
     });
     await migrateUp();

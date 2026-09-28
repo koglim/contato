@@ -1,3 +1,4 @@
+import dotenv from "dotenv";
 import { readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -5,11 +6,15 @@ import { fileURLToPath } from "node:url";
 import process from "node:process";
 import console from "node:console";
 
+const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const rootDir = resolve(apiRoot, "../..");
+dotenv.config({ path: resolve(rootDir, ".env") });
+dotenv.config({ path: resolve(apiRoot, ".env") });
+
 const suite = process.argv[2];
 if (suite !== "unit" && suite !== "integration") {
   throw new Error("Expected test suite: unit or integration");
 }
-const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 function testFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -26,6 +31,6 @@ const result = spawnSync(process.execPath, [
   "--import", "tsx", "--test",
   ...(suite === "integration" ? ["--test-concurrency=1"] : []),
   ...files,
-], { cwd: apiRoot, stdio: "inherit" });
+], { cwd: apiRoot, stdio: "inherit", env: process.env });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;
