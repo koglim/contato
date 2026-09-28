@@ -789,21 +789,18 @@ test("migration 027 upgrade: declined João + subsequent Carlos on same search b
         JSON.stringify({...carlosSnapshot, public_code: biaCode, professional_name: 'Bia', professional_phone_e164: differentProfPhone}), biaConvId]);
     const afterBia = (await query("SELECT count(*)::integer AS cnt FROM contacts WHERE search_request_id=$1", [searchId])).rows[0].cnt;
     assert.equal(afterBia, 3);
-
-    await query("DELETE FROM professionals WHERE id=$1", [differentProfId]);
   } finally {
     // Teardown
     await withTransaction(async (db) => {
-      await db.query("DELETE FROM contacts WHERE search_request_id = $1", [searchId]);
       await db.query("ALTER TABLE opportunity_response_events DISABLE TRIGGER opportunity_event_immutable");
-      await db.query("DELETE FROM opportunity_response_events WHERE contact_id = $1", [joaoContactId]);
+      await db.query("DELETE FROM opportunity_response_events WHERE contact_id = $1 OR contact_id = $2", [joaoContactId, carlosContactId]);
       await db.query("ALTER TABLE opportunity_response_events ENABLE TRIGGER opportunity_event_immutable");
+      await db.query("DELETE FROM contacts WHERE search_request_id = $1", [searchId]);
       await db.query("DELETE FROM channel_inbound_messages WHERE id = $1 OR id = $2 OR id = $3", [joaoChoiceId, carlosChoiceId, joaoInboundId]);
       await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [customer2Phone]);
       await db.query("DELETE FROM search_conversations WHERE search_request_id = $1", [searchId]);
       await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
-      await db.query("DELETE FROM professionals WHERE id = $1", [joaoId]);
-      await db.query("DELETE FROM professionals WHERE id = $1", [carlosId]);
+      await db.query("DELETE FROM professionals WHERE id = $1 OR id = $2 OR id = $3", [joaoId, carlosId, differentProfId]);
       await db.query("DELETE FROM customers WHERE id = $1", [customerId2]);
     });
   }
