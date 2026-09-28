@@ -17,6 +17,7 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 * **Governança de Status Profissional:** Enum `professional_status` com estados estritos (`'draft'`, `'active'`, `'suspended'`), vínculo a categorias e áreas de atendimento.
 * **Assinaturas e Entitlements Neutros (PR #14):** Modelagem de planos e assinaturas de profissionais (Migration 025). Lock atômico de concorrência (`FOR UPDATE OF professionals`) garantindo que apenas assinantes ativos no modo `account_managed` recebam novos contatos (perfis `legacy_unmanaged` provisoriamente isentos).
 * **Conclusão e Confirmação de Atendimentos (PR #15):** Registro de encerramento do serviço (`concluído CC-XXXXXXXX`) por qualquer das partes, confirmação (`confirmar CC-XXXXXXXX`) ou contestação (`contestar CC-XXXXXXXX`) pela contraparte com código obrigatório no parser atual, isolados de contexto de busca.
+* **Ciclo de Conexão Bilateral v2 (PR #17 — Migration 027):** Conexão imediata no status `shared` mediante seleção e consentimento informado do cliente, eliminação do segundo aceite obrigatório do profissional, telemetria imutável de indisponibilidade via `professional_unavailability_events` (P0027), suporte a múltiplas conexões por busca via índice `(search_request_id, professional_id)` e elegibilidade direta para conclusão a partir de `shared`.
 * **Painel Web do Profissional (`/dashboard`):** Aplicação Next.js com BFF, autenticação via cookie assinado, edição de dados cadastrais (telefone em modo somente-leitura), serviços, áreas de atendimento e disponibilidade.
 
 ---
@@ -25,19 +26,15 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 
 Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
-1. **Ciclo de Conexão v2 ([ADR-004](decisions/ADR-004-connection-lifecycle-v2-direction.md)):**
-   * Ajustar a semântica do domínio: participação elegível do profissional + seleção ativa do cliente + consentimento informado do cliente para compartilhamento bilateral dos contatos = **conexão imediatamente estabelecida**.
-   * Remover o aceite obrigatório do profissional do caminho crítico da entrega e do ciclo de vida do contato.
-   * Adaptar mensagens do WhatsApp para refletir a oportunidade já conectada e tratar a recusa profissional apenas como sinal declaratório de indisponibilidade.
-2. **Conversation Intelligence / Seleção v2:**
+1. **Conversation Intelligence / Seleção v2:**
    * Permitir perguntas comparativas e esclarecimentos factuais entre os profissionais apresentados sem quebrar o fluxo de escolha.
    * Auditoria formal de consumo de tokens, tamanho de prompts, latência e fast paths determinísticos.
    * Resolução contextual inteligente de comandos sem obrigar a digitação manual de `CC-...` quando houver único atendimento ativo.
-3. **Localização v2 (Fundação de Entrada):**
+2. **Localização v2 (Fundação de Entrada):**
    * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
-4. **Reconciliação n8n / Evolution / Workflows Versionados:**
+3. **Reconciliação n8n / Evolution / Workflows Versionados:**
    * Atualizar os fluxos instalados no ambiente remoto (EasyPanel) a partir dos arquivos versionados em `workflows/n8n/`, habilitando o envio de desafios de autenticação (`professional_auth_challenge`).
-5. **Sincronização Contínua da Documentação:**
+4. **Sincronização Contínua da Documentação:**
    * Manter a disciplina de atualizar a documentação canônica a cada PR com alteração funcional ou arquitetural.
 
 ---

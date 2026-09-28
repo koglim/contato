@@ -1038,7 +1038,7 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
       [selectionOutcome.contactId],
     )).rows[0];
     assert.ok(contactRow);
-    assert.equal(contactRow.status, "requested");
+    assert.equal(contactRow.status, "shared");
 
     // Wait for the background revoke to unblock and finish
     assert.ok(revokePromise);
@@ -1069,10 +1069,10 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
     assert.ok(oppOutcome);
     const parsed = opportunityMessageSchema.safeParse(oppOutcome.result);
     assert.ok(parsed.success);
-    assert.equal(parsed.data.result.kind, "accepted");
+    assert.equal(parsed.data.result.kind, "acknowledged");
 
     const updatedContact = (await query<{ status: string }>(`SELECT status FROM contacts WHERE id = $1`, [contactRow.id])).rows[0];
-    assert.equal(updatedContact.status, "accepted");
+    assert.equal(updatedContact.status, "shared");
   } finally {
     await query(`UPDATE channel_inbound_messages SET response_outbound_id = NULL WHERE phone_e164 IN ($1, $2)`, [customerPhone, profPhone]);
     await query(`DELETE FROM channel_outbound_message_matches WHERE match_id = $1`, [matchId]);

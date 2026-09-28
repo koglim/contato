@@ -19,7 +19,7 @@ function createMockContact(overrides: Partial<ContactRow> = {}): ContactRow {
     search_request_id: randomUUID(),
     selection_conversation_id: randomUUID(),
     public_code: "CC-23456789",
-    status: "accepted",
+    status: "shared",
     bilateral_snapshot: {
       public_code: "CC-23456789",
       service_name: "Eletricista Residencial",

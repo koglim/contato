@@ -166,7 +166,7 @@ export class ContactCompletionService {
         });
       }
 
-      if (lockedContact.status !== "accepted") {
+      if (lockedContact.status !== "shared" && lockedContact.status !== "accepted") {
         return this.finishReply(db, record, {
           action: "unavailable",
           replyText: "Essa solicitação não está disponível para conclusão.",

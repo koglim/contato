@@ -6,12 +6,12 @@ Documento canônico de arquitetura, ciclo de vida e garantias da funcionalidade 
 
 ## 1. Visão Geral e Propósito
 
-Após a jornada de busca, consentimento, seleção e contato bilateral (`contacts.status = 'accepted'`), o ciclo de vida do atendimento prestado precisava de uma transição auditável e bilateral para o encerramento do serviço.
+Após a jornada de busca, consentimento, seleção e contato bilateral estabelecido diretamente (`contacts.status = 'shared'`), o ciclo de vida do atendimento prestado precisava de uma transição auditável e bilateral para o encerramento do serviço.
 
 O objetivo do módulo **Contact Completion & Confirmation** é:
 - Permitir que qualquer uma das partes (cliente ou profissional) declare a conclusão do serviço;
 - Exigir confirmação da contraparte antes de marcar o contato como `completed` (`contacts.status = 'completed'`);
-- Permitir que a contraparte conteste a conclusão declarada, mantendo o serviço ativo em andamento (`contacts.status = 'accepted'`) e registrando formalmente a disputa;
+- Permitir que a contraparte conteste a conclusão declarada, mantendo o serviço ativo em andamento (`contacts.status = 'shared'`) e registrando formalmente a disputa;
 - Garantir serialização determinística, idempotência e notificações confiáveis via Outbox transacional sem concorrência destrutiva ou interpretação não-determinística.
 
 ---
@@ -27,13 +27,13 @@ stateDiagram-v2
     pending_confirmation --> confirmed: Declaração concorrente da contraparte
     pending_confirmation --> contested: Contestação da contraparte
     confirmed --> [*]: contacts.status = 'completed'
-    contested --> [*]: contacts.status mantido 'accepted'
+    contested --> [*]: contacts.status mantido 'shared'
 ```
 
 ### Estados do Aggregate:
 1. `pending_confirmation`: Uma das partes enviou comando determinístico declarando conclusão do atendimento (ação registrada no ledger como evento `'declared'`). O registro em `contact_completions` é persistido com `state = 'pending_confirmation'`, `declared_by = 'customer' | 'professional'`, `declared_at = NOW()`, e timestamps `confirmed_at` e `contested_at` nulos. A contraparte é notificada via Outbox solicitando confirmação ou contestação.
 2. `confirmed`: A contraparte confirmou explicitamente a declaração (ou ambas as partes declararam de forma independente). O aggregate `contact_completions` transiciona para `state = 'confirmed'` com `confirmed_at = NOW()`. O contato em `contacts` é atualizado atomicamente para `status = 'completed'`. A tabela `contacts` não possui coluna `completed_at`; o timestamp canônico da conclusão é registrado em `contact_completions.confirmed_at`.
-3. `contested`: A contraparte contestou a declaração de conclusão. O aggregate `contact_completions` transiciona para `state = 'contested'` com `contested_at = NOW()`. O contato em `contacts` permanece com `status = 'accepted'`. Nenhum encerramento automático é forçado; o caso é registrado como disputa durável para eventual mediação/suporte.
+3. `contested`: A contraparte contestou a declaração de conclusão. O aggregate `contact_completions` transiciona para `state = 'contested'` com `contested_at = NOW()`. O contato em `contacts` permanece com `status = 'shared'`. Nenhum encerramento automático é forçado; o caso é registrado como disputa durável para eventual mediação/suporte.
 
 ---
 
@@ -116,12 +116,13 @@ Se o webhook do canal reenviar a mesma mensagem (`provider` + `provider_message_
 
 - **Desacoplamento de contexto de busca ativa**: O processamento de conclusão de atendimento é uma operação no nível de contato, autorizada pelo snapshot bilateral e serializada na linha de `contacts`. Alterações em conversas de busca ativas do cliente (e consequente mudança de `context_fingerprint`) **não** geram `InboxContextChangedError` na rota de conclusão de contatos, assegurando que o comando seja processado sem interferir ou ser bloqueado pelo fluxo de busca.
 - **Preservação de conversas de busca ativas**: Se um cliente estiver no meio de um fluxo de busca de outro serviço e enviar um comando determinístico de conclusão de um contato anterior (`concluído CC-XXXXXXXX`), o comando é roteado estritamente para o módulo de conclusão de contatos. A conversa de busca ativa **não é cancelada, corrompida ou sobrescrita**.
-- **Independência de assinatura profissional**: Uma vez que o contato foi aceito (`contacts.status = 'accepted'`), o ciclo de vida do serviço pode ser concluído normalmente, mesmo se a assinatura do profissional expirar ou for revogada posteriormente.
+- **Independência de assinatura profissional**: Uma vez que o contato bilateral é estabelecido (`contacts.status = 'shared'`), o ciclo de vida do serviço pode ser concluído normalmente, mesmo se a assinatura do profissional expirar ou for revogada posteriormente.
+- **Indisponibilidade profissional não bloqueia conclusão**: Um evento de indisponibilidade em `professional_unavailability_events` é um fato declaratório unilateral do profissional. Ele **não** cancela a conexão bilateral, **não** anula o status `shared` do contato e **não** impede que qualquer das partes inicie ou conclua o ciclo de conclusão. Declarações de indisponibilidade e evidências de conclusão coexistem no ledger como registros auditáveis independentes.
 
 ---
 
-## 10. Desacoplamento de Avaliações e Reputação (PR #16)
+## 10. Desacoplamento de Avaliações e Reputação
 
 O módulo de conclusão de atendimento é deliberadamente separado de avaliações:
 - **Zero código de estrelas, notas ou reputação** foi inserido no PR #15.
-- A conclusão confirmada (`contacts.status = 'completed'`) servirá como pré-requisito e token de elegibilidade para que o cliente possa avaliar o profissional no futuro PR #16 (*Reviews & Ratings v1*).
+- A conclusão confirmada (`contacts.status = 'completed'`) servirá como pré-requisito e token de elegibilidade para que o cliente possa avaliar o profissional em uma etapa futura de engenharia (*Reviews & Ratings* — sem número de PR atribuído, pois o PR #16 corresponde à reconciliação canônica de documentação).

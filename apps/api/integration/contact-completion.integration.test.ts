@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import { channelInboundMessageResponseSchema } from "@contatocerto/shared";
 import { buildApp } from "../src/app.js";
-import { closeDatabaseConnection, query, type DatabaseClient } from "../src/database/connection.js";
+import { closeDatabaseConnection, query, withTransaction, type DatabaseClient } from "../src/database/connection.js";
 import { createOpportunityCode } from "../src/modules/bilateral-contact/bilateral-contact.policy.js";
 import { ContactCompletionService } from "../src/modules/contact-completion/contact-completion.service.js";
 import { PostgresContactCompletionRepository } from "../src/modules/contact-completion/contact-completion.repository.js";
@@ -134,7 +134,7 @@ async function createFixture(options: FixtureOptions = {}) {
     consent_method: "selection_after_notice",
   };
 
-  const contactStatus = options.status ?? "accepted";
+  const contactStatus = options.status ?? "shared";
   await query(
     `INSERT INTO contacts (
        id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
@@ -241,7 +241,7 @@ async function createFixture(options: FixtureOptions = {}) {
       `INSERT INTO contacts (
          id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'accepted')`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'shared')`,
       [cId, pId, customerId, sId, chId, cCode, JSON.stringify(snap), convId]
     );
     return { id: cId, code: cCode, professionalPhone: pPhone };
@@ -301,7 +301,7 @@ async function createFixture(options: FixtureOptions = {}) {
       `INSERT INTO contacts (
          id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'accepted')`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'shared')`,
       [contId, professionalId, cId2, sId, chId, cCode, JSON.stringify(snap), convId]
     );
     return { id: contId, code: cCode, customerPhone: cPhone2 };
@@ -451,7 +451,7 @@ test("Scenario 1: Customer declares completion, professional confirms -> contact
     assert.equal(completion1.confirmed_at, null);
 
     const contact1 = await f.getContact();
-    assert.equal(contact1.status, "accepted"); // Still accepted until counterpart confirms!
+    assert.equal(contact1.status, "shared"); // Still shared until counterpart confirms!
 
     const events1 = await f.getEvents();
     assert.equal(events1.length, 1);
@@ -518,7 +518,7 @@ test("Scenario 2: Professional declares completion, customer confirms -> contact
   }
 });
 
-test("Scenario 3: Counterpart contests completion -> contacts.status remains accepted and auditable dispute is recorded", async () => {
+test("Scenario 3: Counterpart contests completion -> contacts.status remains shared and auditable dispute is recorded", async () => {
   const f = await createFixture();
   try {
     // 1. Customer declares completion
@@ -533,9 +533,9 @@ test("Scenario 3: Counterpart contests completion -> contacts.status remains acc
     assert.equal(completion.state, "contested");
     assert.ok(completion.contested_at);
 
-    // Contact status MUST REMAIN accepted
+    // Contact status MUST REMAIN shared
     const contact = await f.getContact();
-    assert.equal(contact.status, "accepted");
+    assert.equal(contact.status, "shared");
 
     const events = await f.getEvents();
     assert.equal(events.length, 2);
@@ -962,9 +962,9 @@ test("Scenario 13C: Deterministic concurrency Scenario C — declaration vs cont
     assert.ok(completion?.contested_at);
     assert.equal(completion?.confirmed_at, null); // NOT mixed confirmed + contested!
 
-    // - contact status remains accepted (never completed with contested aggregate)
+    // - contact status remains shared (never completed with contested aggregate)
     const contact = await f.getContact();
-    assert.equal(contact.status, "accepted");
+    assert.equal(contact.status, "shared");
 
     // - no duplicate terminal notifications
     const outbounds = await f.getOutbounds();
@@ -1184,9 +1184,9 @@ test("Scenario 13F: Multi-contact: Customer with multiple historical contacts ta
     const completion1 = await f.getCompletion();
     assert.equal(completion1?.state, "pending_confirmation");
 
-    // Contact 2 must remain strictly accepted with NO completion record
+    // Contact 2 must remain strictly shared with NO completion record
     const contact2Record = (await query<{ status: string }>("SELECT status FROM contacts WHERE id = $1", [contact2.id])).rows[0];
-    assert.equal(contact2Record.status, "accepted");
+    assert.equal(contact2Record.status, "shared");
     const completion2 = (await query("SELECT * FROM contact_completions WHERE contact_id = $1", [contact2.id])).rows;
     assert.equal(completion2.length, 0);
 
@@ -1201,7 +1201,7 @@ test("Scenario 13F: Multi-contact: Customer with multiple historical contacts ta
   }
 });
 
-test("Scenario 13G: Multi-contact: Professional with multiple accepted opportunities targets exact public code without affecting others", async () => {
+test("Scenario 13G: Multi-contact: Professional with multiple shared opportunities targets exact public code without affecting others", async () => {
   const f = await createFixture();
   // Professional Carlos has opportunity 1 (f.code) and opportunity 2 (contactB.code)
   const contactB = await f.addOpportunityForPro("marceneiro");
@@ -1217,9 +1217,9 @@ test("Scenario 13G: Multi-contact: Professional with multiple accepted opportuni
     const contact1 = await f.getContact();
     assert.equal(contact1.status, "completed");
 
-    // Opportunity 2 must remain accepted with no completion
+    // Opportunity 2 must remain shared with no completion
     const contactBRecord = (await query<{ status: string }>("SELECT status FROM contacts WHERE id = $1", [contactB.id])).rows[0];
-    assert.equal(contactBRecord.status, "accepted");
+    assert.equal(contactBRecord.status, "shared");
     const completionB = (await query("SELECT * FROM contact_completions WHERE contact_id = $1", [contactB.id])).rows;
     assert.equal(completionB.length, 0);
   } finally {
@@ -1230,7 +1230,7 @@ test("Scenario 13G: Multi-contact: Professional with multiple accepted opportuni
 test("Scenario 13H: Decoupled context: Active search conversation changing after inbound claim does NOT fail completion with InboxContextChangedError", async () => {
   const f = await createFixture({ hasActiveSearch: true });
   try {
-    // 1. Customer has accepted contact A and active search conversation B
+    // 1. Customer has shared contact A and active search conversation B
     const activeConv = (await query<{ status: string; pending_slot: string }>(
       "SELECT status, pending_slot FROM search_conversations WHERE id = $1",
       [f.activeConversationId]
@@ -1349,6 +1349,65 @@ test("Scenario 15: Migration 026 rollback is blocked with P0026 when completion 
       }
     );
   } finally {
+    await f.cleanup();
+  }
+});
+test("Scenario 16: Professional unavailability does NOT block completion; shared contact remains completion-eligible", async () => {
+  const f = await createFixture();
+  try {
+    // Insert a professional_unavailability_events record for the contact
+    const unavailInboundId = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id,provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,status,processed_at,result)
+       VALUES ($1::uuid,'test',$1::text,$2,'não consigo','BR',3,'processed',NOW(),'{}'::jsonb)`,
+      [unavailInboundId, f.professionalPhone]
+    );
+    // Disable immutability trigger for fixture insertion
+    await query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
+    await query(
+      `INSERT INTO professional_unavailability_events (contact_id,professional_id,inbound_id,origin,rule_version)
+       VALUES ($1,$2,$3,'channel_inbox','connection-v2')`,
+      [f.contactId, f.professionalId, unavailInboundId]
+    );
+    await query("ALTER TABLE professional_unavailability_events ENABLE TRIGGER professional_unavailability_events_immutable");
+
+    // Contact still has status='shared' with an unavailability event
+    const contactBefore = await f.getContact();
+    assert.equal(contactBefore.status, "shared");
+    const unavailCount = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM professional_unavailability_events WHERE contact_id=$1", [f.contactId])).rows[0].cnt;
+    assert.equal(unavailCount, 1);
+
+    // Customer declares completion — must succeed despite unavailability event
+    const declRes = await f.send(`concluído ${f.code}`, f.customerPhone);
+    assert.equal(declRes.result.action, "declared", `Expected 'declared' but got '${declRes.result.action}': ${declRes.reply_text}`);
+    assert.match(declRes.reply_text, /Aguardando confirmação/);
+
+    const completion = await f.getCompletion();
+    assert.ok(completion, "Completion aggregate must be created");
+    assert.equal(completion.state, "pending_confirmation");
+
+    // Professional confirms — must also succeed
+    const confRes = await f.send(`confirmar ${f.code}`, f.professionalPhone);
+    assert.equal(confRes.result.action, "confirmed");
+
+    const contactAfter = await f.getContact();
+    assert.equal(contactAfter.status, "completed");
+
+    // Unavailability event still exists (immutable, not deleted)
+    const unavailCountAfter = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM professional_unavailability_events WHERE contact_id=$1", [f.contactId])).rows[0].cnt;
+    assert.equal(unavailCountAfter, 1, "Unavailability event must remain after completion");
+  } finally {
+    // Clean up completion events and unavailability events before f.cleanup (which deletes inbound messages)
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completion_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completions WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
+      await db.query("DELETE FROM professional_unavailability_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE professional_unavailability_events ENABLE TRIGGER professional_unavailability_events_immutable");
+    });
     await f.cleanup();
   }
 });

@@ -95,3 +95,16 @@ Para evitar fraudes, distorções de reputação e falsas expectativas de client
 
 * O ciclo de avaliações, notas e comentários após a conclusão de serviços encontra-se planejado para as próximas etapas de engenharia, mas **não está implementado no código atual** em `main`.
 * O sistema atual suporta o ciclo de conclusão e confirmação factual ([PR #15](CONTACT_COMPLETION_CONFIRMATION.md)), servindo como base estrutural para a futura camada de reputação.
+
+---
+
+## 10. Ciclo de Conexão Bilateral v2 e Ausência de Segundo Aceite Obrigatório
+
+* **Equação Canônica da Conexão:**
+  $$\text{Participação elegível do profissional} + \text{Seleção ativa do cliente} + \text{Consentimento informado do cliente para compartilhamento bilateral dos contatos} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
+* **Conexão Imediata em `shared`:** Após a seleção ativa e consentimento informado do cliente, o contato bilateral é persistido diretamente como `status = 'shared'`. Ambos os lados recebem os dados telefônicos recíprocos imediatamente via WhatsApp.
+* **Inexistência de Segundo Aceite Obrigatório:** O profissional não precisa aceitar ou aprovar o lead para que a oportunidade exista formalmente. Frases como "aceito" ou "posso atender" atuam estritamente como reconhecimento de cortesia da plataforma, sem mutação transacional do status.
+* **Declaração Unilateral de Indisponibilidade:** Mensagens de recusa ("não consigo", "recuso", etc.) geram registro imutável em `professional_unavailability_events` (protegido por gatilho com código de erro `P0027`), mantêm o contato no status `shared`, reativam a busca original para que o cliente selecione outro profissional e notificam o cliente via Outbox.
+* **Múltiplas Conexões por Busca:** O índice único `(search_request_id, professional_id)` garante que o mesmo profissional não receba conexões duplicadas para a mesma busca, enquanto permite conexões subsequentes legítimas com outros profissionais caso o primeiro declare indisponibilidade.
+* **Elegibilidade para Conclusão:** Qualquer contato no status `shared` é diretamente elegível para o ciclo de conclusão bilateral de serviço, independentemente de confirmações prévias do prestador.
+* **Coexistência de Declarações Conflitantes:** Um evento de indisponibilidade profissional e um ciclo de conclusão podem coexistir para o mesmo contato. A declaração de indisponibilidade é um fato histórico auditável; ela **não** veta nem cancela uma conclusão subsequente. Ambos os registros são preservados como evidências no ledger para análise futura de qualidade e reputação.

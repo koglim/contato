@@ -47,6 +47,7 @@ export const bilateralSnapshotSchema = z.object({
   chosen_at: z.string().datetime(),
   consented_at: z.string().datetime(),
   consent_method: z.enum(["selection_after_notice", "legacy_confirmation"]),
+  connection_rule_version: z.literal("connection-v2").optional(),
 }).strict();
 export type BilateralSnapshot = z.infer<typeof bilateralSnapshotSchema>;
 
@@ -58,7 +59,7 @@ export function presentProfessionalOpportunity(snapshot: BilateralSnapshot) {
     ...(snapshot.neighborhood ? [`Bairro: ${snapshot.neighborhood}`] : []),
     `Solicitação: ${snapshot.summary}`,
     `Telefone do cliente: ${snapshot.customer_phone_e164}`,
-    "Entre em contato para combinar o atendimento solicitado.",
-    `Para responder, envie “aceito ${snapshot.public_code}” ou “recuso ${snapshot.public_code}”.`,
+    "Entre em contato com ele se puder atender.",
+    `Se não conseguir atender, responda: “não consigo ${snapshot.public_code}”.`,
   ].join("\n");
 }

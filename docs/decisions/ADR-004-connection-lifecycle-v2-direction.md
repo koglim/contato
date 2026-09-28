@@ -1,21 +1,20 @@
 # ADR-004: Direção de Produto para o Ciclo de Conexão Bilateral v2
 
-* **Status:** ACCEPTED / NOT YET IMPLEMENTED
+* **Status:** IMPLEMENTED (PR #17 — Connection Lifecycle v2)
 * **Data:** 2026-09-27
 * **Decisores:** Produto e Arquitetura ContatoCerto
 
 ---
 
-> [!CAUTION]
-> **Aviso de Não Implementação:**
-> Este registro define uma **decisão de produto aprovada para implementação futura**.
-> O código atualmente presente em `main` ainda opera sob o modelo legado (onde o status de aceite profissional participa da semântica de ciclo de vida). Esta ADR documenta a direção a ser implementada na próxima frente técnica, **não devendo ser considerada como código em execução no presente momento**.
+> [!NOTE]
+> **Implementação Concluída:**
+> Esta decisão foi implementada no PR #17 através da Migration 027 (`027_add_connection_lifecycle_v2.js`), estabelecendo a criação direta de contatos como `shared`, telemetria imutável de indisponibilidade via `professional_unavailability_events` e elegibilidade direta para conclusão de serviços.
 
 ---
 
 ## Contexto
 
-No modelo original e na base atual de código do ContatoCerto, após a escolha do profissional pelo cliente, o registro de contato (`contacts`) transita por estados onde a resposta profissional (`accepted` ou `declined` dentro do enum `contact_status`: `'requested'`, `'shared'`, `'accepted'`, `'declined'`, `'completed'`, `'cancelled'`) participa do ciclo de vida.
+No modelo original e na base de código anterior ao PR #17, após a escolha do profissional pelo cliente, o registro de contato (`contacts`) transitava por estados onde a resposta profissional (`accepted` ou `declined` dentro do enum `contact_status`: `'requested'`, `'shared'`, `'accepted'`, `'declined'`, `'completed'`, `'cancelled'`) participava do ciclo de vida.
 
 Na prática de um marketplace conversacional de serviços locais:
 1. O cliente procura um profissional com urgência e espera contato imediato.
@@ -33,8 +32,8 @@ Na prática de um marketplace conversacional de serviços locais:
    * O profissional receberá a notificação da oportunidade contendo o telefone do cliente, resumo do serviço e o contexto seguro de localização disponível.
    * O profissional terá a opção de sinalizar caso não possa atender (*"estou indisponível"*).
    * Essa resposta de indisponibilidade é classificada estritamente como **declaração unilateral do profissional**, servindo para telemetria operacional de qualidade e para que o sistema possa oferecer opções adicionais ao cliente, sem apagar o fato de que a oportunidade foi entregue.
-4. **Planejamento de Engenharia:**
-   * Esta alteração será implementada na frente técnica subsequente (Connection Lifecycle v2), ajustando migrations, transições de status da tabela `contacts` e templates de mensagens.
+4. **Implementação de Engenharia:**
+   * Esta direção foi implementada na Migration 027 (`027_add_connection_lifecycle_v2.js`), com ajustes no `ContactCompletionService`, `ProfessionalOpportunityService`, schemas compartilhados e templates de mensagens.
 
 ## Consequências
 
@@ -43,4 +42,4 @@ Na prática de um marketplace conversacional de serviços locais:
   * Acelera drasticamente a velocidade de fechamento entre cliente e prestador.
   * Simplifica as regras de auditoria e elimina estados intermediários ambíguos de contatos "presos aguardando aceite".
 * **Negativas / Compromissos:**
-  * Exigirá refatoração das consultas e testes que hoje assumem que um contato só pode ser concluído ou confirmado se tiver passado previamente pelo status `'accepted'`.
+  * **LEGACY:** Requeria refatoração das consultas e testes que assumiam que um contato só podia ser concluído ou confirmado se tivesse passado previamente pelo status `'accepted'`. Essa refatoração foi concluída no PR #17 (Migration 027 + ajustes no `ContactCompletionService`).
