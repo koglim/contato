@@ -30,9 +30,10 @@ Em b2.3, o mesmo Structured Output passou a exigir `confidence` (`high`,
 `greeting` e `small_talk`. `natural_reply` só é utilizável para saudação,
 conversa breve, esclarecimento ou retorno de fora de escopo. A API limita o
 texto a 320 caracteres e rejeita telefone, e-mail, link, preço, disponibilidade,
-distância, prazo, credenciais e alegações de ações concluídas. Resposta rejeitada
-é substituída por texto determinístico. Confiança baixa não altera memória nem
+Texto de resposta rejeitada é substituído por texto determinístico. Confiança baixa não altera memória nem
 inicia busca sem uma evidência de domínio suficiente.
+
+Em PR #18 (Selection Intelligence v2), a interpretação aceita `inquire_candidate`, `compare_candidates` e `show_more` quando a conversa aguarda seleção (`pending="selection"`). Apenas os candidatos apresentados da página ativa (`shownCandidates`, até 3 profissionais) entram no contexto do modelo com atributos não PII. Perguntas sobre candidatos nunca efetuam a seleção nem mutam o domínio (ADR-002) e são respondidas exclusivamente via `SelectionInquiryPresenter` ou fast path determinístico (distância/preço) com 0 chamadas de composição. Comandos de conclusão sem código ("já terminei", "confirmo") são resolvidos deterministicamente para 1 contato elegível único.
 
 Na orquestração adaptativa v1, o controlador separa `speech_act`, evidência de
 serviço, localização e ação seguinte. Um match de catálogo `exact`/`phrase` é

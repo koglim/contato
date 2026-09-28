@@ -37,3 +37,33 @@ export function deterministicSearchProposal(rawText: string, serviceEvidence: st
     location: { text: location, evidence: location }, natural_reply: null, confidence: "high", uncertain: false });
   return proposal.success ? proposal.data : null;
 }
+
+export type SelectionFastPathResult =
+  | { kind: "distance_comparison" }
+  | { kind: "price_comparison" }
+  | { kind: "none" };
+
+export function deterministicSelectionFastPath(rawText: string): SelectionFastPathResult {
+  const text = normalizeContextualText(rawText);
+  if (!text) return { kind: "none" };
+
+  if (
+    /^(?:qual|quais)(?: e| esta)? (?:o|os)? (?:mais|menor) (?:perto|proximo|distante|distancia)\??$/u.test(text)
+    || /^(?:qual|quais) (?:esta|ficam?) (?:mais|menor) (?:perto|proximo)\??$/u.test(text)
+    || /^qual o mais perto\??$/u.test(text)
+    || /^qual o mais proximo\??$/u.test(text)
+  ) {
+    return { kind: "distance_comparison" };
+  }
+
+  if (
+    /^(?:qual|quais)(?: e| esta)? (?:o|os)? (?:mais|menor) (?:barato|preco|valor)\??$/u.test(text)
+    || /^(?:qual|quais) (?:tem|cobram?) (?:o|os)? (?:menor|mais) (?:preco|valor|barato)\??$/u.test(text)
+    || /^qual o mais barato\??$/u.test(text)
+    || /^qual o menor preco\??$/u.test(text)
+  ) {
+    return { kind: "price_comparison" };
+  }
+
+  return { kind: "none" };
+}

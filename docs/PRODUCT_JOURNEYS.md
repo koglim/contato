@@ -33,11 +33,11 @@ flowchart TD
 
 #### 3. Apresentação e Comparação
 * O sistema apresenta até 3 profissionais elegíveis por página (com limite total de até 6 profissionais por busca).
-* **CURRENT:** O cliente recebe uma mensagem estruturada com nome, especialidade e indicadores factuais disponíveis. O cliente pode escolher por número da opção (ex.: `1`) ou pelo nome do profissional.
-* **TARGET (Conversation Intelligence v2):** O cliente poderá fazer perguntas comparativas factuais sobre os profissionais apresentados (ex.: *"Qual deles atende mais perto do centro?"*). O assistente responderá com base estritamente em dados reais cadastrados, sem nunca inventar estimativas de preço, prazos de garantia ou disponibilidade que não existam no sistema.
+* **CURRENT (Conversation Intelligence & Selection v2 — PR #18):** O cliente recebe uma mensagem estruturada com nome, especialidade e indicadores factuais disponíveis. O cliente pode escolher por número da opção (ex.: `1`), pelo nome do profissional ou por linguagem natural. Além disso, o cliente pode realizar **perguntas contextuais de esclarecimento ou comparação** sobre os candidatos apresentados (ex.: *"me fale mais do João"*, *"qual é o mais barato?"*, *"qual é o mais perto?"*, *"compara os dois"*, *"tem mais opções?"*).
+* As dúvidas sobre candidatos apresentados são respondidas exclusivamente com fatos reais cadastrados no sistema (via `SelectionInquiryPresenter` ou fast path determinístico de menor distância/preço), sem nenhuma chamada de composição de IA. Perguntas sobre candidatos **nunca** realizam a seleção nem mutam o domínio (ADR-002).
 
 #### 4. Seleção e Consentimento do Cliente para Compartilhamento Bilateral
-* Ao escolher um profissional, o cliente autoriza o compartilhamento do seu número de WhatsApp com o prestador selecionado.
+* Ao escolher um profissional (sem fazer perguntas), o cliente autoriza o compartilhamento do seu número de WhatsApp com o prestador selecionado.
 * **CURRENT (Connection Lifecycle v2 — Migration 027):**
   $$\text{Participação elegível do profissional} + \text{Seleção ativa do cliente} + \text{Consentimento informado do cliente para compartilhamento bilateral dos contatos} = \mathbf{CONEX\tilde{A}O\ ESTABELECIDA}$$
   A transação cria o registro de contato diretamente com `status = 'shared'` e envia o telefone do profissional ao cliente (com o código `CC-XXXXXXXX`) e os dados do cliente ao profissional via WhatsApp. Não há dependência de um segundo aceite mandatório pelo profissional para a conexão ser considerada real e ativa.
@@ -47,8 +47,7 @@ flowchart TD
 * O cliente e o profissional negociam livremente pelo WhatsApp prazos, orçamentos, visitas técnicas e pagamentos. A plataforma não interfere na transação financeira do serviço.
 
 #### 6. Conclusão e Confirmação
-* **CURRENT:** Qualquer uma das partes pode declarar a conclusão do atendimento enviando `concluído CC-XXXXXXXX`. A elegibilidade para conclusão é direta a partir do status `shared`. A contraparte (cliente ou profissional) pode confirmar com `confirmar CC-XXXXXXXX` ou contestar com `contestar CC-XXXXXXXX`. O parser atual exige obrigatoriamente o código público `CC-XXXXXXXX`.
-* **TARGET:** Resolução contextual proativa que convide o cliente a confirmar se o serviço foi realizado sem exigir a digitação do código quando houver apenas um atendimento ativo na conversa.
+* **CURRENT (Code-Free Contact Completion — PR #18):** Qualquer uma das partes pode declarar a conclusão do atendimento enviando o comando com o código público `concluído CC-XXXXXXXX` ou através de frases em linguagem conversacional (ex.: `"já terminei"`, `"serviço concluído"`, `"confirmo o atendimento"`). O parser determinístico resolve comandos em linguagem natural sem código quando houver exatamente **1 contato elegível único** para o número de WhatsApp do remetente. Caso existam múltiplos contatos elegíveis, o sistema solicita desambiguação sem expor números de telefone.
 
 ---
 

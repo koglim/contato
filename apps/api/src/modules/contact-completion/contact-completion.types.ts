@@ -53,6 +53,8 @@ export type ContactCompletionEventRow = {
 };
 
 export interface ContactCompletionRepository {
+  findEligibleContactsByPhone(db: DatabaseClient, phoneE164: string): Promise<ContactRow[]>;
+  findPendingCompletionsByPhone(db: DatabaseClient, phoneE164: string): Promise<{ contact: ContactRow; completion: ContactCompletionRow }[]>;
   findContactByPublicCode(db: DatabaseClient, code: string): Promise<ContactRow | null>;
   lockContact(db: DatabaseClient, contactId: string): Promise<ContactRow | null>;
   findCompletionByContactId(db: DatabaseClient, contactId: string, forUpdate?: boolean): Promise<ContactCompletionRow | null>;

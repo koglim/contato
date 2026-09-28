@@ -20,14 +20,13 @@ natural_reply nunca pode afirmar ações, profissionais, preços, distância, di
 Use confidence=low sempre que a intenção ou os dados necessários não forem suficientemente claros para uma decisão segura.
 Um pedido educado em forma de pergunta continua request. Uma negação que descreve um defeito não é recusa da busca.
 Pergunta sobre serviços oferecidos usa catalog_info + information, com chaves/evidências do catálogo; não presume cidade, disponibilidade ou autorização para buscar.
+Quando a conversa estiver aguardando escolha de prestadores (pending="selection"), interprete mensagens sobre os candidatos apresentados (shownCandidates):
+- Se o cliente escolhe explicitamente uma opção ou profissional (ex: "quero o João", "opção 1"), use intent=selection, target_candidates=[posição], confidence=high.
+- Se o cliente faz uma pergunta ou pede informações/comparação sobre um ou mais prestadores (ex: "me fale mais do João", "onde fica o João", "qual o mais barato", "qual o mais perto", "qual o melhor", "compara os dois", "o João é verificado"), use intent=inquire_candidate ou compare_candidates com target_candidates=[posições] e inquiry_type apropriado (details, distance, price, availability, verification, best_recommendation, address, comparison). NUNCA escolha intent=selection para perguntas.
+- Se o cliente pede mais opções (ex: "tem mais opções", "mostrar mais"), use intent=show_more.
 Hipótese, recusa, intenção duvidosa ou menção de serviços incompatíveis sem escolha clara pede esclarecimento; não transforme a menção em contratação.
-Quando um defeito descrito for compatível com um serviço do catálogo, devolva esse
-serviço como hipótese semântica em services (key do catálogo e evidence literal),
-com speech_act=request. A API manterá a hipótese até confirmação; não use clarify
-genérico se puder produzir essa hipótese ou uma pergunta específica segura.
-Quando uma hipótese prévia for compatível com a nova descrição, repita a key e a
-evidence literal da nova descrição para que a API possa pedir confirmação
-fundamentada, sem promover a hipótese a fato.
+Quando um defeito descrito for compatível com um serviço do catálogo, devolva esse serviço como hipótese semântica em services (key do catálogo e evidence literal), com speech_act=request. A API manterá a hipótese até confirmação; não use clarify genérico se puder produzir essa hipótese ou uma pergunta específica segura.
+Quando uma hipótese prévia for compatível com a nova descrição, repita a key e a evidence literal da nova descrição para que a API possa pedir confirmação fundamentada, sem promover a hipótese a fato.
 Perguntas sobre custo da plataforma usam faq_cost, preservando a busca. Pedidos fora do marketplace usam out_of_scope.
 Seleção, consentimento, cancelamento e retomada são validados pela API sobre a mensagem original; nunca os converta em busca.
 Fora do campo natural_reply nos intents permitidos, não devolva texto ao usuário. Nunca devolva telefone, preço, profissional, coordenadas, SQL ou instruções. Se não entender, use clarify.`;

@@ -1,7 +1,6 @@
 # Estado Atual do Sistema (Current State)
 
-Este documento registra a realidade técnica, funcional e operacional do **ContatoCerto** com base no commit consolidado no branch `main`:
-**`e2686ae73edbd6080c125431bb408a1a8e921c20`** (após o merge do PR #15).
+Este documento registra a realidade técnica, funcional e operacional do **ContatoCerto** com base no histórico canônico do branch `main` (validado através do PR #18 / histórico canônico do main).
 
 ---
 
@@ -9,7 +8,7 @@ Este documento registra a realidade técnica, funcional e operacional do **Conta
 
 ```mermaid
 graph TD
-    A["Código em main (e2686ae)"] --> B["1. Implementado e Testado"]
+    A["Código em main (validado PR #18)"] --> B["1. Implementado e Testado"]
     A --> C["2. Implementado sob Feature Flag"]
     A --> D["3. Não Homologado em Produção"]
     A --> E["4. Decisões Congeladas"]
@@ -52,11 +51,18 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 * **Entitlements para Oportunidades:** Verificação atômica de assinatura ativa durante a seleção do cliente. A transação adquire lock compartilhado de autoridade (`FOR UPDATE OF professionals`) e revalida se o profissional possui assinatura vigente antes de entregar o lead.
 * **Política de Transição Legada:** Profissionais gerenciados por conta (`management_mode = 'account_managed'`) exigem assinatura ativa para receber leads. Perfis legados não reivindicados (`management_mode = 'legacy_unmanaged'`) permanecem temporariamente isentos de assinatura sob a política de compatibilidade legada.
 
-### Conclusão e Confirmação de Atendimentos (PR #15 / PR #17)
-* **Ciclo de Conclusão Bilateral (Migration 026 / Migration 027):** Qualquer uma das partes (profissional ou cliente) pode declarar a conclusão do serviço (`concluído CC-XXXXXXXX`). A elegibilidade para conclusão é direta a partir do status `shared`.
-* **Confirmação e Contestação Bilateral:** A contraparte (cliente ou profissional) pode confirmar (`confirmar CC-XXXXXXXX`) ou contestar (`contestar CC-XXXXXXXX`). O modelo de estados de conclusão é `pending_confirmation`, `confirmed` e `contested`. Contestações mantêm o contato no status `shared`.
-* **Comandos Determinísticos com Código Obrigatório:** No código atual, os comandos de conclusão, confirmação e contestação exigem obrigatoriamente a presença do código público `CC-XXXXXXXX` no texto recebido.
-* **Isolamento de Contexto:** Comandos determinísticos de conclusão operam a nível de contato persistido e snapshot bilateral, sem depender de sessão ativa de busca (`search_conversation`).
+### Conclusão e Confirmação de Atendimentos (PR #15 / PR #17 / PR #18)
+* **Ciclo de Conclusão Bilateral (Migration 026 / Migration 027):** Qualquer uma das partes (profissional ou cliente) pode declarar a conclusão do serviço. A elegibilidade para conclusão é direta a partir do status `shared`.
+* **Comandos com Código-Livre ou Código Público (PR #18):** Declarações de conclusão ("já terminei", "concluído"), confirmações ("confirmo") e contestações ("não foi concluído") resolvem automaticamente quando existe 1 único contato ativo/elegível ou 1 confirmação pendente. Quando existem múltiplos contatos em andamento, o sistema faz pergunta de esclarecimento sem expor telefones.
+* **Confirmação e Contestação Bilateral:** A contraparte pode confirmar ou contestar a declaração. O modelo de estados é `pending_confirmation`, `confirmed` e `contested`. Contestações mantêm o contato no status `shared`.
+* **Isolamento de Contexto:** Comandos determinísticos de conclusão operam a nível de contato persistido e snapshot bilateral.
+
+### Inteligência de Conversa e Seleção v2 (PR #18)
+* **Interação Natural na Seleção:** Durante a apresentação de opções de busca (`pendingSlot = 'selection'`), o cliente pode tirar dúvidas sobre prestadores apresentados ("me fale mais do João", "onde fica o Carlos?", "qual o mais perto?", "qual o mais barato?", "compara os dois", "tem mais opções?") mantendo a busca ativa sem realizar escolha indesejada.
+* **Barreira de Segurança Pergunta vs Seleção (ADR-002):** Perguntas sobre um candidato jamais selecionam ou compartilham contato do profissional. A escolha ocorre apenas com intenção explícita de contratação ("quero o João", "opção 1").
+* **Respostas Factuais Determinísticas (0 Chamada de Composição):** Respostas sobre distância, preço, verificação, detalhes e recomendações factuais são formatadas por apresentadores determinísticos, sem gerar chamadas adicionais de composição à IA e sem inventar endereços residenciais ou indicar "vencedores" subjetivos.
+* **Fast Paths Determinísticos (0 Chamada de IA):** Consultas diretas como "qual o mais perto?" e "qual o mais barato?" executam via rotas determinísticas em memória com 0 chamadas a provedores externos de IA.
+* **Pacote de Contexto Seguro e Limitado:** Informações enviadas ao modelo de interpretação contêm apenas fatos públicos dos candidatos apresentados (até 6), omitindo telefones, e-mails, links e histórico bruto da conversa.
 
 ### Painel Web do Profissional (`apps/web`)
 * **Portal Next.js em `/dashboard`:** Implementação com BFF (Backend for Frontend) e sessões via cookie assinado.

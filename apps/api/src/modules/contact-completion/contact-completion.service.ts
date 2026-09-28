@@ -32,12 +32,35 @@ export class ContactCompletionService {
       return null;
     }
 
-    const command = parseContactCompletionCommand(record.rawText);
-    if (!command) {
-      return null;
-    }
+    let command = parseContactCompletionCommand(record.rawText);
 
     return this.transaction(async (db) => {
+      // If no explicit command parsed, check if this is a reference response (e.g. "com o João") for an active multi-contact completion
+      if (!command) {
+        const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+        if (normalizedRaw && !record.rawText.includes("?")) {
+          const eligible = await this.repository.findEligibleContactsByPhone(db, record.phoneE164);
+          if (eligible.length > 1) {
+            const matched = eligible.filter((c) => {
+              const snap = bilateralSnapshotSchema.safeParse(c.bilateral_snapshot);
+              if (!snap.success) return false;
+              const profName = snap.data.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+              const profFirstName = profName.split(" ")[0] ?? "";
+              const serviceName = snap.data.service_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+              return (profFirstName.length >= 2 && normalizedRaw.includes(profFirstName))
+                || (serviceName.length >= 2 && normalizedRaw.includes(serviceName));
+            });
+            if (matched.length === 1) {
+              command = { kind: "declare", code: matched[0]!.public_code };
+            }
+          }
+        }
+      }
+
+      if (!command) {
+        return null;
+      }
+
       const inboundRes = await db.query<{
         status: string;
         processing_token: string | null;
@@ -76,23 +99,94 @@ export class ContactCompletionService {
       );
       if (!live.rows.length) throw new InboxFenceError();
 
+      // Resolve contact to operate on (explicit public code vs code-free resolution)
+      let targetContactId: string | null = null;
 
-      const foundContact = await this.repository.findContactByPublicCode(db, command.code);
-      if (!foundContact) {
+      if (command.code) {
+        const found = await this.repository.findContactByPublicCode(db, command.code);
+        if (found) targetContactId = found.id;
+      } else if (command.kind === "confirm" || command.kind === "contest") {
+        const pendingCompletions = await this.repository.findPendingCompletionsByPhone(db, record.phoneE164);
+        if (pendingCompletions.length === 1) {
+          targetContactId = pendingCompletions[0]!.contact.id;
+        } else if (pendingCompletions.length > 1) {
+          const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+          const matched = pendingCompletions.filter((item) => {
+            const snap = bilateralSnapshotSchema.safeParse(item.contact.bilateral_snapshot);
+            if (!snap.success) return false;
+            const profFirstName = snap.data.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().split(" ")[0] ?? "";
+            return profFirstName.length >= 2 && normalizedRaw.includes(profFirstName);
+          });
+          if (matched.length === 1) {
+            targetContactId = matched[0]!.contact.id;
+          } else {
+            const options = pendingCompletions.map((item) => {
+              const snap = bilateralSnapshotSchema.safeParse(item.contact.bilateral_snapshot);
+              return snap.success ? `${snap.data.professional_name} (${snap.data.service_name})` : item.contact.public_code;
+            }).join(" e ");
+            return this.finishUnavailable(
+              db,
+              record,
+              `Você possui confirmações pendentes para ${options}. Por favor, informe com qual prestador deseja ${command.kind === "confirm" ? "confirmar" : "contestar"}.`
+            );
+          }
+        } else {
+          // No pending completion found for a code-free confirm/contest
+          return null;
+        }
+      } else if (command.kind === "declare") {
+        const eligible = await this.repository.findEligibleContactsByPhone(db, record.phoneE164);
+        if (eligible.length === 0) {
+          return this.finishUnavailable(
+            db,
+            record,
+            "Não encontrei nenhuma solicitação ativa em andamento para o seu número."
+          );
+        }
+        if (eligible.length === 1) {
+          targetContactId = eligible[0]!.id;
+        } else {
+          const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+          const matched = eligible.filter((c) => {
+            const snap = bilateralSnapshotSchema.safeParse(c.bilateral_snapshot);
+            if (!snap.success) return false;
+            const profName = snap.data.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+            const profFirstName = profName.split(" ")[0] ?? "";
+            const serviceName = snap.data.service_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+            return (profFirstName.length >= 2 && normalizedRaw.includes(profFirstName))
+              || (serviceName.length >= 2 && normalizedRaw.includes(serviceName));
+          });
+          if (matched.length === 1) {
+            targetContactId = matched[0]!.id;
+          } else {
+            const options = eligible.map((c) => {
+              const snap = bilateralSnapshotSchema.safeParse(c.bilateral_snapshot);
+              return snap.success ? `${snap.data.professional_name} (${snap.data.service_name})` : c.public_code;
+            }).join(" e ");
+            return this.finishUnavailable(
+              db,
+              record,
+              `Você possui solicitações em andamento com ${options}. Por favor, informe o nome do prestador ou o código da solicitação que deseja concluir.`
+            );
+          }
+        }
+      }
+
+      if (!targetContactId) {
         return this.finishUnavailable(
           db,
           record,
-          "Não identifiquei uma solicitação ativa correspondente a esse código para o seu número."
+          "Não identifiquei uma solicitação ativa correspondente para o seu número."
         );
       }
 
       // Authoritative serialization point: lock contact row first!
-      const lockedContact = await this.repository.lockContact(db, foundContact.id);
+      const lockedContact = await this.repository.lockContact(db, targetContactId);
       if (!lockedContact) {
         return this.finishUnavailable(
           db,
           record,
-          "Não identifiquei uma solicitação ativa correspondente a esse código para o seu número."
+          "Não identifiquei uma solicitação ativa correspondente para o seu número."
         );
       }
 
@@ -101,7 +195,7 @@ export class ContactCompletionService {
         return this.finishUnavailable(
           db,
           record,
-          "Não identifiquei uma solicitação ativa correspondente a esse código para o seu número."
+          "Não identifiquei uma solicitação ativa correspondente para o seu número."
         );
       }
       const snapshot = snapshotParse.data;

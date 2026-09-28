@@ -27,7 +27,9 @@ import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal,
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
 import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, CONTEXTUAL_HYPOTHESIS_REJECTED, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 import { classifyConversationAIError, withConversationAITimeout, type ConversationAIFallbackEvent, type ConversationAIFallbackReason, type ConversationAIStage } from "./contextual.provider.js";
-import { deterministicSearchProposal } from "./contextual.fast-path.js";
+import { deterministicSearchProposal, deterministicSelectionFastPath } from "./contextual.fast-path.js";
+import { presentSelectionInquiry, type CandidateInquiryFact } from "../selection-message/selection-inquiry.presenter.js";
+import type { ContextualShownCandidate } from "./contextual.contract.js";
 import { confirmedUniqueHypothesis, rejectedUniqueHypothesis } from "./contextual.confirmation.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
@@ -114,13 +116,37 @@ export class ContextualConversationService implements ContextualInboxHandler {
         } catch { /* Resolver failure leaves the normal interpretation path available. */ }
       }
       let namedSelection = false;
+      let shownCandidates: ContextualShownCandidate[] = [];
       if (!global && !recoveredSelection && snapshot.pendingSlot === "selection" && snapshot.conversationId) {
         const current = await new PostgresSearchConversationRepository().findById(snapshot.conversationId);
         if (current?.searchRequestId) {
           const shown = await new PostgresSelectionMatchRepository().listShown(current.searchRequestId);
           namedSelection = resolveProfessionalSelection(record.rawText, shown).kind !== "unresolved";
+          shownCandidates = shown.map((m) => {
+            const cents = m.priceFromCents;
+            const pMode = m.priceMode;
+            let formattedPrice = "Sob consulta";
+            if (pMode === "quote") formattedPrice = "Sob consulta";
+            else if (cents !== null) {
+              const fromStr = (cents / 100).toFixed(2).replace(".", ",");
+              if (pMode === "fixed") formattedPrice = `R$ ${fromStr}`;
+              else if (pMode === "range" && m.priceToCents !== null) formattedPrice = `R$ ${fromStr} a R$ ${(m.priceToCents / 100).toFixed(2).replace(".", ",")}`;
+              else formattedPrice = `A partir de R$ ${fromStr}`;
+            }
+            return {
+              position: m.rankPosition ?? 1,
+              name: m.displayName,
+              distance_km: m.distanceMeters !== null ? Number((m.distanceMeters / 1000).toFixed(1)) : null,
+              price_mode: pMode,
+              price_formatted: formattedPrice,
+              verified: m.isVerified,
+              availability: m.effectiveAvailableNow ? ("now" as const) : ("unstated" as const),
+              summary: m.serviceDescription ?? null,
+            };
+          });
         }
       }
+      const selectionFastPath = snapshot.pendingSlot === "selection" ? deterministicSelectionFastPath(record.rawText) : { kind: "none" as const };
       const criticalDelegate = global || recoveredSelection || (snapshot.pendingSlot === "selection"
         && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null));
       let rejection: Awaited<ReturnType<typeof rejectedUniqueHypothesis>> = null;
@@ -139,6 +165,15 @@ export class ContextualConversationService implements ContextualInboxHandler {
       if (criticalDelegate) {
         path = "critical_delegate";
         decision = { kind: "delegate", memory: snapshot.memory, correction: false };
+      } else if (selectionFastPath.kind !== "none") {
+        path = "deterministic_fast_path";
+        decision = {
+          kind: "selection_inquiry",
+          memory: snapshot.memory,
+          correction: false,
+          inquiryType: selectionFastPath.kind === "distance_comparison" ? "distance" : "price",
+          targetPositions: [],
+        };
       } else if (snapshot.pendingSlot !== "selection" && confirmedHypothesis) {
         path = "confirmed_hypothesis";
         decision = { kind: "search", correction: false, memory: { ...snapshot.memory, service: { value: confirmedHypothesis.name, source: "user_confirmation", inboundId: record.id }, hypotheses: [] } };
@@ -190,6 +225,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
               message: stripPrivate(record.rawText), service: snapshot.memory.service ? stripPrivate(snapshot.memory.service.value) : null,
               location: snapshot.memory.location ? stripPrivate(snapshot.memory.location.value) : null, pending: snapshot.pendingSlot,
               hypotheses: snapshot.memory.hypotheses.map(item => item.name), catalog,
+              ...(snapshot.pendingSlot === "selection" ? { shownCandidates } : {}),
             }), this.options.timeoutMs ?? DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS);
             const parsedProposal = contextualProposalSchema.parse(proposal);
             proposal = parsedProposal;
@@ -321,6 +357,28 @@ export class ContextualConversationService implements ContextualInboxHandler {
             conversationId = routed.conversationId ?? conversationId;
             if (global && global.kind !== "help") memory = emptyMemory();
           }
+        } else if (!fallback && decision.kind === "selection_inquiry") {
+          let shownMatches: CandidateInquiryFact[] = [];
+          if (conversationId) {
+            const conv = await conversations.findById(conversationId);
+            if (conv?.searchRequestId) {
+              const rawShown = await new PostgresSelectionMatchRepository(execute, transaction).listShown(conv.searchRequestId);
+              shownMatches = rawShown.map((m) => ({
+                position: m.rankPosition ?? 1,
+                displayName: m.displayName,
+                distanceMeters: m.distanceMeters,
+                priceMode: m.priceMode,
+                priceFromCents: m.priceFromCents,
+                priceToCents: m.priceToCents,
+                isVerified: m.isVerified,
+                availability: m.effectiveAvailableNow ? "now" : "unstated",
+                summary: m.serviceDescription ?? null,
+                serviceName: m.serviceName,
+              }));
+            }
+          }
+          text = presentSelectionInquiry(decision.inquiryType ?? "details", shownMatches, decision.targetPositions ?? []);
+          status = "information";
         } else if (!fallback && decision.kind === "faq_cost") {
           text = CONTEXTUAL_COST_POLICY; status = "information";
         } else if (!fallback && decision.kind === "catalog_info") {

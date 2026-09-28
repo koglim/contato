@@ -19,12 +19,13 @@ Estabelecer uma divisão estrita de responsabilidades entre a camada de interpre
 1. **Escopo da Inteligência Artificial (Interpretação e Fluidez):**
    * A IA atua exclusivamente na extração de intenções, mapeamento de termos livres para serviços do catálogo, extração de menções de localização geográfica e composição de respostas amigáveis.
    * A IA pode responder dúvidas explicativas com base exclusiva em dados factuais já persistidos no banco de dados.
+   * **Selection Intelligence v2 (PR #18):** Dúvidas e comparações do cliente sobre candidatos apresentados (`inquire_candidate`, `compare_candidates`) são interpretadas pela IA para identificar a intenção, mas a resposta é formatada 100% via apresentador factual determinístico (`SelectionInquiryPresenter`) ou fast paths determinísticos (distância/preço). Perguntas sobre candidatos **nunca** realizam seleções nem mutam o domínio.
 2. **Escopo Exclusivo do Domínio Determinístico (Regras e Autoridade):**
    * **Identidade e Autorização:** Autenticação de contas, tokens OTP e validação de propriedade de telefone são puramente determinísticos.
    * **Consentimento:** O consentimento para compartilhamento de dados é obtido por meio de ações de seleção registradas e auditadas em transações SQL.
    * **Matching e Ranking:** O cálculo de elegibilidade, filtros de raio espacial PostGIS e ordenação de profissionais são imunes a julgamentos probabilísticos da IA.
    * **Mutação de Contatos e Assinaturas:** Apenas a API e o PostgreSQL realizam inserts/updates nas tabelas `contacts`, `contact_completions` e `professional_subscriptions`.
-   * **Fast Paths Determinísticos:** Sempre que o usuário responder com números (`"1"`, `"2"`), palavras-chave de comando (`"concluído"`, `"cancelar"`) ou confirmações unívocas, o processamento ocorre por código determinístico, sem acionar a LLM.
+   * **Fast Paths Determinísticos:** Sempre que o usuário responder com números (`"1"`, `"2"`), palavras-chave de comando (`"concluído"`, `"cancelar"`), comparações de distância/preço (*"qual o mais perto?"*, *"qual o mais barato?"*) ou confirmações unívocas, o processamento ocorre por código determinístico com custo zero de IA.
 
 ## Consequências
 

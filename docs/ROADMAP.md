@@ -18,6 +18,7 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 * **Assinaturas e Entitlements Neutros (PR #14):** Modelagem de planos e assinaturas de profissionais (Migration 025). Lock atômico de concorrência (`FOR UPDATE OF professionals`) garantindo que apenas assinantes ativos no modo `account_managed` recebam novos contatos (perfis `legacy_unmanaged` provisoriamente isentos).
 * **Conclusão e Confirmação de Atendimentos (PR #15):** Registro de encerramento do serviço (`concluído CC-XXXXXXXX`) por qualquer das partes, confirmação (`confirmar CC-XXXXXXXX`) ou contestação (`contestar CC-XXXXXXXX`) pela contraparte com código obrigatório no parser atual, isolados de contexto de busca.
 * **Ciclo de Conexão Bilateral v2 (PR #17 — Migration 027):** Conexão imediata no status `shared` mediante seleção e consentimento informado do cliente, eliminação do segundo aceite obrigatório do profissional, telemetria imutável de indisponibilidade via `professional_unavailability_events` (P0027), suporte a múltiplas conexões por busca via índice `(search_request_id, professional_id)` e elegibilidade direta para conclusão a partir de `shared`.
+* **Inteligência de Conversa e Seleção v2 (PR #18):** Interação natural na etapa de seleção ("me fale mais do João", "qual o mais perto?", "qual o mais barato?", "compara os dois", "tem mais opções?"), barreira estrita de segurança pergunta vs seleção (ADR-002), apresentadores determinísticos com 0 chamada de composição à IA, fast paths determinísticos com 0 chamadas de IA e comandos de conclusão/confirmação/contestação com código-livre ou código público com resolução inteligente de múltiplos contatos.
 * **Painel Web do Profissional (`/dashboard`):** Aplicação Next.js com BFF, autenticação via cookie assinado, edição de dados cadastrais (telefone em modo somente-leitura), serviços, áreas de atendimento e disponibilidade.
 
 ---
@@ -26,11 +27,7 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 
 Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
-1. **Conversation Intelligence / Seleção v2:**
-   * Permitir perguntas comparativas e esclarecimentos factuais entre os profissionais apresentados sem quebrar o fluxo de escolha.
-   * Auditoria formal de consumo de tokens, tamanho de prompts, latência e fast paths determinísticos.
-   * Resolução contextual inteligente de comandos sem obrigar a digitação manual de `CC-...` quando houver único atendimento ativo.
-2. **Localização v2 (Fundação de Entrada):**
+1. **Localização v2 (Fundação de Entrada):**
    * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
 3. **Reconciliação n8n / Evolution / Workflows Versionados:**
    * Atualizar os fluxos instalados no ambiente remoto (EasyPanel) a partir dos arquivos versionados em `workflows/n8n/`, habilitando o envio de desafios de autenticação (`professional_auth_challenge`).
