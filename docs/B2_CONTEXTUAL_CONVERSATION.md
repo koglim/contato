@@ -12,8 +12,7 @@ desligada e usa o texto persistido na Outbox, sem regeneração.
 
 A interpretação usa Responses/Structured Outputs, schema estrito e catálogo
 ativo real limitado a 100 serviços, com descrições limitadas a 200 caracteres.
-Sem ferramentas, histórico integral, telefone, IDs de clientes/profissionais,
-preços ou credenciais no contexto. Mensagem e descrições são dados não confiáveis.
+Sem ferramentas, histórico integral, telefone, IDs de clientes/profissionais ou credenciais no contexto. No estágio de resolução de serviço (`pending="service"` ou `"location"`), também não há preços nem dados de candidatos no contexto. No estágio de seleção (`pending="selection"`), o catálogo é enviado vazio (0 itens) e entram exclusivamente os candidatos exibidos (até 6 profissionais da página 1/2) com atributos sem PII, incluindo fatos de preço determinísticos (`price_formatted`, `priceMode`). Mensagem e descrições são dados não confiáveis.
 Evidências/localidade devem corresponder a trechos completos da mensagem original.
 Uma profissão explicitamente reconhecida pode ser confirmada; uma associação
 semântica sugerida pelo modelo permanece hipótese até confirmação do cliente.

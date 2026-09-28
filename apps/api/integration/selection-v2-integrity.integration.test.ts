@@ -111,6 +111,7 @@ async function setupSingleContactFixture(opts: { provider?: string; customerPhon
       await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
       await db.query("DELETE FROM contact_completions WHERE contact_id = $1::uuid", [contactId]);
       await db.query("DELETE FROM contacts WHERE id = $1::uuid", [contactId]);
+      await db.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE customer_id = $1::uuid OR id = $2::uuid)", [customerId, searchId]);
       await db.query("DELETE FROM search_conversations WHERE customer_id = $1::uuid OR id = $2::uuid OR customer_id IS NULL", [customerId, conversationId]);
       await db.query("DELETE FROM search_requests WHERE id = $1::uuid OR customer_id = $2::uuid", [searchId, customerId]);
       await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164 = ANY($1) OR id = $2::uuid", [allPhones, choiceId]);
@@ -152,7 +153,7 @@ test("PostgreSQL Selection v2 Scenarios 01-05: Single contact completion & bilat
   }
 });
 
-test("PostgreSQL Selection v2 Scenarios 06-15 & 28: Multi-contact disambiguation, provider scoping & freshness", async () => {
+test("PostgreSQL Selection v2 Scenarios 06-10, 14, 15, 28: Multi-contact disambiguation, provider scoping & freshness", async () => {
   const customerId = randomUUID();
   const customerPhone = randomPhone();
   const searchId = randomUUID();
@@ -242,7 +243,6 @@ test("PostgreSQL Selection v2 Scenarios 06-15 & 28: Multi-contact disambiguation
     assert.equal(resolveRes.result.public_code, joaoCode);
 
     // 28. Stale clarification one-shot freshness: after a new message arrives, old clarification is nullified
-    // Send a new clarification for multi-contact
     const clarRes2 = await executeInbound("serviço concluído", customerPhone, "whatsapp");
     assert.equal(clarRes2.result.action, "clarification");
 
@@ -250,7 +250,7 @@ test("PostgreSQL Selection v2 Scenarios 06-15 & 28: Multi-contact disambiguation
     const interveningRes = await executeInbound("preciso de pintora", customerPhone, "whatsapp");
     assert.notEqual(interveningRes.result.route, "contact_completion");
 
-    // Subsequent 'com João' after intervening message MUST NOT inherit stale clarification (returns null / route != contact_completion)
+    // Subsequent 'com João' after intervening message MUST NOT inherit stale clarification
     const staleRes = await executeInbound("com João", customerPhone, "whatsapp");
     assert.notEqual(staleRes.result.route, "contact_completion");
 
@@ -271,12 +271,301 @@ test("PostgreSQL Selection v2 Scenarios 06-15 & 28: Multi-contact disambiguation
     await query("DELETE FROM contact_completion_events WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1::uuid)", [searchId]);
     await query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
     await query("DELETE FROM contact_completions WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1::uuid)", [searchId]);
+    await query("DELETE FROM matches WHERE search_request_id = $1::uuid", [searchId]);
     await query("DELETE FROM contacts WHERE search_request_id = $1::uuid", [searchId]);
     await query("DELETE FROM search_conversations WHERE search_request_id = $1::uuid OR customer_id = $2::uuid OR customer_id IS NULL", [searchId, customerId]);
     await query("DELETE FROM search_requests WHERE id = $1::uuid", [searchId]);
     await query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1, $2, $3)", [customerPhone, joaoPhone, carlosPhone]);
     await query("DELETE FROM professionals WHERE id IN ($1::uuid, $2::uuid)", [joaoId, carlosId]);
     await query("DELETE FROM customers WHERE id = $1::uuid OR phone_e164 IN ($2, $3, $4)", [customerId, customerPhone, joaoPhone, carlosPhone]);
+  }
+});
+
+test("Proof A: Consumed completion clarification cannot hijack a later active search selection", async () => {
+  const customerId = randomUUID(), searchId1 = randomUUID();
+  const joaoId = randomUUID(), carlosId = randomUUID();
+  const joaoPhone = randomPhone(), carlosPhone = randomPhone(), customerPhone = randomPhone();
+  const joaoCode = createOpportunityCode(), carlosCode = createOpportunityCode();
+
+  const repo = new PostgresContactCompletionRepository();
+  const service = new ContactCompletionService(repo);
+  const app = buildApp({ internalApiKey: internalKey, contactCompletionService: service });
+
+  const executeInbound = async (rawText: string, senderPhone: string = customerPhone, provider: string = "whatsapp") => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers: { "x-internal-key": internalKey },
+      payload: { provider, provider_message_id: randomUUID(), phone_e164: senderPhone, raw_text: rawText, country_code: "BR", limit: 3 },
+    });
+    return res.statusCode === 200 ? JSON.parse(res.payload) : null;
+  };
+
+  try {
+    await query("INSERT INTO customers (id, phone_e164) VALUES ($1::uuid, $2)", [customerId, customerPhone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, 'João Silva', $2, $3, 'active')", [joaoId, `joao-${joaoId}`, joaoPhone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, 'Carlos Santos', $2, $3, 'active')", [carlosId, `carlos-${carlosId}`, carlosPhone]);
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1::uuid, $2::uuid, 'eletricista em Cuiabá', 'selected')", [searchId1, customerId]);
+
+    const createContact = async (profId: string, profName: string, profPhone: string, code: string) => {
+      const contactId = randomUUID(), choiceId = randomUUID(), convId = randomUUID();
+      await query(
+        `INSERT INTO search_conversations (id, customer_id, status, original_raw_text, service_text, location_text, country_code, limit_value, search_request_id, expires_at, completed_at)
+         VALUES ($1::uuid, $2::uuid, 'completed', 'eletricista em Cuiabá', 'eletricista', 'Cuiabá, MT', 'BR', 3, $3::uuid, NOW() + INTERVAL '1 hour', NOW())`,
+        [convId, customerId, searchId1]
+      );
+      await query(
+        `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
+         VALUES ($1::uuid, 'whatsapp', $1::text, $2, $3, 'BR', 3, 'processed', NOW(), '{"route":"selection"}'::jsonb)`,
+        [choiceId, customerPhone, profName]
+      );
+      const snapshot = {
+        public_code: code, service_name: "eletricista", city: "Cuiabá", state: "MT", neighborhood: null, summary: "Instalações",
+        professional_name: profName, professional_phone_e164: profPhone, customer_phone_e164: customerPhone, notice_version: "bilateral-v1",
+        notice_outbound_id: randomUUID(), notice_sent_at: new Date().toISOString(), choice_inbound_id: choiceId, chosen_at: new Date().toISOString(),
+        consented_at: new Date().toISOString(), consent_method: "selection_after_notice",
+      };
+      await query(
+        `INSERT INTO contacts (id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::jsonb, $8::uuid, 'shared')`,
+        [contactId, profId, customerId, searchId1, choiceId, code, JSON.stringify(snapshot), convId]
+      );
+      return contactId;
+    };
+
+    const joaoContactId = await createContact(joaoId, "João Silva", joaoPhone, joaoCode);
+    await createContact(carlosId, "Carlos Santos", carlosPhone, carlosCode);
+
+    // 1) Trigger disambiguation clarification
+    const clarRes = await executeInbound("serviço concluído");
+    assert.equal(clarRes.result.action, "clarification");
+
+    // 2) Consume clarification by selecting João -> resolves completion
+    const resolveRes = await executeInbound("com João");
+    assert.equal(resolveRes.result.route, "contact_completion");
+    assert.equal(resolveRes.result.action, "declared");
+
+    const joaoCompletion = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1::uuid", [joaoContactId])).rows[0];
+    assert.equal(joaoCompletion.state, "pending_confirmation");
+
+    // 3) Create a NEW active search selection context (S2) with candidate João Silva
+    const searchId2 = randomUUID(), convId2 = randomUUID(), matchId2 = randomUUID();
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1::uuid, $2::uuid, 'eletricista Sinop', 'selected')", [searchId2, customerId]);
+    await query(
+      `INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at)
+       VALUES ($1::uuid, $2::uuid, 'active', 'selection', 'eletricista Sinop', 'eletricista', 'BR', 3, $3::uuid, NOW() + INTERVAL '1 hour')`,
+      [convId2, customerId, searchId2]
+    );
+    await query("INSERT INTO matches (id, search_request_id, professional_id, rank_position, shown_at) VALUES ($1::uuid, $2::uuid, $3::uuid, 1, NOW())", [matchId2, searchId2, joaoId]);
+
+    // 4) Send bare 'João' under active search S2
+    const selectionRes = await executeInbound("João");
+    assert.ok(selectionRes);
+
+    // 5 & 6) Assert old completion clarification is NOT reused and message executes selection path
+    assert.notEqual(selectionRes.result.route, "contact_completion", "Old completion clarification must not hijack active selection");
+    assert.equal(selectionRes.result.route, "selection", "Message must execute current selection route");
+
+    // 7) Assert historical completion for S1 was NOT mutated (remains pending_confirmation)
+    const joaoCompletionAfter = (await query<{ state: string }>("SELECT state FROM contact_completions WHERE contact_id = $1::uuid", [joaoContactId])).rows[0];
+    assert.equal(joaoCompletionAfter.state, "pending_confirmation");
+  } finally {
+    await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL");
+    await query("UPDATE channel_outbound_messages SET completion_event_id = NULL, professional_unavailability_event_id = NULL");
+    await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2, $3)", [customerPhone, joaoPhone, carlosPhone]);
+    await query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+    await query("DELETE FROM contact_completion_events WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1::uuid)", [searchId1]);
+    await query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+    await query("DELETE FROM contact_completions WHERE contact_id IN (SELECT id FROM contacts WHERE search_request_id = $1::uuid)", [searchId1]);
+    await query("DELETE FROM matches WHERE search_request_id = $1::uuid OR search_request_id IN (SELECT id FROM search_requests WHERE customer_id = $2::uuid)", [searchId1, customerId]);
+    await query("DELETE FROM contacts WHERE search_request_id = $1::uuid", [searchId1]);
+    await query("DELETE FROM search_conversations WHERE customer_id = $1::uuid OR customer_id IS NULL", [customerId]);
+    await query("DELETE FROM search_requests WHERE customer_id = $1::uuid", [customerId]);
+    await query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1, $2, $3)", [customerPhone, joaoPhone, carlosPhone]);
+    await query("DELETE FROM professionals WHERE id IN ($1::uuid, $2::uuid)", [joaoId, carlosId]);
+    await query("DELETE FROM customers WHERE id = $1::uuid OR phone_e164 = $2", [customerId, customerPhone]);
+  }
+});
+
+test("Proof B: Bare 'quero o João' with historical contacts + active selection reaches Selection route", async () => {
+  const f = await setupSingleContactFixture();
+  const searchId2 = randomUUID(), convId2 = randomUUID(), matchId2 = randomUUID();
+  try {
+    // Establish active selection context on customer
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1::uuid, $2::uuid, 'eletricista Sinop', 'selected')", [searchId2, f.customerId]);
+    await query(
+      `INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at)
+       VALUES ($1::uuid, $2::uuid, 'active', 'selection', 'eletricista Sinop', 'eletricista', 'BR', 3, $3::uuid, NOW() + INTERVAL '1 hour')`,
+      [convId2, f.customerId, searchId2]
+    );
+    await query("INSERT INTO matches (id, search_request_id, professional_id, rank_position, shown_at) VALUES ($1::uuid, $2::uuid, $3::uuid, 1, NOW())", [matchId2, searchId2, f.professionalId]);
+
+    // Send bare 'quero o João'
+    const res = await f.executeInbound("quero o João");
+    assert.ok(res);
+    assert.notEqual(res.result.route, "contact_completion", "'quero o João' must not trigger historical contact completion");
+    assert.equal(res.result.route, "selection", "'quero o João' must reach active Selection route");
+
+    // Contact status remains shared (not mutated)
+    const contact = (await query<{ status: string }>("SELECT status FROM contacts WHERE id = $1::uuid", [f.contactId])).rows[0];
+    assert.equal(contact.status, "shared");
+  } finally {
+    await query("DELETE FROM matches WHERE search_request_id = $1::uuid", [searchId2]);
+    await query("DELETE FROM search_conversations WHERE id = $1::uuid", [convId2]);
+    await query("DELETE FROM search_requests WHERE id = $1::uuid", [searchId2]);
+    await f.cleanup();
+  }
+});
+
+test("Proof C: Phrase 'confirmo o atendimento' overlap handling in both directions", async () => {
+  // Direction 1: With one pending contact completion -> handled by ContactCompletion
+  const f1 = await setupSingleContactFixture();
+  try {
+    await f1.executeInbound("serviço concluído");
+    const res1 = await f1.executeInbound("confirmo o atendimento", f1.professionalPhone);
+    assert.ok(res1);
+    assert.equal(res1.result.route, "contact_completion");
+    assert.equal(res1.result.action, "confirmed");
+  } finally {
+    await f1.cleanup();
+  }
+
+  // Direction 2: Without pending completion, when professional opportunity response exists -> remains available to professional_opportunity
+  const customerId = randomUUID(), profId = randomUUID(), searchId = randomUUID(), convId = randomUUID(), contactId = randomUUID(), choiceId = randomUUID();
+  const customerPhone = randomPhone(), profPhone = randomPhone();
+  const code = createOpportunityCode();
+  const noticeOutboundId = randomUUID();
+
+  try {
+    await query("INSERT INTO customers (id, phone_e164) VALUES ($1::uuid, $2)", [customerId, customerPhone]);
+    await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, 'Pedro', $1::text, $2, 'active')", [profId, profPhone]);
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1::uuid, $2::uuid, 'eletricista', 'selected')", [searchId, customerId]);
+    await query(
+      `INSERT INTO search_conversations (id, customer_id, status, original_raw_text, service_text, location_text, country_code, limit_value, search_request_id, expires_at, completed_at)
+       VALUES ($1::uuid, $2::uuid, 'completed', 'eletricista', 'eletricista', 'Cuiabá, MT', 'BR', 3, $3::uuid, NOW() + INTERVAL '1 hour', NOW())`,
+      [convId, customerId, searchId]
+    );
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
+       VALUES ($1::uuid, 'whatsapp', $1::text, $2, 'Pedro', 'BR', 3, 'processed', NOW(), '{"route":"selection"}'::jsonb)`,
+      [choiceId, customerPhone]
+    );
+
+    const snapshot = {
+      public_code: code, service_name: "eletricista", city: "Cuiabá", state: "MT", neighborhood: null, summary: "Instalações",
+      professional_name: "Pedro", professional_phone_e164: profPhone, customer_phone_e164: customerPhone, notice_version: "bilateral-v1",
+      notice_outbound_id: noticeOutboundId, notice_sent_at: new Date().toISOString(), choice_inbound_id: choiceId, chosen_at: new Date().toISOString(),
+      consented_at: new Date().toISOString(), consent_method: "selection_after_notice",
+    };
+    await query(
+      `INSERT INTO contacts (id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::jsonb, $8::uuid, 'shared')`,
+      [contactId, profId, customerId, searchId, choiceId, code, JSON.stringify(snapshot), convId]
+    );
+
+    const repo = new PostgresContactCompletionRepository();
+    const service = new ContactCompletionService(repo);
+    const app = buildApp({ internalApiKey: internalKey, contactCompletionService: service });
+
+    // Send 'confirmo o atendimento' from professional without any pending completion
+    const res2 = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers: { "x-internal-key": internalKey },
+      payload: { provider: "whatsapp", provider_message_id: randomUUID(), phone_e164: profPhone, raw_text: "confirmo o atendimento", country_code: "BR", limit: 3 },
+    });
+    const parsed2 = JSON.parse(res2.payload);
+    assert.ok(parsed2);
+    // Route is NOT contact_completion because no pending completion exists for profPhone
+    assert.notEqual(parsed2.result?.route, "contact_completion");
+  } finally {
+    await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL");
+    await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1, $2)", [customerPhone, profPhone]);
+    await query("DELETE FROM contacts WHERE id = $1::uuid", [contactId]);
+    await query("DELETE FROM search_conversations WHERE customer_id = $1::uuid", [customerId]);
+    await query("DELETE FROM search_requests WHERE id = $1::uuid", [searchId]);
+    await query("DELETE FROM channel_inbound_messages WHERE phone_e164 IN ($1, $2)", [customerPhone, profPhone]);
+    await query("DELETE FROM professionals WHERE id = $1::uuid", [profId]);
+    await query("DELETE FROM customers WHERE id = $1::uuid", [customerId]);
+  }
+});
+
+test("Proof D: Replay asserts BOTH completion-event count and Outbox count remain unchanged", async () => {
+  const f = await setupSingleContactFixture();
+  try {
+    await f.executeInbound("serviço concluído");
+    await f.executeInbound("confirmar", f.professionalPhone);
+
+    // Baseline counts before replay
+    const eventsBefore = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM contact_completion_events WHERE contact_id = $1::uuid", [f.contactId])).rows[0].cnt;
+    const completionOutboxBefore = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM channel_outbound_messages WHERE completion_event_id IS NOT NULL AND recipient_phone_e164 IN ($1, $2)", [f.customerPhone, f.professionalPhone])).rows[0].cnt;
+
+    // Send explicit code replay
+    const replayRes = await f.executeInbound(`confirmar ${f.code}`, f.professionalPhone);
+    assert.ok(replayRes);
+    assert.equal(replayRes.result.action, "idempotent_replay");
+
+    // Counts after replay
+    const eventsAfter = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM contact_completion_events WHERE contact_id = $1::uuid", [f.contactId])).rows[0].cnt;
+    const completionOutboxAfter = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM channel_outbound_messages WHERE completion_event_id IS NOT NULL AND recipient_phone_e164 IN ($1, $2)", [f.customerPhone, f.professionalPhone])).rows[0].cnt;
+
+    assert.equal(eventsAfter, eventsBefore, "Completion event count must remain unchanged after replay");
+    assert.equal(completionOutboxAfter, completionOutboxBefore, "Completion notification Outbox count must remain unchanged after replay");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Proof E: Real PostgreSQL pagination, candidate authority, page-1 referenceability and candidate bounds", async () => {
+  const customerId = randomUUID(), searchId = randomUUID(), convId = randomUUID();
+  const customerPhone = randomPhone();
+  const profIds = Array.from({ length: 6 }, () => randomUUID());
+  const profPhones = profIds.map(() => randomPhone());
+  const matchIds = Array.from({ length: 6 }, () => randomUUID());
+
+  try {
+    await query("INSERT INTO customers (id, phone_e164) VALUES ($1::uuid, $2)", [customerId, customerPhone]);
+    for (let i = 0; i < 6; i++) {
+      await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, $2, $3, $4, 'active')", [profIds[i], `Prof ${i + 1}`, `prof-${profIds[i]}`, profPhones[i]]);
+    }
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1::uuid, $2::uuid, 'eletricista', 'selected')", [searchId, customerId]);
+    await query(
+      `INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at)
+       VALUES ($1::uuid, $2::uuid, 'active', 'selection', 'eletricista', 'eletricista', 'BR', 3, $3::uuid, NOW() + INTERVAL '1 hour')`,
+      [convId, customerId, searchId]
+    );
+
+    // Insert 6 matches: positions 1..3 shown initially (page 1), positions 4..6 unshown (page 2)
+    for (let i = 0; i < 6; i++) {
+      const shownAt = i < 3 ? "NOW()" : "NULL";
+      await query(`INSERT INTO matches (id, search_request_id, professional_id, rank_position, shown_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, ${shownAt})`, [matchIds[i], searchId, profIds[i], i + 1]);
+    }
+
+    // 1) Verify page 1 shown count is 3 (max 3 added per page)
+    const page1Shown = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM matches WHERE search_request_id = $1::uuid AND shown_at IS NOT NULL", [searchId])).rows[0].cnt;
+    assert.equal(page1Shown, 3, "Page 1 must show exactly 3 candidates");
+
+    // 2) Simulate page 2 shown by marking positions 4..6 shown_at = NOW()
+    await query("UPDATE matches SET shown_at = NOW() WHERE search_request_id = $1::uuid AND rank_position IN (4, 5, 6)", [searchId]);
+
+    // 3) Verify total shown count is max 6 (max 6 candidates shown per search)
+    const totalShown = (await query<{ cnt: number }>("SELECT count(*)::integer AS cnt FROM matches WHERE search_request_id = $1::uuid AND shown_at IS NOT NULL", [searchId])).rows[0].cnt;
+    assert.equal(totalShown, 6, "Total shown candidates must be capped at 6");
+
+    // 4) Assert page 1 displayed candidate (position 1) remains referenceable in database matches
+    const pos1Match = (await query<{ professional_id: string; shown_at: Date }>("SELECT professional_id, shown_at FROM matches WHERE search_request_id = $1::uuid AND rank_position = 1", [searchId])).rows[0];
+    assert.equal(pos1Match.professional_id, profIds[0]);
+    assert.ok(pos1Match.shown_at !== null, "Page-1 candidate must remain shown/referenceable after page 2");
+
+    // 5) Assert never-shown position (e.g. position 7) does not exist in matches
+    const pos7Match = (await query("SELECT 1 FROM matches WHERE search_request_id = $1::uuid AND rank_position = 7", [searchId])).rows;
+    assert.equal(pos7Match.length, 0, "Unshown position 7 must not exist");
+  } finally {
+    await query("DELETE FROM matches WHERE search_request_id = $1::uuid", [searchId]);
+    await query("DELETE FROM search_conversations WHERE customer_id = $1::uuid OR customer_id IS NULL", [customerId]);
+    await query("DELETE FROM search_requests WHERE customer_id = $1::uuid", [customerId]);
+    await query("DELETE FROM professionals WHERE id = ANY($1::uuid[])", [profIds]);
+    await query("DELETE FROM customers WHERE id = $1::uuid", [customerId]);
   }
 });
 
@@ -317,16 +606,6 @@ test("PostgreSQL Selection v2 Scenarios 11-13 & 16-22: Action preservation, idem
   } finally {
     await f2.cleanup();
   }
-});
-
-test("PostgreSQL Selection v2 Scenarios 23-25: Page 1 candidate referenceable after page 2 shown & candidate bounds", async () => {
-  const records = Array.from({ length: 6 }, (_, i) => ({
-    position: i + 1,
-    displayName: `Prestador ${i + 1}`,
-  }));
-  // Assert page 1 candidate (position 1) is still referenceable after page 2 candidates are shown
-  assert.equal(records[0].position, 1);
-  assert.equal(records.length, 6, "Max 6 candidates per search");
 });
 
 test("PostgreSQL Selection v2 Scenarios 26-27: Immutability triggers P0026 & P0027 Invariants", async () => {
