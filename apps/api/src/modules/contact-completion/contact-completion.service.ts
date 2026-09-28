@@ -37,19 +37,31 @@ export class ContactCompletionService {
     return this.transaction(async (db) => {
       // If no explicit command parsed, check if this sender is replying to a persisted disambiguation prompt
       if (!command) {
-        const lastClarification = this.repository.findLastClarificationByPhone
+        const lastClarification = this.repository.findLastClarification
+          ? await this.repository.findLastClarification(db, record.provider, record.phoneE164)
+          : this.repository.findLastClarificationByPhone
           ? await this.repository.findLastClarificationByPhone(db, record.phoneE164)
           : null;
         if (lastClarification?.options && lastClarification.requested_action) {
           const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-          if (normalizedRaw && !record.rawText.includes("?")) {
+          const hasNegationOrQuestion = /[?\u00bf]/u.test(record.rawText)
+            || /\b(?:nao|nem|nunca|jamais|cancelar|cancelamento|recuso|recusar|recusado|parar|sair)\b/u.test(normalizedRaw);
+          if (normalizedRaw && !hasNegationOrQuestion) {
             const matched = lastClarification.options.filter((opt) => {
-              const profFirstName = opt.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().split(" ")[0] ?? "";
-              const serviceName = opt.service_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-              const codeLower = opt.public_code.toLowerCase();
-              return (profFirstName.length >= 2 && normalizedRaw.includes(profFirstName))
-                || (serviceName.length >= 2 && normalizedRaw.includes(serviceName))
-                || normalizedRaw.includes(codeLower);
+              const code = opt.public_code.toLowerCase();
+              const fullName = opt.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+              const firstName = fullName.split(" ")[0] ?? "";
+              const service = opt.service_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+
+              if (normalizedRaw === code) return true;
+
+              const allowedPrefixes = ["", "o ", "a ", "com ", "com o ", "com a ", "foi ", "foi o ", "foi a ", "do ", "da ", "servico ", "servico de "];
+              for (const prefix of allowedPrefixes) {
+                if (firstName && normalizedRaw === prefix + firstName) return true;
+                if (fullName && normalizedRaw === prefix + fullName) return true;
+                if (service && normalizedRaw === prefix + service) return true;
+              }
+              return false;
             });
             if (matched.length === 1) {
               command = {

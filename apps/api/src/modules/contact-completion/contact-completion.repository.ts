@@ -61,21 +61,36 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
     }));
   }
 
+  async findLastClarification(db: DatabaseClient, provider: string, phoneE164: string): Promise<ContactCompletionMessage | null> {
+    const res = await db.query<{ result: unknown }>(
+      `SELECT result
+       FROM channel_inbound_messages
+       WHERE provider = $1 AND phone_e164 = $2 AND status = 'processed'
+         AND result->>'route' = 'contact_completion'
+         AND result->>'action' = 'clarification'
+         AND result->>'clarification_kind' = 'contact_disambiguation'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [provider, phoneE164]
+    );
+    if (!res.rows[0]?.result) return null;
+    return res.rows[0].result as ContactCompletionMessage;
+  }
+
   async findLastClarificationByPhone(db: DatabaseClient, phoneE164: string): Promise<ContactCompletionMessage | null> {
     const res = await db.query<{ result: unknown }>(
       `SELECT result
        FROM channel_inbound_messages
        WHERE phone_e164 = $1 AND status = 'processed'
+         AND result->>'route' = 'contact_completion'
+         AND result->>'action' = 'clarification'
+         AND result->>'clarification_kind' = 'contact_disambiguation'
        ORDER BY created_at DESC
        LIMIT 1`,
       [phoneE164]
     );
     if (!res.rows[0]?.result) return null;
-    const msg = res.rows[0].result as ContactCompletionMessage;
-    if (msg && msg.route === "contact_completion" && msg.action === "clarification" && msg.clarification_kind === "contact_disambiguation") {
-      return msg;
-    }
-    return null;
+    return res.rows[0].result as ContactCompletionMessage;
   }
 
   async findContactByPublicCode(db: DatabaseClient, code: string): Promise<ContactRow | null> {

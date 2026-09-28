@@ -16,7 +16,7 @@ const GLOBAL_COMMANDS: ReadonlyMap<string, GlobalConversationCommand["kind"]> = 
   ["nao entendi", "help"],
 ]);
 
-const SHOW_MORE_COMMANDS = new Set([
+export const SHOW_MORE_COMMANDS = new Set([
   "mais",
   "mais opcoes",
   "ver mais",

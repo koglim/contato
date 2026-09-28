@@ -23,6 +23,24 @@ export type SelectionInquiryType =
   | "unshown"
   | "other";
 
+export function sanitizePublicCandidateText(text: string | null | undefined, maxLen = 160): string {
+  if (!text) return "";
+  const cleaned = text
+    .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/giu, "")
+    .replace(/https?:\/\/\S+/giu, "")
+    .replace(/www\.\S+/giu, "")
+    .replace(/\+?\d[\d\s().-]{7,}\d/gu, "")
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return cleaned.slice(0, maxLen).trim();
+}
+
+export function sanitizePublicCandidateName(name: string): string {
+  const sanitized = sanitizePublicCandidateText(name, 80);
+  return sanitized || "Profissional";
+}
+
 function formatDistance(meters: number | null): string {
   if (meters === null) return "distância não informada";
   if (meters >= 1000) {
@@ -46,12 +64,18 @@ function formatPrice(fact: CandidateInquiryFact): string {
 
 export function presentSelectionInquiry(
   type: SelectionInquiryType,
-  candidates: CandidateInquiryFact[],
+  rawCandidates: CandidateInquiryFact[],
   targetPositions: number[] = [],
 ): string {
-  if (type === "unshown" || candidates.length === 0) {
+  if (type === "unshown" || rawCandidates.length === 0) {
     return "Esse prestador não está entre as opções apresentadas para a sua busca atual.";
   }
+
+  const candidates = rawCandidates.map((c) => ({
+    ...c,
+    displayName: sanitizePublicCandidateName(c.displayName),
+    summary: c.summary ? sanitizePublicCandidateText(c.summary, 160) || null : null,
+  }));
 
   const targets = targetPositions.length > 0
     ? candidates.filter((c) => targetPositions.includes(c.position))

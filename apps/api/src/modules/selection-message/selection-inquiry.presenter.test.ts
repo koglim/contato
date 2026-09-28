@@ -78,3 +78,40 @@ test("presents unshown professional message gracefully", () => {
   const result = presentSelectionInquiry("unshown", sampleCandidates, []);
   assert.match(result, /Esse prestador não está entre as opções apresentadas/);
 });
+
+test("presenter sanitizes display name and summary containing phone, email, URL, www URL, UUID and prompt text", () => {
+  const maliciousCandidates: CandidateInquiryFact[] = [
+    {
+      position: 1,
+      displayName: "João +55 66 99999-9999 joao@example.com https://evil.com www.phish.com 12345678-1234-1234-1234-123456789abc",
+      distanceMeters: 3200,
+      priceMode: "fixed",
+      priceFromCents: 15000,
+      priceToCents: null,
+      isVerified: true,
+      availability: "now",
+      summary: "Chame no +5566988888888 / joao@dev.com / http://dev.com / www.site.com 00000000-0000-0000-0000-000000000000",
+      serviceName: "Eletricista",
+    },
+  ];
+
+  const detailsResult = presentSelectionInquiry("details", maliciousCandidates, [1]);
+  assert.doesNotMatch(detailsResult, /\+55/);
+  assert.doesNotMatch(detailsResult, /joao@/);
+  assert.doesNotMatch(detailsResult, /https?:/);
+  assert.doesNotMatch(detailsResult, /www\./);
+  assert.doesNotMatch(detailsResult, /[0-9a-f]{8}-[0-9a-f]{4}/i);
+  // Facts remain intact
+  assert.match(detailsResult, /3,2 km/);
+  assert.match(detailsResult, /R\$ 150,00/);
+  assert.match(detailsResult, /Profissional verificado/);
+
+  const bestResult = presentSelectionInquiry("best_recommendation", maliciousCandidates, []);
+  assert.doesNotMatch(bestResult, /\+55/);
+  assert.doesNotMatch(bestResult, /joao@/);
+  assert.doesNotMatch(bestResult, /https?:/);
+  assert.doesNotMatch(bestResult, /www\./);
+  assert.doesNotMatch(bestResult, /[0-9a-f]{8}-[0-9a-f]{4}/i);
+  assert.match(bestResult, /3,2 km/);
+  assert.match(bestResult, /R\$ 150,00/);
+});
