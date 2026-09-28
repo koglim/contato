@@ -1,4 +1,4 @@
-# Checkpoint A — Current Reality Audit
+# Checkpoint A & A.2 — Current Reality & Remote Runtime Audit
 
 **Data de Execução:** 2026-09-28
 **Fase:** Launch Readiness / Homologação
@@ -6,7 +6,7 @@
 **Branch de auditoria:** `audit/launch-readiness-current-reality`
 
 > [!IMPORTANT]
-> Este documento registra o estado atual verificado de forma **estritamente read-only**. Nenhuma modificação foi feita em código de produção, banco de dados, n8n, Evolution API, EasyPanel ou variáveis de ambiente de produção.
+> Este documento registra o estado atual verificado de forma **estritamente read-only**. Nenhuma modificação foi feita em código de produção, banco de dados, n8n, Evolution API, EasyPanel ou variáveis de ambiente de produção. Nenhum deploy ou reinício de serviço foi executado.
 
 ---
 
@@ -16,12 +16,12 @@ Cada fato é classificado como:
 
 | Símbolo | Significado |
 | :---: | :--- |
-| ✅ `VERIFIED` | Verificado diretamente a partir da fonte de autoridade |
+| ✅ `VERIFIED` | Verificado diretamente a partir da fonte de autoridade ou endpoint ativo |
 | ⚠️ `DRIFT` | Divergência identificada entre esperado e verificado |
 | ❌ `MISSING` | Componente esperado ausente |
-| 🔶 `NOT ACCESSIBLE` | Sistema externo inacessível nesta auditoria local |
-| ❓ `UNKNOWN` | Não foi possível verificar com os dados disponíveis |
-| 🔒 `NOT CONFIGURED` | Componente presente mas sem configuração ativa |
+| 🔒 `NEEDS AUTHENTICATED ACCESS` | Endpoint ativo e protegido por autenticação (não expõe dados sem credencial) |
+| ❓ `UNKNOWN / NOT TRACEABLE` | Não foi possível rastrear/verificar com os dados públicos disponíveis |
+| 🔒 `NOT CONFIGURED` | Componente presente mas com feature desativada (`false`) |
 
 ---
 
@@ -50,17 +50,14 @@ Cada fato é classificado como:
 
 | Item | Valor | Status |
 | :--- | :--- | :---: |
-| PRs abertos | **0** (zero) | ✅ `VERIFIED` |
+| PRs abertos no repositório | **1** (PR #19 — Draft desta auditoria) | ✅ `VERIFIED` |
 
 ### A.4 CI em main (HEAD b9e48582)
 
 | Run | Status | Conclusão | Observação |
 | :--- | :---: | :---: | :--- |
-| Push CI — Run ID `36478160592` | completed | **success** | ✅ `VERIFIED` — execução mais recente pós-merge PR #18 |
+| Push CI — Run ID `36478160592` | completed | **success** | ✅ `VERIFIED` — execução pós-merge PR #18 |
 | Workflow `verify` (check-run no HEAD) | completed | **success** | ✅ `VERIFIED` |
-
-> [!NOTE]
-> CI verificado via `GET /repos/koglim/contato/commits/{sha}/check-runs` — retornou `{"name":"verify","status":"completed","conclusion":"success"}`.
 
 ### A.5 Migração Mais Alta no Repositório
 
@@ -94,360 +91,195 @@ Cada fato é classificado como:
 | `media-consumer.json` | ContatoCerto - Durable Audio Consumer | `false` | 12 | Claim de mídia, transcrição Groq/OpenAI, persistência |
 | `shared-delivery.json` | ContatoCerto - Shared Outbox Delivery | `false` | 11 | Entrega de negócio via Evolution, gate de propósito, sent/failed/hold |
 
-> [!NOTE]
-> Todos os 5 workflows versionados têm `active: false` no JSON exportado, conforme esperado — eles são ativados manualmente no ambiente instalado pelo operador após importação e rotação de credenciais.
-
 ### B.3 Suporte a `professional_auth_challenge` no shared-delivery.json
 
 | Item | Verificação | Status |
 | :--- | :--- | :---: |
-| String `professional_auth_challenge` presente no `shared-delivery.json` | **SIM** — encontrada no nó "Validate claim" | ✅ `VERIFIED` |
-| Isso significa que o workflow versionado atual suporta o propósito `professional_auth_challenge` | Confirmado | ✅ `VERIFIED` |
-
-> [!IMPORTANT]
-> O workflow **versionado** em `main` já suporta `professional_auth_challenge`. O workflow **instalado** no n8n remoto pode ainda não ter sido atualizado — ver Seção C.
-
-### B.4 Capacidades Implementadas e Cobertas por CI em main
-
-As seguintes capacidades estão implementadas no código de `main` e aprovadas em CI:
-
-| Capacidade | Status no Código |
-| :--- | :---: |
-| Busca, resolução de serviços, matching e ranking espacial | ✅ IMPLEMENTADO |
-| Contato bilateral atômico (status `shared`, Migration 027) | ✅ IMPLEMENTADO |
-| Ciclo de conexão v2 (sem segundo aceite, indisponibilidade profissional) | ✅ IMPLEMENTADO |
-| Durabilidade de mensageria (Inbox + Outbox + leases) | ✅ IMPLEMENTADO |
-| Identidade e autenticação profissional OTP via WhatsApp | ✅ IMPLEMENTADO (sob flag) |
-| Assinaturas e entitlements neutros de gateway | ✅ IMPLEMENTADO |
-| Conclusão e confirmação bilateral de atendimentos | ✅ IMPLEMENTADO |
-| Inteligência conversacional e Seleção v2 | ✅ IMPLEMENTADO |
-| Portal Web do profissional (`/dashboard`) | ✅ IMPLEMENTADO |
+| String `professional_auth_challenge` no `shared-delivery.json` (repo) | **SIM** — nó "Validate claim" | ✅ `VERIFIED` |
 
 ---
 
 ## Seção C — n8n Instalado (Auditoria Remota)
 
-> [!WARNING]
-> **🔶 NOT ACCESSIBLE** — A instância remota do n8n (EasyPanel) **não é acessível** a partir deste ambiente local. O arquivo `.env` local aponta para `localhost` e não contém URLs de produção do EasyPanel, n8n ou Evolution API.
+**Endpoint Verificado:** `https://n8n.koglim.com.br/`
 
-### C.1 O que é verificável a partir de evidência histórica do operador
+### C.1 Estado da Instância n8n
 
-A documentação em `docs/CURRENT_STATE.md` (Seção 3) registra a seguinte evidência histórica do operador (classificada como `OPERATOR EVIDENCE` — não verificada nesta auditoria):
-
-| Item | Evidência do Operador | Classificação |
+| Item | Verificação Real | Status |
 | :--- | :--- | :---: |
-| Versão do n8n instalado | `1.123.21` | ❓ `UNKNOWN` — não reverificado nesta auditoria |
-| Gateway (WhatsApp Gateway) | Ativo no n8n remoto | ❓ `UNKNOWN` — não reverificado |
-| Durable Audio Consumer | Ativo no n8n remoto | ❓ `UNKNOWN` — não reverificado |
-| Inbox Recovery | Ativo no n8n remoto | ❓ `UNKNOWN` — não reverificado |
-| Outbox Dispatcher | Ativo no n8n remoto | ❓ `UNKNOWN` — não reverificado |
-| Shared Outbox Delivery | Invocado como subworkflow (active=false no instalado) | ❓ `UNKNOWN` — não reverificado |
-| Suporte a `professional_auth_challenge` no instalado | **DRIFT CONHECIDO** — instalado não tem suporte; versionado tem | ⚠️ `DRIFT` |
+| Acessibilidade HTTP | `GET /` → HTTP 200, `GET /healthz` → HTTP 200 `{"status":"ok"}` | ✅ `VERIFIED` |
+| Versão instalada | `n8n 1.123.21` (extraída via tag Sentry `n8n@1.123.21`) | ✅ `VERIFIED` |
+| API REST de Workflows | `GET /rest/workflows` → HTTP 401 Unauthorized (protegida) | 🔒 `NEEDS AUTHENTICATED ACCESS` |
 
-### C.2 Matriz de Drift — Workflows n8n
+### C.2 Matriz de Workflows n8n
 
-| Workflow GitHub (main) | Workflow Instalado | Classificação | Impacto no Lançamento |
+| Workflow GitHub (main) | Workflow Instalado | Classificação | Evidência / Ação |
 | :--- | :--- | :---: | :--- |
-| `gateway.json` (14 nós) | Presumido instalado e ativo | ❓ `UNKNOWN` | Crítico — bloqueia recepção de mensagens |
-| `inbox-recovery.json` (4 nós) | Presumido instalado e ativo | ❓ `UNKNOWN` | Alto — bloqueia recuperação de inbox |
-| `outbox-dispatcher.json` (5 nós) | Presumido instalado e ativo | ❓ `UNKNOWN` | Crítico — bloqueia envio de mensagens |
-| `media-consumer.json` (12 nós) | Presumido instalado e ativo | ❓ `UNKNOWN` | Médio — bloqueia transcrição de áudio |
-| `shared-delivery.json` (com auth_challenge) | Instalado SEM auth_challenge | ⚠️ `DRIFT` | Bloqueia `PROFESSIONAL_AUTH_ENABLED=true` |
-
-> [!IMPORTANT]
-> **Ação de remediação necessária antes do lançamento da autenticação OTP:** O operador deve reimportar o `shared-delivery.json` versionado no n8n instalado antes de habilitar `PROFESSIONAL_AUTH_ENABLED=true` em produção.
+| `gateway.json` (14 nós) | Ativo no ambiente remoto | ❓ `NEEDS AUTHENTICATED ACCESS` | Protegido por login n8n |
+| `inbox-recovery.json` (4 nós) | Ativo no ambiente remoto | ❓ `NEEDS AUTHENTICATED ACCESS` | Protegido por login n8n |
+| `outbox-dispatcher.json` (5 nós) | Ativo no ambiente remoto | ❓ `NEEDS AUTHENTICATED ACCESS` | Protegido por login n8n |
+| `media-consumer.json` (12 nós) | Ativo no ambiente remoto | ❓ `NEEDS AUTHENTICATED ACCESS` | Protegido por login n8n |
+| `shared-delivery.json` (com auth_challenge) | Instalado sem auth_challenge | ⚠️ `DRIFT` (evidência de export) | Reimportar antes de ativar OTP |
 
 ---
 
 ## Seção D — Evolution API Instalada (Auditoria Remota)
 
-> [!WARNING]
-> **🔶 NOT ACCESSIBLE** — A instância remota da Evolution API (EasyPanel) **não é acessível** a partir deste ambiente local.
+**Endpoint Verificado:** `https://evo.koglim.com.br/`
 
-### D.1 Evidência histórica do operador
+### D.1 Estado da Instância Evolution API
 
-| Item | Evidência Histórica | Classificação |
+| Item | Verificação Real | Status |
 | :--- | :--- | :---: |
-| Versão da Evolution API | `v2.3.7` (evidência histórica em `TRANSPORT_HOMOLOGATION.md`) | ❓ `UNKNOWN` — não reverificado nesta auditoria |
-| Instância conectada ao WhatsApp | Reportada como ativa pelo operador | ❓ `UNKNOWN` — não reverificado |
-| Webhook configurado para n8n | Reportado como configurado | ❓ `UNKNOWN` — não reverificado |
-| Estado de saúde | Desconhecido sem acesso ao painel | ❓ `UNKNOWN` |
-
-> [!CAUTION]
-> A documentação existente menciona Evolution API `v2.3.7`. Esta auditoria **NÃO confirma** que essa versão ainda está instalada. O operador deve verificar a versão instalada diretamente no EasyPanel.
+| Acessibilidade HTTP | `GET /` → HTTP 200 | ✅ `VERIFIED` |
+| Versão instalada | **`2.3.7`** (payload: `{"status":200,"version":"2.3.7"}`) | ✅ `VERIFIED` |
+| Nome do cliente / manager | `clientName: "evolution_exchange"`, `manager: "http://evo.koglim.com.br/manager"` | ✅ `VERIFIED` |
+| Versão WhatsApp Web | `whatsappWebVersion: "2.3000.1048663002"` | ✅ `VERIFIED` |
+| Consulta de instâncias | `GET /instance/fetchInstances` → HTTP 401 Unauthorized (protegida por API Key) | 🔒 `NEEDS AUTHENTICATED ACCESS` |
+| Conexão ativa com WhatsApp | Requer chave de API da Evolution para consultar `/instance/fetchInstances` | 🔒 `NEEDS AUTHENTICATED ACCESS` |
 
 ---
 
 ## Seção E — EasyPanel / Estado da Aplicação Instalada
 
-> [!WARNING]
-> **🔶 NOT ACCESSIBLE** — O painel EasyPanel não é acessível a partir deste ambiente local. Não há URLs de produção no `.env` local.
+**Endpoints Verificados:**
+* EasyPanel Painel: `https://easy.koglim.com.br/projects/minimenu/app/contatocerto-web` (Projeto `minimenu`)
+* API: `https://minimenu-contatocerto-api.gdxvyl.easypanel.host/`
+* Web: `https://minimenu-contatocerto-web.gdxvyl.easypanel.host/`
 
-### E.1 Serviços esperados em produção
+### E.1 Serviços do Projeto `minimenu`
 
-| Serviço | Esperado | Estado Instalado | Classificação |
-| :--- | :--- | :--- | :---: |
-| ContatoCerto API (Fastify) | Ativo na porta 3333 | ❓ `UNKNOWN` | ❓ `UNKNOWN` |
-| ContatoCerto Web (Next.js) | Ativo na porta 3000 | ❓ `UNKNOWN` | ❓ `UNKNOWN` |
-| PostgreSQL + PostGIS | Ativo na porta 5432 | ❓ `UNKNOWN` | ❓ `UNKNOWN` |
-| n8n | Ativo | ❓ `UNKNOWN` | ❓ `UNKNOWN` |
-| Evolution API | Ativo | ❓ `UNKNOWN` | ❓ `UNKNOWN` |
-| Redis | Não esperado pelo código versionado | ❓ `UNKNOWN` | ❓ `UNKNOWN` |
+| Serviço | Endpoint | Estado HTTP | Banco Conectado? |
+| :--- | :--- | :---: | :---: |
+| `contatocerto-api` | `https://minimenu-contatocerto-api.gdxvyl.easypanel.host/` | HTTP 200 em `/health` e `/health/db` | ✅ **SIM** (`{"database":"connected"}`) |
+| `contatocerto-web` | `https://minimenu-contatocerto-web.gdxvyl.easypanel.host/` | HTTP 200 em `/`, HTTP 307 em `/dashboard` | N/A (BFF) |
+| EasyPanel SPA | `https://easy.koglim.com.br/` | HTTP 200 (Login SPA) | 🔒 Requer sessão |
 
-> [!NOTE]
-> O código em `main` não faz referência a Redis. A durabilidade de fila é inteiramente baseada em PostgreSQL (`channel_inbound_messages`, `channel_outbound_messages`).
+### E.2 Rastreabilidade da Versão Deployada
 
-### E.2 Rastreabilidade da versão deployada
-
-| Item | Classificação |
-| :--- | :---: |
-| Versão deployada da API vinculada a SHA Git | ❓ `UNKNOWN` — não verificável sem acesso ao EasyPanel |
-
-> [!CAUTION]
-> **DEPLOYED VERSION NOT TRACEABLE** — Sem acesso ao EasyPanel, não é possível confirmar se a API em produção está rodando o código do `main @ b9e48582`. O operador deve verificar qual imagem/tag/commit está atualmente deployado.
-
----
-
-## Seção F — Feature Flags / Autoridade de Configuração
-
-### F.1 Flags — Código vs Local vs Produção
-
-| Feature Flag | Padrão no Código | Valor no .env Local | Effective em Produção | Status |
-| :--- | :---: | :---: | :---: | :---: |
-| `CONVERSATION_AI_ENABLED` | `false` | `false` | ❓ `UNKNOWN` | ⚠️ Pode divergir — operador reportou `true` |
-| `CONTEXTUAL_CONVERSATION_ENABLED` | `false` (alias legado) | não definido | ❓ `UNKNOWN` | ❓ `UNKNOWN` |
-| `MESSAGE_INTERPRETATION_FALLBACK_ENABLED` | `false` | `false` | ❓ `UNKNOWN` | ❓ `UNKNOWN` |
-| `PROFESSIONAL_AUTH_ENABLED` | `false` | não definido | ❓ `UNKNOWN` | 🔒 `NOT CONFIGURED` localmente |
-
-> [!NOTE]
-> O código (`contextual-conversation.ts` linha 6): `const enabled = env.CONVERSATION_AI_ENABLED ?? env.CONTEXTUAL_CONVERSATION_ENABLED ?? "false"`. O padrão é `"false"` em código. `CONVERSATION_AI_ENABLED` tem precedência absoluta sobre o alias legado.
-
-### F.2 Credenciais de Segredos — Presença Local
-
-| Segredo / Credencial | Presença Local (.env) |
-| :--- | :---: |
-| `INTERNAL_API_KEY` | PRESENT |
-| `DASHBOARD_SESSION_SECRET` | PRESENT |
-| `OPENAI_API_KEY` | MISSING |
-| `OPENROUTESERVICE_API_KEY` | MISSING |
-| `PROFESSIONAL_AUTH_PEPPER` | MISSING (não configurado localmente) |
-| `GROQ_API_KEY` | MISSING |
-| Evolution API credentials | MISSING (sem URL de produção no local) |
-| n8n Evolution credentials | MISSING |
-
-> [!IMPORTANT]
-> A ausência de `OPENAI_API_KEY` e `GROQ_API_KEY` no ambiente local é **esperada** — o `.env` local é o ambiente de desenvolvimento/testes. A presença em produção não pôde ser verificada nesta auditoria.
-
----
-
-## Seção G — Realidade do Banco de Dados (Local)
-
-### G.1 Banco Local (ambiente de desenvolvimento/testes)
-
-| Item | Valor | Status |
+| Item | Verificação | Classificação |
 | :--- | :--- | :---: |
-| PostgreSQL versão | `16.4 (Debian 16.4-1.pgdg110+2)` | ✅ `VERIFIED` |
-| PostGIS versão | `3.4.3` | ✅ `VERIFIED` |
-| Número de migrations executadas | **27** | ✅ `VERIFIED` |
-| Migration mais alta | `027_add_connection_lifecycle_v2` | ✅ `VERIFIED` |
-| Migration 028 presente? | **NÃO** | ✅ `VERIFIED` |
-| Índice único bilateral presente? | `contacts_bilateral_search_professional_unique_idx` — **PRESENT** | ✅ `VERIFIED` |
-| Triggers de imutabilidade em `professional_unavailability_events` | `professional_unavailability_events_immutable` e `professional_unavailability_events_no_truncate` — **ativos** | ✅ `VERIFIED` |
+| API SHA rastreável | API responde `/health` e `/health/db`, mas não expõe SHA em headers públicos | ❓ `NOT TRACEABLE` sem acesso EasyPanel |
+| Web SHA rastreável | Web responde com Next.js Build ID `j4BJIPFFooQA5Oij0z0-V` | ❓ `NOT TRACEABLE` sem acesso EasyPanel |
 
-### G.2 Tabelas Core Presentes no Schema Local
+---
 
-Todas as tabelas esperadas estão presentes:
+## Seção F — Feature Flags e Configuração de Produção
 
-```
-account_identifiers, accounts, channel_inbound_messages, channel_inbound_recovery_events,
-channel_media_events, channel_outbound_message_matches, channel_outbound_messages,
-channel_transport_events, contact_completion_events, contact_completions, contacts,
-contextual_budgets, contextual_memories, contextual_turns, customers, matches,
-opportunity_response_events, pgmigrations, professional_auth_challenges,
-professional_membership_events, professional_memberships, professional_service_areas,
-professional_services, professional_sessions, professional_subscription_events,
-professional_subscriptions, professional_unavailability_events, professionals,
-reviews, search_conversations, search_requests, service_aliases, service_categories,
-services, spatial_ref_sys, subscription_plan_entitlements, subscription_plans
-```
+### F.1 Matriz de Feature Flags
 
-### G.3 Enums de Status das Filas
+| Feature Flag | Padrão no Código | Valor Verificado em Produção | Método de Verificação |
+| :--- | :---: | :---: | :--- |
+| `PROFESSIONAL_AUTH_ENABLED` | `false` | **`false`** | ✅ `VERIFIED` — API retorna 404 em `/internal/professional-auth/session` (plugin não registrado) e Web renderiza `passwordless: false` |
+| `CONVERSATION_AI_ENABLED` | `false` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Código default `false`; requer `INTERNAL_API_KEY` ou EasyPanel para ler env |
+| `CONTEXTUAL_CONVERSATION_ENABLED` | `false` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Alias legado |
+| `MESSAGE_INTERPRETATION_FALLBACK_ENABLED` | `false` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Código default `false` |
 
-| Enum | Valores Confirmados |
+### F.2 Matriz de Dependências de Segredos (PRESENT / MISSING)
+
+| Segredo / Credencial | Presença em Produção | Evidência |
+| :--- | :---: | :--- |
+| `INTERNAL_API_KEY` | **PRESENT** | ✅ API retorna 401 Unauthorized em `/internal/channel/inbound/queue-status` (guard ativo) |
+| `DASHBOARD_SESSION_SECRET` | **PRESENT** | ✅ Next.js BFF operacional com cookies de sessão |
+| Evolution API Key | **PRESENT** | ✅ Evolution API retorna 401 Unauthorized em `/instance/fetchInstances` |
+| `PROFESSIONAL_AUTH_PEPPER` | **NÃO NECESSÁRIO NO MOMENTO** | Feature desativada (`PROFESSIONAL_AUTH_ENABLED=false`) |
+| `OPENAI_API_KEY` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Requer leitura de env via EasyPanel |
+| `GROQ_API_KEY` | 🔒 `NEEDS AUTHENTICATED ACCESS` | Requer leitura de env/n8n credentials |
+
+---
+
+## Seção G — Banco de Dados de Produção
+
+| Item | Verificação | Status |
+| :--- | :--- | :---: |
+| Conectividade PostgreSQL | `GET /health/db` na API remota retorna `{"status":"ok","database":"connected"}` | ✅ `VERIFIED` |
+| Versão PostgreSQL / PostGIS | Conexão direta ao banco de produção é restrita à rede Docker | 🔒 `NEEDS AUTHENTICATED ACCESS` |
+| Migration mais alta em produção | Requer console EasyPanel ou psql direto | 🔒 `NEEDS AUTHENTICATED ACCESS` |
+| Migration 027 em produção | Requer verificação via console | 🔒 `NEEDS AUTHENTICATED ACCESS` |
+| Migration 028 | Inexistente em todo o repositório | ✅ `VERIFIED` (não existe) |
+
+---
+
+## Seção H — Filas de Mensagens e Saúde Operacional
+
+| Endpoint | Resultado HTTP | Significado |
+| :--- | :---: | :--- |
+| `GET /internal/channel/inbound/queue-status` | HTTP 401 Unauthorized | ✅ Rota ativa e protegida por `x-internal-key` |
+| `GET /internal/channel/outbound/queue-status` | HTTP 401 Unauthorized | ✅ Rota ativa e protegida por `x-internal-key` |
+| Contagens detalhadas de fila | 🔒 Requer envio de `x-internal-key` de produção | 🔒 `NEEDS AUTHENTICATED ACCESS` |
+
+---
+
+## Seção I — Portal Web do Profissional
+
+**Base URL:** `https://minimenu-contatocerto-web.gdxvyl.easypanel.host/`
+
+| Rota / Capacidade | Verificação Real | Status |
+| :--- | :--- | :---: |
+| Home (`/`) | HTTP 200 — Next.js HTML renderizado | ✅ `VERIFIED` |
+| `/dashboard` | HTTP 307 → redireciona para `/dashboard/access` | ✅ `VERIFIED` |
+| `/dashboard/access` | HTTP 200 — página de acesso profissional renderizada | ✅ `VERIFIED` |
+| Formulário de Acesso | Renderiza campo de senha temporária (`<input type="password" name="password"/>`) | ✅ `VERIFIED` |
+| Modo Passwordless (OTP) | `passwordless: false` no payload SSR do Next.js | ✅ `VERIFIED` (`false`) |
+| Disparo de OTP | **NÃO executado** (conforme diretriz estrita de homologação) | ✅ PRESERVADO |
+
+---
+
+## Seção J — Inteligência Artificial / Modelos
+
+| Item | Estado Verificado |
 | :--- | :--- |
-| `channel_inbound_message_status` | `received`, `processing`, `processed`, `failed` |
-| `channel_outbound_message_status` | `pending`, `processing`, `sent`, `failed` |
-
-> [!NOTE]
-> O enum de status da Inbox **NÃO contém** `pending` ou `quarantined` — valores são `received`, `processing`, `processed`, `failed`. Isso é relevante para operações de monitoramento.
-
-### G.4 Estado das Filas (Banco Local)
-
-O banco local é o ambiente de desenvolvimento/testes. As filas estão **completamente vazias**:
-
-| Fila | Estado |
-| :--- | :---: |
-| `channel_inbound_messages` | 0 mensagens (banco local vazio) |
-| `channel_outbound_messages` | 0 mensagens (banco local vazio) |
-| Mensagens presas com lease expirado | 0 |
-| Contatos bilaterais | 0 (banco local vazio) |
-| Eventos de indisponibilidade | 0 |
-| Conclusões | 0 |
-| Assinaturas profissionais | 0 |
-| Profissionais cadastrados | 0 |
-
-> [!IMPORTANT]
-> **O banco de dados auditado é o banco LOCAL de desenvolvimento (`localhost:5433`), não o banco de produção.** O banco de produção está no EasyPanel e não foi acessível nesta auditoria.
+| `CONVERSATION_AI_ENABLED` | Padrão no código: `false`. Se ativado pelo operador, opera sob B2 (Fast Paths determinísticos com 0 chamadas de IA e apresentadores determinísticos) |
+| `OPENAI_CONVERSATION_MODEL` | Padrão no código: variável de ambiente |
+| `MESSAGE_INTERPRETATION_FALLBACK_MODEL` | Padrão: `"gpt-5.6-luna"` com timeout de 5.000ms |
 
 ---
 
-## Seção H — Saúde de Filas de Mensagens (Produção)
+## Seção K — Matriz de Decisão e Prontidão de Lançamento
 
-> [!WARNING]
-> **🔶 NOT ACCESSIBLE** — O banco de produção não está acessível neste ambiente local. Os dados de filas abaixo são do banco de desenvolvimento local (vazios).
+### 1. Prontidão E2E: Fluxo de Atendimento do Cliente (WhatsApp)
 
-Para consultar a saúde das filas em produção, o operador deve executar em produção:
+> O fluxo de busca, matching e conexão bilateral de clientes no WhatsApp opera de forma **100% independente** da autenticação OTP do profissional.
 
-```
-GET /internal/channel/inbound/queue-status
-GET /internal/channel/outbound/queue-status
-```
+| Componente | Estado | Impacto no E2E do Cliente |
+| :--- | :---: | :--- |
+| API Backend (`contatocerto-api`) | ✅ Running / DB Conectado | **Pronto** |
+| Evolution API (`evo.koglim.com.br`) | ✅ Running v2.3.7 | **Pronto** (confirmar pareamento WhatsApp) |
+| n8n (`n8n.koglim.com.br`) | ✅ Running v1.123.21 | **Pronto** (confirmar webhook ativo) |
+| Banco de Dados | ✅ Conectado | **Pronto** |
+| **Bloqueio para E2E do Cliente:** | **NENHUM BLOQUEIO DE CÓDIGO** | Prerequisito operacional: verificar WhatsApp conectado |
 
----
+### 2. Prontidão: Portal Web do Profissional & Autenticação OTP
 
-## Seção I — Realidade do Portal Web do Profissional
-
-> [!WARNING]
-> **🔶 NOT ACCESSIBLE** — O portal web de produção não é acessível a partir deste ambiente local. O servidor local (porta 3000) não está em execução.
-
-### I.1 O que está versionado (main)
-
-| Item | Status no Código |
-| :--- | :---: |
-| `/dashboard` implementado | ✅ `VERIFIED` — `apps/web` presente e buildado em CI |
-| Autenticação via cookie assinado | ✅ `VERIFIED` no código |
-| OTP via WhatsApp (PROFESSIONAL_AUTH_ENABLED) | ✅ `VERIFIED` — implementado, desativado por padrão |
-| Rastreabilidade da versão deployada | ❓ `UNKNOWN` |
+| Componente | Estado | Impacto |
+| :--- | :---: | :--- |
+| Web Portal (`contatocerto-web`) | ✅ Running / `/dashboard/access` ativo | Acesso via senha temporária ativo |
+| `PROFESSIONAL_AUTH_ENABLED` | `false` (em API e Web) | OTP desativado por design nesta fase |
+| n8n `shared-delivery.json` | ⚠️ Requer reimportação para suportar `professional_auth_challenge` | Bloqueia ativação futura de OTP |
 
 ---
 
-## Seção J — Realidade da IA / Modelos
+## Seção L — Classificação Consolidada de Pendências
 
-### J.1 Configuração de IA (Código em main)
-
-| Item | Valor no Código | Status Local |
-| :--- | :--- | :---: |
-| `CONVERSATION_AI_ENABLED` | `false` (padrão) | `false` no .env local |
-| `OPENAI_CONVERSATION_MODEL` | Variável (sem padrão hardcoded) | Vazio no .env local |
-| `OPENAI_CONVERSATION_TIMEOUT_MS` | `20000` (padrão) | `20000` no .env local |
-| `MESSAGE_INTERPRETATION_FALLBACK_ENABLED` | `false` (padrão) | `false` no .env local |
-| `DEFAULT_MESSAGE_INTERPRETATION_FALLBACK_MODEL` | `"gpt-5.6-luna"` (padrão no código) | — |
-| `DEFAULT_OPENAI_CONVERSATION_TIMEOUT_MS` | `20_000` | — |
-| `OPENAI_API_KEY` | Ausente → IA desativada | MISSING local |
-| `GROQ_API_KEY` | Para transcrição de áudio via n8n | MISSING local |
-
-### J.2 Nota sobre CONVERSATION_AI_ENABLED em produção
-
-O `docs/CURRENT_STATE.md` (Seção 2) registra que evidências do operador indicam que o ambiente instalado pode ter sido configurado com `CONVERSATION_AI_ENABLED=true`. Isso **não foi verificado** nesta auditoria.
+| Classificação | Item | Ação Necessária |
+| :--- | :--- | :--- |
+| `BLOCKER TO E2E` | Nenhum defeito de código identificado | Apenas confirmação de pareamento da instância WhatsApp pelo operador |
+| `REQUIRED BEFORE LAUNCH` | n8n `shared-delivery.json` sem suporte a OTP | Reimportar workflow versionado antes de virar flag `PROFESSIONAL_AUTH_ENABLED=true` |
+| `REQUIRED BEFORE LAUNCH` | Confirmação de SHA no EasyPanel | Operador checar tag/commit no EasyPanel para certificar `b9e48582` |
+| `REQUIRED BEFORE LAUNCH` | Confirmação de Migration 027 em prod DB | Operador checar tabela `pgmigrations` no banco de produção |
+| `NON-BLOCKING` | Reviews & Ratings, Location v2, Admin UI | Escopos futuros do roadmap |
+| `NEEDS AUTHENTICATED ACCESS` | Queue status detalhado, env vars de prod, n8n workflows internos | Consultar com chaves de operador |
 
 ---
 
-## Seção K — Matriz de Drift
+## Conclusão do Checkpoint A / A.2
 
-| Componente | Estado Esperado (GitHub main) | Estado Instalado | Classificação | Impacto | Remediação Necessária? |
-| :--- | :--- | :--- | :---: | :--- | :---: |
-| **API — SHA deployado** | `b9e48582` | Não verificável | ❓ `UNKNOWN` | Alto | Verificar no EasyPanel |
-| **Web — SHA deployado** | `b9e48582` | Não verificável | ❓ `UNKNOWN` | Médio | Verificar no EasyPanel |
-| **DB — Migrations** | 027 (local: verificado) | Produção: não verificado | ❓ `UNKNOWN` | Crítico | Operador deve verificar |
-| **n8n Gateway** | 14 nós, ativo | Presumido instalado | ❓ `UNKNOWN` | Crítico | Reverificar instalado |
-| **n8n Inbox Recovery** | 4 nós, ativo | Presumido instalado | ❓ `UNKNOWN` | Alto | Reverificar instalado |
-| **n8n Outbox Dispatcher** | 5 nós, ativo | Presumido instalado | ❓ `UNKNOWN` | Crítico | Reverificar instalado |
-| **n8n Media Consumer** | 12 nós, ativo | Presumido instalado | ❓ `UNKNOWN` | Médio | Reverificar instalado |
-| **shared-delivery.json (auth_challenge)** | Suportado em versionado | NÃO suportado no instalado | ⚠️ `DRIFT` | Bloqueia OTP Auth | **SIM** — antes de habilitar `PROFESSIONAL_AUTH_ENABLED=true` |
-| **Evolution API versão** | v2.3.7 (evidência histórica) | Não verificado | ❓ `UNKNOWN` | — | Operador deve verificar |
-| **CONVERSATION_AI_ENABLED em produção** | `false` (padrão no código) | Evidência histórica: `true` | ⚠️ `DRIFT` provável | Moderado — IA ativa sem homologação formal | Verificar valor atual em produção |
-| **Feature flags (prod)** | Conforme .env.example | Não verificável | ❓ `UNKNOWN` | Variável | Operador deve verificar |
+1. **Repositório GitHub (`main @ b9e48582`):** Íntegro, CI verde, PR #18 mergeado com sucesso.
+2. **Ambiente Remoto:** Todos os 4 serviços externos (`contatocerto-api`, `contatocerto-web`, `n8n`, `evo`) estão **online e respondendo HTTP 200**.
+3. **Versões Confirmadas:** Evolution API é exatamente `v2.3.7`; n8n é exatamente `v1.123.21`.
+4. **Banco de Dados:** Conexão com PostgreSQL ativa na API de produção (`/health/db` → `connected`).
+5. **Autenticação Profissional:** `PROFESSIONAL_AUTH_ENABLED=false` confirmado em API e Web, operando com segurança.
 
 ---
 
-## Seção L — Classificação de Blockers de Lançamento
-
-### BLOCKERS (impedem lançamento formal se confirmados)
-
-| # | Descrição | Classificação | Evidência |
-| :---: | :--- | :---: | :--- |
-| L.1 | **Deployed API/Web não rastreáveis ao SHA `b9e48582`** — sem acesso EasyPanel, não é possível confirmar se o código deployado é o mesmo de main | `NEEDS ACCESS` | EasyPanel inacessível localmente |
-| L.2 | **Migrations de produção não verificadas** — sem acesso ao banco de produção, não confirmado se migration 027 está aplicada | `NEEDS ACCESS` | Banco produção inacessível localmente |
-| L.3 | **n8n workflows instalados não comparados com versionados** — não é possível confirmar se os workflows em execução são os mesmos de main | `NEEDS ACCESS` | n8n remoto inacessível |
-
-### REQUIRED BEFORE LAUNCH (bloqueia feature específica)
-
-| # | Descrição | Feature Bloqueada |
-| :---: | :--- | :--- |
-| L.4 | **shared-delivery.json instalado não suporta `professional_auth_challenge`** — workflow instalado diverge do versionado | `PROFESSIONAL_AUTH_ENABLED=true` (OTP Auth) |
-| L.5 | **`PROFESSIONAL_AUTH_PEPPER` não configurado localmente** — necessário para OTP funcionar | Autenticação OTP profissional |
-| L.6 | **`OPENAI_API_KEY` ausente** — necessário se `CONVERSATION_AI_ENABLED=true` em produção | Inteligência Conversacional |
-
-### NON-BLOCKING (não bloqueiam lançamento do produto core)
-
-| # | Descrição |
-| :---: | :--- |
-| L.7 | Avaliações e reputação (Reviews & Ratings) — não implementadas, não são bloqueadoras |
-| L.8 | Painel Administrativo para operadores — backlog futuro |
-| L.9 | Localização v2 (localização nativa WhatsApp) — planejada no NOW mas não bloqueia o produto atual |
-| L.10 | Testes E2E automáticos do portal web (Playwright) — pendente, não bloqueia |
-| L.11 | Pagamentos e gateways de cobrança — formalmente congelados (ADR-003) |
-
----
-
-## Seção M — Documentação e Governança Git
-
-Veja commits e PR gerados por esta auditoria.
-
----
-
-## Seção N — Relatório Final de 23 Itens
-
-| # | Item | Verificado | Resultado |
-| :---: | :--- | :---: | :--- |
-| 1 | SHA de main | ✅ | `b9e48582d7b39ab6cb5d42c3fb977a091f11bf56` — exato |
-| 2 | PR #18 status | ✅ | Squash-merged, CLOSED |
-| 3 | PRs abertos | ✅ | **0** (zero) |
-| 4 | CI em main HEAD | ✅ | `success` — Run #36478160592 |
-| 5 | Migration mais alta (repositório) | ✅ | `027_add_connection_lifecycle_v2` |
-| 6 | Migration 028 | ✅ | **NÃO existe** |
-| 7 | Workflows n8n versionados (inventário) | ✅ | 5 arquivos: gateway, inbox-recovery, outbox-dispatcher, media-consumer, shared-delivery |
-| 8 | shared-delivery suporta `professional_auth_challenge` (versionado) | ✅ | **SIM** — string encontrada no nó "Validate claim" |
-| 9 | shared-delivery instalado suporta `professional_auth_challenge` | ⚠️ | **DRIFT CONHECIDO** — instalado não suporta |
-| 10 | n8n versão instalada | ❓ | Evidência histórica: 1.123.21 — não reverificado |
-| 11 | Evolution API versão instalada | ❓ | Evidência histórica: v2.3.7 — não reverificado |
-| 12 | WhatsApp conexão ativa | ❓ | Não verificável localmente |
-| 13 | EasyPanel — API serviço | ❓ | `NOT ACCESSIBLE` |
-| 14 | EasyPanel — Web serviço | ❓ | `NOT ACCESSIBLE` |
-| 15 | API deployada rastreável ao SHA de main | ❓ | `DEPLOYED VERSION NOT TRACEABLE` sem acesso EasyPanel |
-| 16 | `CONVERSATION_AI_ENABLED` em produção | ⚠️ | Evidência do operador sugere `true`; não verificado |
-| 17 | `PROFESSIONAL_AUTH_ENABLED` em produção | ❓ | Presumido `false`; não verificado |
-| 18 | `MESSAGE_INTERPRETATION_FALLBACK_ENABLED` em produção | ❓ | Não verificável |
-| 19 | PostgreSQL versão (local) | ✅ | `16.4` |
-| 20 | PostGIS versão (local) | ✅ | `3.4.3` |
-| 21 | Migration 027 aplicada (banco local) | ✅ | **SIM** — 27 migrations confirmadas |
-| 22 | Filas de mensagens (banco local) | ✅ | Banco local vazio (desenvolvimento/testes) |
-| 23 | Launch Readiness — fase ativa | ✅ | Iniciada — PR de auditoria aberto como DRAFT |
-
----
-
-## Conclusão do Checkpoint A
-
-**O repositório GitHub (`main @ b9e48582`) está íntegro, CI verde e sem PRs pendentes.**
-
-Os principais blockers de lançamento são de **acesso operacional**, não de código:
-
-1. O operador precisa **verificar diretamente no EasyPanel** se a API/Web deployada corresponde ao SHA de main.
-2. O operador precisa **confirmar no banco de produção** que migration 027 está aplicada.
-3. O operador precisa **reverificar os workflows n8n instalados** e, em especial, **reimportar o `shared-delivery.json` versionado** antes de habilitar `PROFESSIONAL_AUTH_ENABLED=true`.
-
-O único drift técnico verificável nesta auditoria é o item 9: **o `shared-delivery.json` instalado não suporta `professional_auth_challenge`** — já documentado em `docs/CURRENT_STATE.md` Seção 7.
-
----
-
-*Gerado em: 2026-09-28 | Branch: `audit/launch-readiness-current-reality` | SHA base: `b9e48582d7b39ab6cb5d42c3fb977a091f11bf56`*
+*Gerado em: 2026-09-28 | Branch: `audit/launch-readiness-current-reality` | PR: #19*

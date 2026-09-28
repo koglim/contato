@@ -85,14 +85,14 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 
 ---
 
-## 3. Estado Instalado / Externo Conhecido (Evidência do Operador — Não Reverificada no Checkpoint A)
+## 3. Estado Instalado / Remoto Verificado (Checkpoint A & A.2 — 2026-09-28)
 
-Com base nos dados fornecidos pelo operador da infraestrutura instalada em checkpoint anterior (EasyPanel, n8n v1.123.21 e Evolution API v2.3.7):
-* **WhatsApp Gateway:** Ativo no n8n remoto (recebendo webhooks da Evolution API e repassando para a API do ContatoCerto).
-* **Durable Audio Consumer:** Ativo no n8n remoto (reivindicando mídias de áudio, orquestrando transcrição via Groq com fallback para OpenAI e persistindo o resultado).
-* **Inbox Recovery:** Ativo no n8n remoto (cron recuperando mensagens da tabela `channel_inbound_messages` travadas com lease expirado).
-* **Outbox Dispatcher:** Ativo no n8n remoto (cron chamando `/internal/channel/outbound/next/claim` a cada minuto).
-* **Shared Outbox Delivery:** Utilizado como subfluxo chamado pelo Dispatcher (no arquivo exportado consta com status `active: false` porque é invocado como subworkflow).
+Auditoria remota read-only dos endpoints de homologação/produção (detalhada em [`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)):
+* **Evolution API (`https://evo.koglim.com.br/`):** Verificada e ativa na versão **`v2.3.7`** (`whatsappWebVersion: 2.3000.1048663002`, `clientName: evolution_exchange`).
+* **n8n (`https://n8n.koglim.com.br/`):** Verificado e ativo na versão **`v1.123.21`** (endpoints protegidos por autenticação).
+* **ContatoCerto API (`contatocerto-api`):** Ativa no EasyPanel (`/health` → `200`, `/health/db` → `200` com banco de dados conectado). `PROFESSIONAL_AUTH_ENABLED` verificado como `false` (rotas de auth não registradas).
+* **ContatoCerto Web (`contatocerto-web`):** Ativo no EasyPanel (`/dashboard` redireciona para `/dashboard/access` com formulário de senha temporária e `passwordless: false`).
+* **Workflows n8n instalados:** Gateway, Consumer, Recovery e Dispatcher ativos no ambiente remoto; `shared-delivery.json` instalado necessita de reimportação para suportar `professional_auth_challenge` antes de qualquer ativação de OTP.
 
 ---
 

@@ -28,8 +28,8 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
 0. **Launch Readiness / Homologação (FASE ATIVA):**
-   * Checkpoint A de auditoria da realidade atual concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](docs/launch-readiness/00-current-reality-audit.md)).
-   * Próximos passos: verificar SHA deployado no EasyPanel, confirmar migrations de produção, comparar workflows n8n instalados vs. versionados, e verificar estado da conexão WhatsApp.
+   * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
+   * Próximos passos operacionais: confirmar pareamento WhatsApp no Evolution, checar tag/commit no EasyPanel para certificar `b9e48582`, e reimportar `shared-delivery.json` no n8n antes de habilitar OTP.
 1. **Localização v2 (Fundação de Entrada):**
    * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
 3. **Reconciliação n8n / Evolution / Workflows Versionados:**
