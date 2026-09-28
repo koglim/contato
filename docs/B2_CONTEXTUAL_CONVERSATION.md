@@ -33,7 +33,7 @@ texto a 320 caracteres e rejeita telefone, e-mail, link, preço, disponibilidade
 Texto de resposta rejeitada é substituído por texto determinístico. Confiança baixa não altera memória nem
 inicia busca sem uma evidência de domínio suficiente.
 
-Em PR #18 (Selection Intelligence v2), a interpretação aceita `inquire_candidate`, `compare_candidates` e `show_more` quando a conversa aguarda seleção (`pending="selection"`). Apenas os candidatos apresentados da página ativa (`shownCandidates`, até 3 profissionais) entram no contexto do modelo com atributos não PII. Perguntas sobre candidatos nunca efetuam a seleção nem mutam o domínio (ADR-002) e são respondidas exclusivamente via `SelectionInquiryPresenter` ou fast path determinístico (distância/preço) com 0 chamadas de composição. Comandos de conclusão sem código ("já terminei", "confirmo") são resolvidos deterministicamente para 1 contato elegível único.
+Em PR #18 (Selection Intelligence v2), a interpretação aceita `inquire_candidate`, `compare_candidates` e `show_more` quando a conversa aguarda seleção (`pending="selection"`). Apenas os candidatos apresentados da busca ativa (`shownCandidates`, até 6 profissionais exibidos) entram no contexto do modelo com atributos não PII. Perguntas sobre candidatos nunca efetuam a seleção nem mutam o domínio (ADR-002) e são respondidas exclusivamente via `SelectionInquiryPresenter` ou fast path determinístico (distância/preço) com 0 chamadas de composição. Comandos de conclusão sem código ("já terminei", "confirmo") são resolvidos deterministicamente para 1 contato elegível único.
 
 Na orquestração adaptativa v1, o controlador separa `speech_act`, evidência de
 serviço, localização e ação seguinte. Um match de catálogo `exact`/`phrase` é

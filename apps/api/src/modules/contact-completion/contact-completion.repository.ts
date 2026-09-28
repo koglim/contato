@@ -15,9 +15,8 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
     const res = await db.query<ContactRow>(
       `SELECT c.id, c.customer_id, c.professional_id, c.search_request_id, c.selection_conversation_id, c.public_code, c.status, c.bilateral_snapshot
        FROM contacts c
-       JOIN customers cust ON cust.id = c.customer_id
-       JOIN professionals prof ON prof.id = c.professional_id
-       WHERE (cust.phone_e164 = $1 OR prof.phone_e164 = $1)
+       WHERE c.bilateral_snapshot IS NOT NULL
+         AND (c.bilateral_snapshot->>'customer_phone_e164' = $1 OR c.bilateral_snapshot->>'professional_phone_e164' = $1)
          AND c.status IN ('shared', 'accepted')
        ORDER BY c.created_at DESC`,
       [phoneE164]
@@ -31,9 +30,8 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
               cc.id AS completion_id, cc.state, cc.declared_by, cc.declared_at, cc.confirmed_at, cc.contested_at, cc.created_at AS completion_created_at, cc.updated_at AS completion_updated_at
        FROM contacts c
        JOIN contact_completions cc ON cc.contact_id = c.id
-       JOIN customers cust ON cust.id = c.customer_id
-       JOIN professionals prof ON prof.id = c.professional_id
-       WHERE (cust.phone_e164 = $1 OR prof.phone_e164 = $1)
+       WHERE c.bilateral_snapshot IS NOT NULL
+         AND (c.bilateral_snapshot->>'customer_phone_e164' = $1 OR c.bilateral_snapshot->>'professional_phone_e164' = $1)
          AND cc.state = 'pending_confirmation'
        ORDER BY cc.created_at DESC`,
       [phoneE164]
@@ -61,6 +59,23 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
         updated_at: row.completion_updated_at,
       },
     }));
+  }
+
+  async findLastClarificationByPhone(db: DatabaseClient, phoneE164: string): Promise<ContactCompletionMessage | null> {
+    const res = await db.query<{ result: unknown }>(
+      `SELECT result
+       FROM channel_inbound_messages
+       WHERE phone_e164 = $1 AND status = 'processed'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [phoneE164]
+    );
+    if (!res.rows[0]?.result) return null;
+    const msg = res.rows[0].result as ContactCompletionMessage;
+    if (msg && msg.route === "contact_completion" && msg.action === "clarification" && msg.clarification_kind === "contact_disambiguation") {
+      return msg;
+    }
+    return null;
   }
 
   async findContactByPublicCode(db: DatabaseClient, code: string): Promise<ContactRow | null> {

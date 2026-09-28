@@ -35,23 +35,27 @@ export class ContactCompletionService {
     let command = parseContactCompletionCommand(record.rawText);
 
     return this.transaction(async (db) => {
-      // If no explicit command parsed, check if this is a reference response (e.g. "com o João") for an active multi-contact completion
+      // If no explicit command parsed, check if this sender is replying to a persisted disambiguation prompt
       if (!command) {
-        const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-        if (normalizedRaw && !record.rawText.includes("?")) {
-          const eligible = await this.repository.findEligibleContactsByPhone(db, record.phoneE164);
-          if (eligible.length > 1) {
-            const matched = eligible.filter((c) => {
-              const snap = bilateralSnapshotSchema.safeParse(c.bilateral_snapshot);
-              if (!snap.success) return false;
-              const profName = snap.data.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-              const profFirstName = profName.split(" ")[0] ?? "";
-              const serviceName = snap.data.service_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+        const lastClarification = this.repository.findLastClarificationByPhone
+          ? await this.repository.findLastClarificationByPhone(db, record.phoneE164)
+          : null;
+        if (lastClarification?.options && lastClarification.requested_action) {
+          const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+          if (normalizedRaw && !record.rawText.includes("?")) {
+            const matched = lastClarification.options.filter((opt) => {
+              const profFirstName = opt.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().split(" ")[0] ?? "";
+              const serviceName = opt.service_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+              const codeLower = opt.public_code.toLowerCase();
               return (profFirstName.length >= 2 && normalizedRaw.includes(profFirstName))
-                || (serviceName.length >= 2 && normalizedRaw.includes(serviceName));
+                || (serviceName.length >= 2 && normalizedRaw.includes(serviceName))
+                || normalizedRaw.includes(codeLower);
             });
             if (matched.length === 1) {
-              command = { kind: "declare", code: matched[0]!.public_code };
+              command = {
+                kind: lastClarification.requested_action,
+                code: matched[0]!.public_code,
+              };
             }
           }
         }
@@ -110,26 +114,21 @@ export class ContactCompletionService {
         if (pendingCompletions.length === 1) {
           targetContactId = pendingCompletions[0]!.contact.id;
         } else if (pendingCompletions.length > 1) {
-          const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-          const matched = pendingCompletions.filter((item) => {
+          const optionsList = pendingCompletions.map((item) => {
             const snap = bilateralSnapshotSchema.safeParse(item.contact.bilateral_snapshot);
-            if (!snap.success) return false;
-            const profFirstName = snap.data.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().split(" ")[0] ?? "";
-            return profFirstName.length >= 2 && normalizedRaw.includes(profFirstName);
+            return {
+              public_code: item.contact.public_code,
+              professional_name: snap.success ? snap.data.professional_name.split(" ")[0] ?? snap.data.professional_name : item.contact.public_code,
+              service_name: snap.success ? snap.data.service_name : "Serviço",
+            };
           });
-          if (matched.length === 1) {
-            targetContactId = matched[0]!.contact.id;
-          } else {
-            const options = pendingCompletions.map((item) => {
-              const snap = bilateralSnapshotSchema.safeParse(item.contact.bilateral_snapshot);
-              return snap.success ? `${snap.data.professional_name} (${snap.data.service_name})` : item.contact.public_code;
-            }).join(" e ");
-            return this.finishUnavailable(
-              db,
-              record,
-              `Você possui confirmações pendentes para ${options}. Por favor, informe com qual prestador deseja ${command.kind === "confirm" ? "confirmar" : "contestar"}.`
-            );
-          }
+          const textOptions = optionsList.map(o => `${o.professional_name} (${o.service_name})`).join(" e ");
+          const replyText = `Você possui confirmações pendentes para ${textOptions}. Por favor, informe com qual prestador deseja ${command.kind === "confirm" ? "confirmar" : "contestar"}.`;
+          return this.finishClarification(db, record, {
+            replyText,
+            requestedAction: command.kind,
+            options: optionsList,
+          });
         } else {
           // No pending completion found for a code-free confirm/contest
           return null;
@@ -146,29 +145,21 @@ export class ContactCompletionService {
         if (eligible.length === 1) {
           targetContactId = eligible[0]!.id;
         } else {
-          const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-          const matched = eligible.filter((c) => {
+          const optionsList = eligible.map((c) => {
             const snap = bilateralSnapshotSchema.safeParse(c.bilateral_snapshot);
-            if (!snap.success) return false;
-            const profName = snap.data.professional_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-            const profFirstName = profName.split(" ")[0] ?? "";
-            const serviceName = snap.data.service_name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-            return (profFirstName.length >= 2 && normalizedRaw.includes(profFirstName))
-              || (serviceName.length >= 2 && normalizedRaw.includes(serviceName));
+            return {
+              public_code: c.public_code,
+              professional_name: snap.success ? snap.data.professional_name.split(" ")[0] ?? snap.data.professional_name : c.public_code,
+              service_name: snap.success ? snap.data.service_name : "Serviço",
+            };
           });
-          if (matched.length === 1) {
-            targetContactId = matched[0]!.id;
-          } else {
-            const options = eligible.map((c) => {
-              const snap = bilateralSnapshotSchema.safeParse(c.bilateral_snapshot);
-              return snap.success ? `${snap.data.professional_name} (${snap.data.service_name})` : c.public_code;
-            }).join(" e ");
-            return this.finishUnavailable(
-              db,
-              record,
-              `Você possui solicitações em andamento com ${options}. Por favor, informe o nome do prestador ou o código da solicitação que deseja concluir.`
-            );
-          }
+          const textOptions = optionsList.map(o => `${o.professional_name} (${o.service_name})`).join(" e ");
+          const replyText = `Você possui solicitações em andamento com ${textOptions}. Por favor, informe o nome do prestador ou o código da solicitação que deseja concluir.`;
+          return this.finishClarification(db, record, {
+            replyText,
+            requestedAction: "declare",
+            options: optionsList,
+          });
         }
       }
 
@@ -517,6 +508,47 @@ export class ContactCompletionService {
       }
 
       return null;
+    });
+  }
+
+  private async finishClarification(
+    db: DatabaseClient,
+    record: ChannelInboundMessageRecord,
+    params: {
+      replyText: string;
+      requestedAction: "declare" | "confirm" | "contest";
+      options: Array<{ public_code: string; professional_name: string; service_name: string }>;
+    }
+  ): Promise<ChannelInboundMessageResponse> {
+    const outboundId = await this.repository.insertOutboundReply(db, {
+      inboundId: record.id,
+      purpose: "customer_reply",
+      provider: record.provider,
+      recipientPhoneE164: record.phoneE164,
+      textContent: params.replyText,
+    });
+
+    const result: ContactCompletionMessage = {
+      route: "contact_completion",
+      action: "clarification",
+      clarification_kind: "contact_disambiguation",
+      requested_action: params.requestedAction,
+      options: params.options,
+      reply_text: params.replyText,
+    };
+
+    await this.repository.markInboundProcessed(db, {
+      inboundId: record.id,
+      result,
+      responseOutboundId: outboundId,
+    });
+
+    return channelInboundMessageResponseSchema.parse({
+      message_id: record.id,
+      duplicate: false,
+      reply_text: params.replyText,
+      outbound: { id: outboundId, status: "pending" },
+      result,
     });
   }
 

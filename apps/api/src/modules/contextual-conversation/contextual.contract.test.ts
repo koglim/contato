@@ -6,7 +6,7 @@ import { controlContextualProposal, contextualInterpretationSchema, contextualPr
 import { readContextualConfig } from "../../config/contextual-conversation.js";
 
 const catalog = [{ key: "encanador", name: "Encanador", description: null }];
-const proposal = (overrides: Partial<ContextualProposal> = {}): ContextualProposal => ({ intent: "search", services: [], location: null, uncertain: false, ...overrides });
+const proposal = (overrides: Partial<ContextualProposal> = {}): ContextualProposal => ({ intent: "search", services: [], location: null, target_candidates: null, inquiry_type: null, uncertain: false, ...overrides });
 const run = (text: string, value: unknown, explicit: string | null = null) => controlContextualProposal(text, randomUUID(), value, emptyMemory(), catalog, explicit);
 
 test("B2 confirms explicit catalog service and literal city independently", () => {
@@ -145,7 +145,7 @@ test("B2 disabled by default and requires explicit configuration", () => {
 
 test("conversation AI schema is strict and controller only uses safe non-transactional replies", () => {
   const greeting = {
-    intent: "greeting", speech_act: "information", services: [], location: null, uncertain: false,
+    intent: "greeting", speech_act: "information", services: [], location: null, target_candidates: null, inquiry_type: null, uncertain: false,
     natural_reply: "Bom dia! Como posso ajudar você hoje?", confidence: "high",
   };
   assert.ok(contextualInterpretationSchema.safeParse(greeting).success);

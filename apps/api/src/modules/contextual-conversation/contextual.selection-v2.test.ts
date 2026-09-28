@@ -112,3 +112,41 @@ test("Selection v2 Security: prompt injection in user message cannot mutate sele
   assert.equal(decision.kind, "selection_inquiry");
   assert.notEqual(decision.kind, "delegate");
 });
+
+test("Selection v2 Candidate Context Sanitizer: removes PII and caps at 6 shown candidates", async () => {
+  const { buildSafeCandidateContext } = await import("./contextual.service.js");
+  const rawRecords = Array.from({ length: 10 }, (_, i) => ({
+    matchId: `00000000-0000-0000-0000-00000000000${i}`,
+    searchRequestId: "11111111-1111-1111-1111-111111111111",
+    professionalId: `22222222-2222-2222-2222-22222222220${i}`,
+    rankPosition: i + 1,
+    shownAt: new Date(),
+    selectedAt: null,
+    displayName: `João ${i + 1} email@example.com +55 66 99999-9999 https://phish.com 00000000-0000-0000-0000-000000000000`,
+    phoneE164: "+5566999999999",
+    slug: `joao-${i + 1}`,
+    profileImageUrl: null,
+    isVerified: i % 2 === 0,
+    serviceName: "Eletricista",
+    serviceDescription: `Descrição com whatsapp +5566988888888 e uuid 12345678-1234-1234-1234-123456789abc`,
+    priceMode: "fixed" as const,
+    priceFromCents: 10000 + i * 1000,
+    priceToCents: null,
+    distanceMeters: 1500 + i * 500,
+    effectiveAvailableNow: i === 0,
+  }));
+
+  const safe = buildSafeCandidateContext(rawRecords);
+
+  assert.equal(safe.length, 6, "Must slice to max 6 candidates");
+  assert.equal(safe[0].position, 1);
+  assert.equal(safe[0].distance_km, 1.5);
+  assert.equal(safe[0].price_formatted, "R$ 100,00");
+  assert.equal(safe[0].availability, "now");
+  assert.doesNotMatch(safe[0].name, /@/);
+  assert.doesNotMatch(safe[0].name, /\+55/);
+  assert.doesNotMatch(safe[0].name, /https?:/);
+  assert.doesNotMatch(safe[0].name, /[0-9a-f]{8}-[0-9a-f]{4}/i);
+  assert.doesNotMatch(safe[0].summary!, /\+55/);
+  assert.doesNotMatch(safe[0].summary!, /[0-9a-f]{8}-[0-9a-f]{4}/i);
+});

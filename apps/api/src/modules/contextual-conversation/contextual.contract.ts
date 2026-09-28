@@ -31,6 +31,8 @@ export const contextualInterpretationSchema = contextualProposalSchema.extend({
   speech_act: speechActSchema,
   natural_reply: naturalReplySchema,
   confidence: confidenceSchema,
+  target_candidates: z.array(z.number().int().min(1).max(6)).max(6).nullable(),
+  inquiry_type: selectionInquiryTypeSchema.nullable(),
 });
 export type ContextualProposal = z.infer<typeof contextualProposalSchema>;
 const slotSchema = z.object({ value: z.string().min(1).max(200), source: z.enum(["user_explicit", "user_confirmation", "domain"]), inboundId: z.string().uuid() }).strict();

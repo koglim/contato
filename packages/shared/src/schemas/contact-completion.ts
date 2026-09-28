@@ -66,5 +66,12 @@ export const contactCompletionMessageSchema = z.object({
   event_id: z.string().uuid().optional(),
   state: contactCompletionStateSchema.optional(),
   reply_text: z.string().min(1).max(2000),
+  clarification_kind: z.string().optional(),
+  requested_action: z.enum(["declare", "confirm", "contest"]).optional(),
+  options: z.array(z.object({
+    public_code: z.string(),
+    professional_name: z.string(),
+    service_name: z.string(),
+  })).optional(),
 });
 export type ContactCompletionMessage = z.infer<typeof contactCompletionMessageSchema>;
