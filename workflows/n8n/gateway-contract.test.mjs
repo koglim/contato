@@ -70,7 +70,26 @@ test("gateway normalizes Brazilian degraded 8-digit mobile numbers while preserv
 });
 
 test("gateway handles Baileys device-qualified PN JIDs and rejects malformed colon JIDs", () => {
-  // Valid device-qualified PN JIDs
+  // Pure helper tests for extractPhoneFromJid
+  assert.equal(extractPhoneFromJid("5566999029086@s.whatsapp.net"), "+5566999029086");
+  assert.equal(extractPhoneFromJid("5566999029086:1@s.whatsapp.net"), "+5566999029086");
+  assert.equal(extractPhoneFromJid("5566999029086:10@s.whatsapp.net"), "+5566999029086");
+  assert.equal(extractPhoneFromJid("556699029086:2@s.whatsapp.net"), "+5566999029086");
+  assert.equal(extractPhoneFromJid("5566999029086::1@s.whatsapp.net"), null);
+  assert.equal(extractPhoneFromJid("5566999029086:@s.whatsapp.net"), null);
+  assert.equal(extractPhoneFromJid("5566999029086:abc@s.whatsapp.net"), null);
+  assert.equal(extractPhoneFromJid("foo:1@s.whatsapp.net"), null);
+  assert.equal(extractPhoneFromJid("123456@lid"), null);
+
+  // Pure helper tests for isOpaqueJid
+  assert.equal(isOpaqueJid("123456789012345@lid"), true);
+  assert.equal(isOpaqueJid("123456789012345:1@lid"), true);
+  assert.equal(isOpaqueJid("123456@hosted"), true);
+  assert.equal(isOpaqueJid("123456@hosted.lid"), true);
+  assert.equal(isOpaqueJid("5566999029086@s.whatsapp.net"), false);
+  assert.equal(isOpaqueJid(null), false);
+
+  // Valid device-qualified PN JIDs via gateway event
   const device1 = event();
   device1.body.data.key.remoteJid = "5566999029086:1@s.whatsapp.net";
   assert.equal(normalize(device1).inbound.phone_e164, "+5566999029086");
