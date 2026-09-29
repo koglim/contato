@@ -37,10 +37,10 @@ test("professional acceptance acts as optional acknowledgement: friendly reply t
   } finally { await f.cleanup(); }
 });
 
-async function fixture(other = false) {
+async function fixture(other = false, customProfPhone?: string) {
   const customerId = randomUUID(), professionalId = randomUUID(), searchId = randomUUID(), conversationId = randomUUID();
   const contactId = randomUUID(), choiceId = randomUUID(), otherId = randomUUID(), code = createOpportunityCode();
-  const customerPhone = phone(), professionalPhone = phone();
+  const customerPhone = phone(), professionalPhone = customProfPhone ?? phone();
   const app = buildApp({ internalApiKey: key });
   await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, customerPhone]);
   await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1::uuid, 'Ana', $1::text, $2, 'active')", [professionalId, professionalPhone]);
@@ -837,20 +837,10 @@ test("professional opportunity regression: degraded 8-digit Brazilian mobile sen
   // Scenario F: Professional registered with canonical +5566999029086,
   // receives opportunity code CC-XXXX, and sends 'não consigo CC-XXXX'
   // from degraded 8-digit sender +556699029086.
-  const f = await fixture();
+  const canonicalProfPhone = "+5566999029086";
+  const degradedProfPhone = "+556699029086";
+  const f = await fixture(false, canonicalProfPhone);
   try {
-    const canonicalProfPhone = "+5566999029086";
-    const degradedProfPhone = "+556699029086";
-
-    // Update professional and snapshot to canonical phone
-    await query("UPDATE professionals SET phone_e164 = $1 WHERE id = $2", [canonicalProfPhone, f.professionalId]);
-    await query(
-      `UPDATE contacts
-          SET bilateral_snapshot = jsonb_set(bilateral_snapshot, '{professional_phone_e164}', to_jsonb($1::text))
-        WHERE id = $2`,
-      [canonicalProfPhone, f.contactId]
-    );
-
     // Professional sends unavailability declaration with DEGRADED phone
     const response = await f.send(`não consigo ${f.code}`, degradedProfPhone);
 

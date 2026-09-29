@@ -61,6 +61,8 @@ type FixtureOptions = {
   status?: string;
   hasActiveSearch?: boolean;
   subscriptionRevoked?: boolean;
+  professionalPhone?: string;
+  customerPhone?: string;
 };
 
 async function createFixture(options: FixtureOptions = {}) {
@@ -71,8 +73,8 @@ async function createFixture(options: FixtureOptions = {}) {
   const contactId = randomUUID();
   const choiceId = randomUUID();
   const code = createOpportunityCode();
-  const customerPhone = randomPhone();
-  const professionalPhone = randomPhone();
+  const customerPhone = options.customerPhone ?? randomPhone();
+  const professionalPhone = options.professionalPhone ?? randomPhone();
   const activeSearchId = randomUUID();
   const activeConversationId = randomUUID();
 
@@ -1415,18 +1417,11 @@ test("Scenario 16: Professional unavailability does NOT block completion; shared
 test("Scenario 17: Brazilian 8-digit degraded mobile sender recognizes professional and creates completion aggregate", async () => {
   // Real regression case: professional registered with canonical +5566999029086,
   // but Evolution API delivers inbound with degraded +556699029086.
-  const f = await createFixture();
+  const canonicalProfPhone = "+5566999029086";
+  const degradedProfPhone = "+556699029086";
+  const f = await createFixture({ professionalPhone: canonicalProfPhone });
   try {
     const contact = await f.getContact();
-    const canonicalProfPhone = "+5566999029086";
-    const degradedProfPhone = "+556699029086";
-    await query("UPDATE professionals SET phone_e164 = $1 WHERE id = $2", [canonicalProfPhone, f.professionalId]);
-    await query(
-      `UPDATE contacts
-          SET bilateral_snapshot = jsonb_set(bilateral_snapshot, '{professional_phone_e164}', to_jsonb($1::text))
-        WHERE id = $2`,
-      [canonicalProfPhone, f.contactId]
-    );
 
     // Professional sends completion command using DEGRADED 8-digit phone (+556699029086)
     const result = await f.send(`Concluído ${contact.public_code}`, degradedProfPhone);
