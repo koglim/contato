@@ -898,6 +898,7 @@ test("professional opportunity regression: historical degraded professional row 
     assert.equal(customerOutbound.length, 1);
     assert.match(customerOutbound[0].text_content, /não poderá atender/);
   } finally {
+    await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL WHERE phone_e164 = $1", [canonicalProfPhone]);
     await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 = $1", [canonicalProfPhone]);
     await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [canonicalProfPhone]);
     await f.cleanup();

@@ -838,7 +838,7 @@ test("Regression E: new bilateral snapshot from historical degraded professional
     VALUES ($1, $2, 'active', 'selection', 'eletricista', 'eletricista', 'BR', 3, $3, NOW() + INTERVAL '1 hour')`, [convId, customerId, searchId]);
   await query("INSERT INTO matches (id, search_request_id, professional_id, rank_position, shown_at) VALUES ($1, $2, $3, 1, NOW())", [matchId, searchId, profId]);
   await query(`INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
-    VALUES ($1, 'test', $1, $2, '1', 'BR', 3, 'processed', NOW(), '{}'::jsonb)`, [choiceId, customerPhone]);
+    VALUES ($1, 'test', $2, $3, '1', 'BR', 3, 'processed', NOW(), '{}'::jsonb)`, [choiceId, `msg-${choiceId}`, customerPhone]);
 
   try {
     const repo = new PostgresSelectionMatchRepository();
