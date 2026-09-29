@@ -94,7 +94,7 @@ async function fixture(other = false, customProfPhone?: string) {
   async function cleanup() {
     await app.close();
     await withTransaction(async (db) => {
-      await db.query("UPDATE channel_inbound_messages SET response_outbound_id=NULL WHERE phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
+      await db.query("UPDATE channel_inbound_messages SET response_outbound_id=NULL WHERE phone_e164 IN ($1,$2) OR response_outbound_id IN (SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2) OR professional_unavailability_event_id IN (SELECT id FROM professional_unavailability_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$3)))", [customerPhone, professionalPhone, customerId]);
       await db.query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2) OR professional_unavailability_event_id IN (SELECT id FROM professional_unavailability_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$3))", [customerPhone, professionalPhone, customerId]);
       // Fixture teardown only; production never bypasses the append-only guard.
       await db.query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
@@ -898,10 +898,10 @@ test("professional opportunity regression: historical degraded professional row 
     assert.equal(customerOutbound.length, 1);
     assert.match(customerOutbound[0].text_content, /não poderá atender/);
   } finally {
+    await f.cleanup();
     await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL WHERE phone_e164 = $1", [canonicalProfPhone]);
     await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 = $1", [canonicalProfPhone]);
     await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [canonicalProfPhone]);
-    await f.cleanup();
   }
 });
 

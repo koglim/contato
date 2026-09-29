@@ -833,7 +833,9 @@ test("Regression E: new bilateral snapshot from historical degraded professional
   // Historical professional record with DEGRADED 8-digit phone
   await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1, 'Ana', $2, $3, 'active')", [profId, `ana-${profId}`, degradedProfPhone]);
   await query("INSERT INTO professional_services (id, professional_id, service_id) VALUES ($1, $2, $3)", [profServId, profId, servId]);
-  await query("INSERT INTO search_requests (id, customer_id, raw_text, service_id, status) VALUES ($1, $2, 'eletricista', $3, 'matched')", [searchId, customerId, servId]);
+  await query("INSERT INTO search_requests (id, customer_id, raw_text, service_id, status, location) VALUES ($1, $2, 'eletricista', $3, 'matched', ST_SetSRID(ST_MakePoint(-55.5, -11.86), 4326)::geography)", [searchId, customerId, servId]);
+  await query(`INSERT INTO professional_service_areas (professional_id, city, state, country_code, center, radius_meters)
+    VALUES ($1, 'Sinop', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.5, -11.86), 4326)::geography, 40000)`, [profId]);
   await query(`INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at)
     VALUES ($1, $2, 'active', 'selection', 'eletricista', 'eletricista', 'BR', 3, $3, NOW() + INTERVAL '1 hour')`, [convId, customerId, searchId]);
   await query("INSERT INTO matches (id, search_request_id, professional_id, rank_position, shown_at) VALUES ($1, $2, $3, 1, NOW())", [matchId, searchId, profId]);
@@ -869,6 +871,7 @@ test("Regression E: new bilateral snapshot from historical degraded professional
       await db.query("DELETE FROM channel_inbound_messages WHERE id = $1", [choiceId]);
       await db.query("DELETE FROM search_conversations WHERE id = $1", [convId]);
       await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
+      await db.query("DELETE FROM professional_service_areas WHERE professional_id = $1", [profId]);
       await db.query("DELETE FROM professional_services WHERE id = $1", [profServId]);
       await db.query("DELETE FROM professionals WHERE id = $1", [profId]);
       await db.query("DELETE FROM services WHERE id = $1", [servId]);
