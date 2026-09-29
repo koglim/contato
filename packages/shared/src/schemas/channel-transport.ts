@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { phoneE164Schema } from './phone.js';
+import { phoneE164Schema, normalizeBrazilianMobilePhone } from './phone.js';
 
 export const mediaAdmissionSchema = z.object({
   provider: z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/u),
-  provider_message_id: z.string().min(1).max(255), phone_e164: phoneE164Schema,
+  provider_message_id: z.string().min(1).max(255), phone_e164: phoneE164Schema.transform(normalizeBrazilianMobilePhone),
   country_code: z.string().regex(/^[A-Z]{2}$/u).default('BR'), limit: z.number().int().min(1).max(10).default(3),
   audio_base64: z.string().max(5*1024*1024), mime_type: z.string().max(100),
   duration_seconds: z.number().nonnegative().nullable(),

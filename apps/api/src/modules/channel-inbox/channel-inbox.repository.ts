@@ -10,6 +10,7 @@ import type {
   MarkProcessedInboundMessageWithOutbound,
 } from "./channel-inbox.types.js";
 import type { ChannelInboundMessageInput } from "@contatocerto/shared";
+import { normalizeBrazilianMobilePhone } from "@contatocerto/shared";
 import {
   channelOutboundMessageColumns,
   associateOutboundMessageMatches,
@@ -81,13 +82,14 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
   ) {}
 
   async createOrFind(input: ChannelInboundMessageInput, options?: { contextual: boolean }) {
+    const phoneE164 = normalizeBrazilianMobilePhone(input.phone_e164);
     const inserted = await this.execute<ChannelInboundMessageRow>(
       `INSERT INTO channel_inbound_messages (
          provider, provider_message_id, phone_e164, raw_text, country_code, limit_value${options?.contextual ? ", contextual_queue" : ""}
        ) VALUES ($1, $2, $3, $4, $5, $6${options?.contextual ? ", TRUE" : ""})
        ON CONFLICT (provider, provider_message_id) DO NOTHING
        RETURNING ${columns}`,
-      [input.provider, input.provider_message_id, input.phone_e164, input.raw_text, input.country_code, input.limit],
+      [input.provider, input.provider_message_id, phoneE164, input.raw_text, input.country_code, input.limit],
     );
     if (inserted.rows[0]) return { record: toRecord(inserted.rows[0]), created: true };
 

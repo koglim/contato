@@ -52,7 +52,7 @@ export {
   customerSearchMessageRequestSchema,
   customerSearchMessageResponseSchema,
 } from "./schemas/customer-search.js";
-export { phoneE164Schema } from "./schemas/phone.js";
+export { phoneE164Schema, normalizeBrazilianMobilePhone, VALID_BRAZILIAN_DDDS } from "./schemas/phone.js";
 export { selectionMessageContractSchema } from "./schemas/selection-message.js";
 export { globalConversationMessageContractSchema } from "./schemas/global-conversation-message.js";
 export {

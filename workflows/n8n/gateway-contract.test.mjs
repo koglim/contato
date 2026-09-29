@@ -5,7 +5,20 @@ import { randomUUID } from "node:crypto";
 import { runInNewContext } from "node:vm";
 import { Buffer } from "node:buffer";
 import { URL } from "node:url";
-import { normalizeGatewayEvent, transcriptionDecision, inboxDecision, mediaClaimDecision } from "./gateway-contract.mjs";
+import {
+  normalizeGatewayEvent,
+  transcriptionDecision,
+  inboxDecision,
+  mediaClaimDecision,
+  extractPhoneFromJid,
+  isOpaqueJid,
+  normalizeBrazilianMobilePhone as gwNormalizeBrazilianMobilePhone,
+  VALID_BRAZILIAN_DDDS as gwValidDDDs,
+} from "./gateway-contract.mjs";
+import {
+  normalizeBrazilianMobilePhone as sharedNormalizeBrazilianMobilePhone,
+  VALID_BRAZILIAN_DDDS as sharedValidDDDs,
+} from "../../packages/shared/dist/index.js";
 import { transportDecision, claimDecision, confirmationDecision } from "./delivery-contract.mjs";
 
 const config = { instance: "test-instance", provider: "evolution", origin: "https://evolution.example.invalid" };
@@ -26,6 +39,241 @@ test("gateway preserves conversation, escaping and historical instance:id idempo
   assert.equal(result.inbound.phone_e164, "+5566991234567");
   assert.deepEqual(normalize(JSON.parse(JSON.stringify(input))), result);
   assert.doesNotMatch(JSON.stringify(result), /jwtPayload|headers|apikey|server_url/);
+});
+
+test("gateway normalizes Brazilian degraded 8-digit mobile numbers while preserving fixed-line and canonical phones", () => {
+  // Scenario A: Degraded Brazilian mobile without 9th digit (e.g. Evolution 2.3.7 bug)
+  const degradedMobile = event();
+  degradedMobile.body.data.key.remoteJid = "556699029086@s.whatsapp.net";
+  assert.equal(normalize(degradedMobile).inbound.phone_e164, "+5566999029086");
+
+  // LID alternative with degraded Brazilian mobile
+  const lidDegraded = event();
+  lidDegraded.body.data.key.remoteJid = "123456789@lid";
+  lidDegraded.body.data.key.remoteJidAlt = "556699029086@s.whatsapp.net";
+  assert.equal(normalize(lidDegraded).inbound.phone_e164, "+5566999029086");
+
+  // Scenario B: Already canonical 9-digit Brazilian mobile
+  const canonicalMobile = event();
+  canonicalMobile.body.data.key.remoteJid = "5566999029086@s.whatsapp.net";
+  assert.equal(normalize(canonicalMobile).inbound.phone_e164, "+5566999029086");
+
+  // Scenario C: Brazilian fixed-line (prefix 3) remains 8-digit
+  const fixedLine = event();
+  fixedLine.body.data.key.remoteJid = "556635321234@s.whatsapp.net";
+  assert.equal(normalize(fixedLine).inbound.phone_e164, "+556635321234");
+
+  // Scenario D: Non-Brazilian international number
+  const intlPhone = event();
+  intlPhone.body.data.key.remoteJid = "14155552671@s.whatsapp.net";
+  assert.equal(normalize(intlPhone).inbound.phone_e164, "+14155552671");
+});
+
+test("gateway handles Baileys device-qualified PN JIDs and rejects malformed colon JIDs", () => {
+  // Pure helper tests for extractPhoneFromJid
+  assert.equal(extractPhoneFromJid("5566999029086@s.whatsapp.net"), "+5566999029086");
+  assert.equal(extractPhoneFromJid("5566999029086:1@s.whatsapp.net"), "+5566999029086");
+  assert.equal(extractPhoneFromJid("5566999029086:10@s.whatsapp.net"), "+5566999029086");
+  assert.equal(extractPhoneFromJid("556699029086:2@s.whatsapp.net"), "+5566999029086");
+  assert.equal(extractPhoneFromJid("5566999029086::1@s.whatsapp.net"), null);
+  assert.equal(extractPhoneFromJid("5566999029086:@s.whatsapp.net"), null);
+  assert.equal(extractPhoneFromJid("5566999029086:abc@s.whatsapp.net"), null);
+  assert.equal(extractPhoneFromJid("foo:1@s.whatsapp.net"), null);
+  assert.equal(extractPhoneFromJid("123456@lid"), null);
+
+  // Pure helper tests for isOpaqueJid
+  assert.equal(isOpaqueJid("123456789012345@lid"), true);
+  assert.equal(isOpaqueJid("123456789012345:1@lid"), true);
+  assert.equal(isOpaqueJid("123456@hosted"), true);
+  assert.equal(isOpaqueJid("123456@hosted.lid"), true);
+  assert.equal(isOpaqueJid("5566999029086@s.whatsapp.net"), false);
+  assert.equal(isOpaqueJid(null), false);
+
+  // Valid device-qualified PN JIDs via gateway event
+  const device1 = event();
+  device1.body.data.key.remoteJid = "5566999029086:1@s.whatsapp.net";
+  assert.equal(normalize(device1).inbound.phone_e164, "+5566999029086");
+
+  const device10 = event();
+  device10.body.data.key.remoteJid = "5566999029086:10@s.whatsapp.net";
+  assert.equal(normalize(device10).inbound.phone_e164, "+5566999029086");
+
+  const deviceDegraded = event();
+  deviceDegraded.body.data.key.remoteJid = "556699029086:2@s.whatsapp.net";
+  assert.equal(normalize(deviceDegraded).inbound.phone_e164, "+5566999029086");
+
+  // Malformed colon JIDs must be rejected
+  for (const malformedJid of [
+    "5566999029086::1@s.whatsapp.net",
+    "5566999029086:@s.whatsapp.net",
+    "5566999029086:abc@s.whatsapp.net",
+    "foo:1@s.whatsapp.net",
+    "5566999029086:1:2@s.whatsapp.net",
+  ]) {
+    const badInput = event();
+    badInput.body.data.key.remoteJid = malformedJid;
+    assert.equal(normalize(badInput).action, "reject", `Expected rejection for malformed JID: ${malformedJid}`);
+  }
+});
+
+test("gateway LID and addressingMode matrix handles pn, lid, and absent modes correctly", () => {
+  // 1. addressingMode = "lid" with opaque remoteJid and valid remoteJidAlt
+  const lidMode = event();
+  lidMode.body.data.key.remoteJid = "123456789012345@lid";
+  lidMode.body.data.key.remoteJidAlt = "5566999029086@s.whatsapp.net";
+  lidMode.body.data.key.addressingMode = "lid";
+  assert.equal(normalize(lidMode).inbound.phone_e164, "+5566999029086");
+
+  // 2. addressingMode = "pn" with PN remoteJid and opaque remoteJidAlt
+  const pnMode = event();
+  pnMode.body.data.key.remoteJid = "5566999029086@s.whatsapp.net";
+  pnMode.body.data.key.remoteJidAlt = "123456789012345@lid";
+  pnMode.body.data.key.addressingMode = "pn";
+  assert.equal(normalize(pnMode).inbound.phone_e164, "+5566999029086");
+
+  // 3. addressingMode absent
+  const absentMode = event();
+  absentMode.body.data.key.remoteJid = "5566999029086@s.whatsapp.net";
+  absentMode.body.data.key.remoteJidAlt = "123456789012345@lid";
+  delete absentMode.body.data.key.addressingMode;
+  assert.equal(normalize(absentMode).inbound.phone_e164, "+5566999029086");
+
+  // 4. Invalid addressingMode value
+  const badMode = event();
+  badMode.body.data.key.addressingMode = "invalid";
+  assert.equal(normalize(badMode).action, "reject");
+
+  // 5. Opaque LID without PN alternative
+  const orphanLid = event();
+  orphanLid.body.data.key.remoteJid = "123456789012345@lid";
+  delete orphanLid.body.data.key.remoteJidAlt;
+  assert.equal(normalize(orphanLid).action, "reject");
+
+  // 6. Opaque LID with another opaque LID in alt
+  const doubleLid = event();
+  doubleLid.body.data.key.remoteJid = "123456789012345@lid";
+  doubleLid.body.data.key.remoteJidAlt = "987654321012345@lid";
+  assert.equal(normalize(doubleLid).action, "reject");
+});
+
+test("gateway canonicalizes phone candidates before conflict comparison", () => {
+  // remoteJid has canonical 9-digit, remoteJidAlt has degraded 8-digit -> identical canonical phone -> ACCEPT
+  const eqCandidates = event();
+  eqCandidates.body.data.key.remoteJid = "5566999029086@s.whatsapp.net";
+  eqCandidates.body.data.key.remoteJidAlt = "556699029086@s.whatsapp.net";
+  const eqResult = normalize(eqCandidates);
+  assert.equal(eqResult.action, "inbox");
+  assert.equal(eqResult.inbound.phone_e164, "+5566999029086");
+
+  // Device-qualified candidate vs plain canonical candidate -> identical canonical phone -> ACCEPT
+  const deviceEq = event();
+  deviceEq.body.data.key.remoteJid = "5566999029086:1@s.whatsapp.net";
+  deviceEq.body.data.key.remoteJidAlt = "5566999029086@s.whatsapp.net";
+  const deviceResult = normalize(deviceEq);
+  assert.equal(deviceResult.action, "inbox");
+  assert.equal(deviceResult.inbound.phone_e164, "+5566999029086");
+
+  // Genuinely conflicting phones -> REJECT webhook_phone_conflict
+  const conflict = event();
+  conflict.body.data.key.remoteJid = "5566999029086@s.whatsapp.net";
+  conflict.body.data.key.remoteJidAlt = "5511988887777@s.whatsapp.net";
+  assert.equal(normalize(conflict).action, "reject");
+  assert.equal(normalize(conflict).reason, "webhook_phone_conflict");
+});
+
+test("gateway enforces Brazilian DDD validation strictly (67 valid DDDs)", () => {
+  // Valid DDD 66 with degraded mobile -> repaired to 9 digits
+  const validDdd = event();
+  validDdd.body.data.key.remoteJid = "556699029086@s.whatsapp.net";
+  assert.equal(normalize(validDdd).inbound.phone_e164, "+5566999029086");
+
+  // Invalid DDD 10 (does not exist in Brazil) -> NOT repaired
+  const invalidDdd10 = event();
+  invalidDdd10.body.data.key.remoteJid = "551099029086@s.whatsapp.net";
+  assert.equal(normalize(invalidDdd10).inbound.phone_e164, "+551099029086");
+
+  // Invalid DDD 20 -> NOT repaired
+  const invalidDdd20 = event();
+  invalidDdd20.body.data.key.remoteJid = "552099029086@s.whatsapp.net";
+  assert.equal(normalize(invalidDdd20).inbound.phone_e164, "+552099029086");
+
+  // Fixed line in valid DDD (prefix 3) -> NOT altered
+  const fixedLine = event();
+  fixedLine.body.data.key.remoteJid = "556635321234@s.whatsapp.net";
+  assert.equal(normalize(fixedLine).inbound.phone_e164, "+556635321234");
+});
+
+test("gateway handles hosted and hosted.lid identity domains safely", () => {
+  // hosted.lid with valid PN alt -> ACCEPT PN
+  const hostedLid = event();
+  hostedLid.body.data.key.remoteJid = "1234567890@hosted.lid";
+  hostedLid.body.data.key.remoteJidAlt = "5566999029086@s.whatsapp.net";
+  assert.equal(normalize(hostedLid).inbound.phone_e164, "+5566999029086");
+
+  // hosted with valid PN alt -> ACCEPT PN
+  const hosted = event();
+  hosted.body.data.key.remoteJid = "1234567890@hosted";
+  hosted.body.data.key.remoteJidAlt = "5566999029086@s.whatsapp.net";
+  assert.equal(normalize(hosted).inbound.phone_e164, "+5566999029086");
+
+  // hosted.lid without PN alt -> REJECT
+  const orphanHostedLid = event();
+  orphanHostedLid.body.data.key.remoteJid = "1234567890@hosted.lid";
+  delete orphanHostedLid.body.data.key.remoteJidAlt;
+  assert.equal(normalize(orphanHostedLid).action, "reject");
+
+  // hosted without PN alt -> REJECT
+  const orphanHosted = event();
+  orphanHosted.body.data.key.remoteJid = "1234567890@hosted";
+  delete orphanHosted.body.data.key.remoteJidAlt;
+  assert.equal(normalize(orphanHosted).action, "reject");
+});
+
+test("parity test: shared and gateway normalizeBrazilianMobilePhone produce identical results across full matrix", () => {
+  // 1. DDD set parity
+  assert.equal(gwValidDDDs.size, 67);
+  assert.equal(sharedValidDDDs.size, 67);
+  assert.deepEqual(Array.from(gwValidDDDs).sort(), Array.from(sharedValidDDDs).sort());
+
+  // 2. Full DDD matrix test: degraded mobile (+55<DDD>9XXXXXXX vs +55<DDD>8XXXXXXX)
+  for (const ddd of gwValidDDDs) {
+    for (const prefix of ["6", "7", "8", "9"]) {
+      const degraded = `+55${ddd}${prefix}1234567`;
+      const expected = `+55${ddd}9${prefix}1234567`;
+      assert.equal(gwNormalizeBrazilianMobilePhone(degraded), expected, `Gateway normalization failed for DDD ${ddd} prefix ${prefix}`);
+      assert.equal(sharedNormalizeBrazilianMobilePhone(degraded), expected, `Shared normalization failed for DDD ${ddd} prefix ${prefix}`);
+      assert.equal(gwNormalizeBrazilianMobilePhone(degraded), sharedNormalizeBrazilianMobilePhone(degraded));
+    }
+    // Fixed lines (prefixes 2, 3, 4, 5)
+    for (const prefix of ["2", "3", "4", "5"]) {
+      const fixed = `+55${ddd}${prefix}1234567`;
+      assert.equal(gwNormalizeBrazilianMobilePhone(fixed), fixed);
+      assert.equal(sharedNormalizeBrazilianMobilePhone(fixed), fixed);
+      assert.equal(gwNormalizeBrazilianMobilePhone(fixed), sharedNormalizeBrazilianMobilePhone(fixed));
+    }
+    // Already canonical 9 digits
+    const canonical = `+55${ddd}998765432`;
+    assert.equal(gwNormalizeBrazilianMobilePhone(canonical), canonical);
+    assert.equal(sharedNormalizeBrazilianMobilePhone(canonical), canonical);
+    assert.equal(gwNormalizeBrazilianMobilePhone(canonical), sharedNormalizeBrazilianMobilePhone(canonical));
+  }
+
+  // 3. Invalid DDDs
+  const invalidDdds = ["10", "20", "23", "25", "26", "29", "30", "36", "39", "40", "50", "52", "56", "60", "70", "72", "76", "78", "80", "90"];
+  for (const invDdd of invalidDdds) {
+    const invPhone = `+55${invDdd}98765432`;
+    assert.equal(gwNormalizeBrazilianMobilePhone(invPhone), invPhone);
+    assert.equal(sharedNormalizeBrazilianMobilePhone(invPhone), invPhone);
+    assert.equal(gwNormalizeBrazilianMobilePhone(invPhone), sharedNormalizeBrazilianMobilePhone(invPhone));
+  }
+
+  // 4. International numbers
+  const intlPhones = ["+14155552671", "+447911123456", "+351912345678", "+4915123456789"];
+  for (const intl of intlPhones) {
+    assert.equal(gwNormalizeBrazilianMobilePhone(intl), intl);
+    assert.equal(sharedNormalizeBrazilianMobilePhone(intl), intl);
+    assert.equal(gwNormalizeBrazilianMobilePhone(intl), sharedNormalizeBrazilianMobilePhone(intl));
+  }
 });
 test("extended text uses the reply, never the quoted message or a caption", () => {
   assert.equal(normalize(event({ extendedTextMessage: { text: "quero a Ana", contextInfo: { quotedMessage: { conversation: "cancelar" } } } })).inbound.raw_text, "quero a Ana");

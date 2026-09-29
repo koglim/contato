@@ -3,12 +3,12 @@ import {
   continueSearchConversationResponseSchema,
   startSearchConversationResponseSchema,
 } from "./search-conversation.js";
-import { phoneE164Schema } from "./phone.js";
+import { phoneE164Schema, normalizeBrazilianMobilePhone } from "./phone.js";
 import { selectionMessageContractSchema } from "./selection-message.js";
 import { globalConversationMessageContractSchema } from "./global-conversation-message.js";
 
 export const customerSearchMessageRequestSchema = z.object({
-  phone_e164: phoneE164Schema,
+  phone_e164: phoneE164Schema.transform(normalizeBrazilianMobilePhone),
   raw_text: z.string().trim().min(1).max(500),
   country_code: z.string().trim().length(2).transform((value) => value.toUpperCase()).default("BR"),
   limit: z.number().int().min(1).max(10).default(3),
