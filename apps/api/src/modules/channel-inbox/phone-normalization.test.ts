@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   normalizeBrazilianMobilePhone,
-  phoneE164Schema,
   channelInboundMessageRequestSchema,
   mediaAdmissionSchema,
   customerSearchMessageRequestSchema,
