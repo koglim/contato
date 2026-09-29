@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import { buildApp } from "../src/app.js";
 import { deliverClaim } from "./delivery-helper.js";
-import { closeDatabaseConnection, query } from "../src/database/connection.js";
+import { closeDatabaseConnection, query, withTransaction } from "../src/database/connection.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
 import { PostgresCustomerRepository } from "../src/modules/customers/customer.repository.js";
 import { PostgresSearchConversationRepository } from "../src/modules/search-conversations/search-conversation.repository.js";
@@ -877,3 +877,44 @@ test("Regression E: new bilateral snapshot from historical degraded professional
     });
   }
 });
+
+test("Regression H: ChannelInbox.runAtomic shares transaction with PostgresCustomerRepository and rollback reverts customer mutation", async () => {
+  const customerId = randomUUID();
+  const degradedPhone = "+559984119070";
+  const canonicalPhone = "+5599984119070";
+  const inboundId = randomUUID();
+  const token = randomUUID();
+
+  await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, degradedPhone]);
+  await query(
+    `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, status, processing_token, processing_started_at, lease_expires_at)
+     VALUES ($1, 'test', $2, $3, 'teste rollback', 'processing', $4, NOW(), NOW() + INTERVAL '1 minute')`,
+    [inboundId, `msg-${inboundId}`, canonicalPhone, token],
+  );
+
+  const inboxRepo = new PostgresChannelInboundMessageRepository();
+  const customerRepo = new PostgresCustomerRepository();
+
+  const record = (await inboxRepo.findById(inboundId))!;
+  assert.ok(record);
+
+  await assert.rejects(
+    inboxRepo.runAtomic(record, async () => {
+      const customer = await customerRepo.findOrCreateByPhoneE164(canonicalPhone);
+      assert.equal(customer.id, customerId);
+      throw new Error("FORCED_ATOMIC_ROLLBACK");
+    }),
+    /FORCED_ATOMIC_ROLLBACK/,
+  );
+
+  const customerAfterRollback = (await query<{ id: string; phone_e164: string }>(
+    "SELECT id, phone_e164 FROM customers WHERE id = $1",
+    [customerId],
+  )).rows[0];
+  assert.ok(customerAfterRollback);
+  assert.equal(customerAfterRollback.phone_e164, degradedPhone, "Customer phone must remain degraded after outer transaction rollback");
+
+  await query("DELETE FROM channel_inbound_messages WHERE id = $1", [inboundId]);
+  await query("DELETE FROM customers WHERE id = $1", [customerId]);
+});
+

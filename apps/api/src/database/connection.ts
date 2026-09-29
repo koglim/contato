@@ -52,6 +52,22 @@ export async function withTransaction<T>(callback: (client: DatabaseClient) => P
   }
 }
 
+export async function withIndependentTransaction<T>(callback: (client: DatabaseClient) => Promise<T>) {
+  const client = await getPool().connect();
+
+  try {
+    await client.query("BEGIN");
+    const result = await transactionScope.run(client, () => callback(client));
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function closeDatabaseConnection() {
   if (pool) {
     await pool.end();
