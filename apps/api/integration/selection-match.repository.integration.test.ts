@@ -833,10 +833,10 @@ test("Regression E: new bilateral snapshot from historical degraded professional
   // Historical professional record with DEGRADED 8-digit phone
   await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1, 'Ana', $2, $3, 'active')", [profId, `ana-${profId}`, degradedProfPhone]);
   await query("INSERT INTO professional_services (id, professional_id, service_id) VALUES ($1, $2, $3)", [profServId, profId, servId]);
-  await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, 'eletricista', 'selected')", [searchId, customerId]);
-  await query(`INSERT INTO search_conversations (id, customer_id, status, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at, completed_at)
-    VALUES ($1, $2, 'completed', 'eletricista', 'eletricista', 'BR', 3, $3, NOW() + INTERVAL '1 hour', NOW())`, [convId, customerId, searchId]);
-  await query("INSERT INTO matches (id, search_request_id, professional_id, service_id, score, rank_position, shown_at) VALUES ($1, $2, $3, $4, 1.0, 1, NOW())", [matchId, searchId, profId, servId]);
+  await query("INSERT INTO search_requests (id, customer_id, raw_text, service_id, status) VALUES ($1, $2, 'eletricista', $3, 'matched')", [searchId, customerId, servId]);
+  await query(`INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at)
+    VALUES ($1, $2, 'active', 'selection', 'eletricista', 'eletricista', 'BR', 3, $3, NOW() + INTERVAL '1 hour')`, [convId, customerId, searchId]);
+  await query("INSERT INTO matches (id, search_request_id, professional_id, rank_position, shown_at) VALUES ($1, $2, $3, 1, NOW())", [matchId, searchId, profId]);
   await query(`INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
     VALUES ($1, 'test', $1, $2, '1', 'BR', 3, 'processed', NOW(), '{}'::jsonb)`, [choiceId, customerPhone]);
 
