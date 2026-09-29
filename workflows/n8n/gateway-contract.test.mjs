@@ -124,7 +124,7 @@ test("gateway export is authenticated, inactive, no duplicate delivery branch or
     if(n.type.endsWith(".code")) assert.doesNotThrow(()=>new Function(n.parameters.jsCode));
   }
   const gate=workflow.nodes.find(n=>n.name==="Validate event").parameters.jsCode;
-  const result=runInNewContext(`(() => { ${gate} })()`,{$json:event(),$vars:{EVOLUTION_INSTANCE:config.instance,EVOLUTION_PROVIDER:config.provider,EVOLUTION_WEBHOOK_ORIGIN:config.origin},Buffer,Date:class extends Date {static now(){return now*1000;}}});
+  const result=runInNewContext(`(() => { ${gate} })()`,{$json:event(),$env:{EVOLUTION_INSTANCE:config.instance,EVOLUTION_PROVIDER:config.provider,EVOLUTION_WEBHOOK_ORIGIN:config.origin},Buffer,Date:class extends Date {static now(){return now*1000;}}});
   assert.equal(result.json.action,"inbox");
 });
 
@@ -135,13 +135,13 @@ function simulateGateway(input, responses = {}, filename="gateway.json", start="
   const workflow=JSON.parse(readFileSync(new URL(filename,import.meta.url),"utf8"));
   const outputs=new Map(); const calls=[]; const acknowledgements=[];
   let name=start, item={json:input};
-  const vars={EVOLUTION_INSTANCE:config.instance,EVOLUTION_PROVIDER:config.provider,EVOLUTION_WEBHOOK_ORIGIN:config.origin};
+  const env={EVOLUTION_INSTANCE:config.instance,EVOLUTION_PROVIDER:config.provider,EVOLUTION_WEBHOOK_ORIGIN:config.origin};
   const evaluate=expression=>runInNewContext(expression.slice(3,-2),{$json:item.json});
   for(let steps=0;name && steps<60;steps++) {
     const node=workflow.nodes.find(n=>n.name===name); assert.ok(node,name);
     let port=0;
     if(node.type.endsWith(".code")) item=runInNewContext(`(() => { ${node.parameters.jsCode} })()`,{
-      $json:item.json,$input:{all:()=>[item]},$vars:vars,$:n=>({item:outputs.get(n)}),Buffer,Date:class extends Date {static now(){return now*1000;}},
+      $json:item.json,$input:{all:()=>[item]},$env:env,$:n=>({item:outputs.get(n)}),Buffer,Date:class extends Date {static now(){return now*1000;}},
     });
     else if(node.type.endsWith(".if")) port=evaluate(node.parameters.conditions.conditions[0].leftValue)?0:1;
     else if(node.type.endsWith(".httpRequest")) {

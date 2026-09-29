@@ -33,7 +33,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/next/claim' }}",
+        "url": "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/next/claim' }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -305,7 +305,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/' + $json.id + '/result' }}",
+        "url": "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/' + $json.id + '/result' }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,

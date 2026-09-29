@@ -117,7 +117,7 @@ test("Inbox recovery export only processes bounded work; empty queue is normal a
 test("exported Code gate evaluates the same contract and dispatcher budgets are bounded", () => {
   const shared = JSON.parse(readFileSync(new URL("shared-delivery.json", import.meta.url), "utf8"));
   const gate = shared.nodes.find((node) => node.name === "Validate claim").parameters.jsCode;
-  const runGate = (claim) => runInNewContext(`(() => { ${gate} })()`, { $json: claim, $vars: { EVOLUTION_PROVIDER: "evolution" } });
+  const runGate = (claim) => runInNewContext(`(() => { ${gate} })()`, { $json: claim, $env: { EVOLUTION_PROVIDER: "evolution" } });
   assert.equal(runGate(response(null, 204)).json.action, "stop");
   assert.equal(runGate(response(message())).json.action, "send");
   const dispatcher = JSON.parse(readFileSync(new URL("outbox-dispatcher.json", import.meta.url), "utf8"));

@@ -47,7 +47,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/next/claim' }}",
+        "url": "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/next/claim' }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -88,7 +88,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $vars.CONTATOCERTO_DELIVERY_WORKFLOW_ID }}",
+          "value": "={{ $env.CONTATOCERTO_DELIVERY_WORKFLOW_ID }}",
           "mode": "id"
         },
         "mode": "each",
