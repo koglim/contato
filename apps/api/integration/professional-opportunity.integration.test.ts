@@ -868,3 +868,37 @@ test("professional opportunity regression: degraded 8-digit Brazilian mobile sen
   }
 });
 
+test("professional opportunity regression: historical degraded professional row + canonical inbound declares unavailability", async () => {
+  // Scenario D: Professional stored in DB with historical degraded phone +556699029086,
+  // receives canonical inbound +5566999029086 after PR #21 normalization.
+  const degradedProfPhone = "+556699029086";
+  const canonicalProfPhone = "+5566999029086";
+  const f = await fixture(false, degradedProfPhone);
+  try {
+    // Professional sends unavailability declaration with CANONICAL phone
+    const response = await f.send(`não consigo ${f.code}`, canonicalProfPhone);
+
+    // Assert: professional recognized, contact owned, unavailability event created
+    assert.equal(response.result.route, "opportunity");
+    assert.equal(response.result.result.kind, "unavailability_declared");
+    assert.equal(await f.countUnavailabilityEvents(), 1);
+
+    // Unavailability event exists and is linked
+    const event = (await query<{ professional_id: string }>(
+      "SELECT professional_id FROM professional_unavailability_events WHERE contact_id = $1",
+      [f.contactId]
+    )).rows[0];
+    assert.ok(event);
+
+    // Customer notification outbound was queued with canonical recipient
+    const customerOutbound = (await query<{ recipient_phone_e164: string; text_content: string }>(
+      "SELECT recipient_phone_e164, text_content FROM channel_outbound_messages WHERE recipient_phone_e164 = $1 AND purpose = 'customer_contact_update'",
+      [f.customerPhone]
+    )).rows;
+    assert.equal(customerOutbound.length, 1);
+    assert.match(customerOutbound[0].text_content, /não poderá atender/);
+  } finally {
+    await f.cleanup();
+  }
+});
+

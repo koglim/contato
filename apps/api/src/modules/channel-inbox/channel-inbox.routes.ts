@@ -5,6 +5,7 @@ import {
 import { createInternalKeyGuard } from "../internal/internal-auth.js";
 import { validationError } from "../internal/validation.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
+import { CustomerPhoneIdentityCollisionError } from "../customers/customer.repository.js";
 import type { ChannelInboxService } from "./channel-inbox.types.js";
 
 type ChannelInboxRoutesOptions = { internalApiKey?: string; service: ChannelInboxService };
@@ -28,6 +29,7 @@ export const channelInboxRoutes: FastifyPluginAsync<ChannelInboxRoutesOptions> =
       if (outcome.kind === "channel_message_payload_conflict") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "channel_message_result_invalid") return reply.code(500).send({ error: outcome.kind });
       if (outcome.kind === "customer_conversation_conflict") return reply.code(409).send({ error: outcome.kind });
+      if (outcome.kind === "customer_phone_identity_collision") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "conversation_processing") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "service_unavailable") return reply.code(409).send({ error: outcome.kind });
       if (outcome.kind === "selection_idempotency_key_required") return reply.code(409).send({ error: outcome.kind });
@@ -41,6 +43,9 @@ export const channelInboxRoutes: FastifyPluginAsync<ChannelInboxRoutesOptions> =
       }, "Channel inbound message processed");
       return reply.send(outcome.response);
     } catch (error) {
+      if (error instanceof CustomerPhoneIdentityCollisionError) {
+        return reply.code(409).send({ error: "customer_phone_identity_collision" });
+      }
       if (error instanceof GeocodingProviderError) {
         const mapped = geocodingError(error);
         return reply.code(mapped.status).send({ error: mapped.code });

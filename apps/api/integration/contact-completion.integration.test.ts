@@ -1501,6 +1501,26 @@ test("Scenario 18: Historical degraded customer phone in snapshot matches canoni
     assert.equal(events[0].action, "declared");
     assert.equal(events[1].actor_role, "customer");
     assert.equal(events[1].action, "confirmed");
+
+    // Verify Regression F: counterpart outbound notification to customer was sent to canonical recipient
+    const promptOutbound = (await query<{ recipient_phone_e164: string }>(
+      "SELECT recipient_phone_e164 FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${f.contactId}:completion:prompt`]
+    )).rows[0];
+    assert.equal(promptOutbound?.recipient_phone_e164, canonicalCustomerPhone);
+
+    const confirmedOutbound = (await query<{ recipient_phone_e164: string }>(
+      "SELECT recipient_phone_e164 FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${f.contactId}:completion:confirmed`]
+    )).rows[0];
+    assert.equal(confirmedOutbound?.recipient_phone_e164, canonicalProfPhone);
+
+    // Verify Regression G: historical snapshot itself is NOT rewritten
+    const rawSnapshot = (await query<{ bilateral_snapshot: { customer_phone_e164: string } }>(
+      "SELECT bilateral_snapshot FROM contacts WHERE id = $1",
+      [f.contactId]
+    )).rows[0];
+    assert.equal(rawSnapshot.bilateral_snapshot.customer_phone_e164, degradedCustomerPhone);
   } finally {
     await withTransaction(async (db) => {
       await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);

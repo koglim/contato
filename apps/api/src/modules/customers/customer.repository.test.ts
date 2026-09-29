@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { QueryResultRow } from "pg";
-import { PostgresCustomerRepository, type CustomerQuery } from "./customer.repository.js";
+import {
+  PostgresCustomerRepository,
+  CustomerPhoneIdentityCollisionError,
+  type CustomerQuery,
+} from "./customer.repository.js";
+import type { DatabaseClient } from "../../database/connection.js";
 
 test("customer repository creates new customer with canonical phone when not found", async () => {
   const calls: Array<{ text: string; values: unknown[] }> = [];
@@ -37,7 +42,7 @@ test("customer repository updates degraded phone to canonical and preserves cust
   assert.deepEqual(calls[1]!.values, ["+5599984119070", "22222222-2222-4222-8222-222222222222"]);
 });
 
-test("customer repository throws CUSTOMER_PHONE_IDENTITY_COLLISION when both canonical and degraded rows exist", async () => {
+test("customer repository throws CustomerPhoneIdentityCollisionError when both canonical and degraded rows exist", async () => {
   const execute: CustomerQuery = async <T extends QueryResultRow>(text: string) => {
     if (text.includes("SELECT id, phone_e164 FROM customers")) {
       return {
@@ -52,6 +57,30 @@ test("customer repository throws CUSTOMER_PHONE_IDENTITY_COLLISION when both can
   const repository = new PostgresCustomerRepository(execute);
   await assert.rejects(
     repository.findOrCreateByPhoneE164("+5599984119070"),
-    /CUSTOMER_PHONE_IDENTITY_COLLISION/u,
+    (err: unknown) => {
+      assert.ok(err instanceof CustomerPhoneIdentityCollisionError);
+      assert.equal(err.code, "customer_phone_identity_collision");
+      return true;
+    }
   );
+});
+
+test("customer repository executes inside transaction runner when execute is omitted", async () => {
+  let transactionCalled = false;
+  const fakeDb: DatabaseClient = {
+    query: async <T extends QueryResultRow>(text: string) => {
+      if (text.includes("SELECT id, phone_e164 FROM customers")) {
+        return { rows: [{ id: "33333333-3333-4333-8333-333333333333", phone_e164: "+559984119070" }] as T[] };
+      }
+      return { rows: [] as T[] };
+    },
+  };
+  const fakeTransaction = async <T>(cb: (client: DatabaseClient) => Promise<T>): Promise<T> => {
+    transactionCalled = true;
+    return cb(fakeDb);
+  };
+  const repository = new PostgresCustomerRepository(undefined, fakeTransaction);
+  const result = await repository.findOrCreateByPhoneE164("+5599984119070");
+  assert.equal(result.id, "33333333-3333-4333-8333-333333333333");
+  assert.equal(transactionCalled, true);
 });

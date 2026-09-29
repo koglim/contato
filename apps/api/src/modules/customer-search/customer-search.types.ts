@@ -6,6 +6,7 @@ import type {
 export type CustomerSearchRouteOutcome =
   | { kind: "response"; response: CustomerSearchMessageResponse; conversationId: string | null; searchRequestId: string | null; presentedMatchIds: string[] }
   | { kind: "customer_conversation_conflict" }
+  | { kind: "customer_phone_identity_collision" }
   | { kind: "conversation_processing" }
   | { kind: "service_unavailable" }
   | { kind: "selection_idempotency_key_required" }

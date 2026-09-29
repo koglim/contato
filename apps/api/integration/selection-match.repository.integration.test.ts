@@ -762,3 +762,118 @@ test("bilateral choice delivers customer reply and independent professional noti
     assert.equal((await bilateralCounts(fixture)).contacts, 1);
   } finally { await app.close(); await fixture.cleanup(); }
 });
+
+test("Regression A: direct customer-search updates historical degraded phone to canonical and preserves customer ID atomically", async () => {
+  const customerId = randomUUID();
+  const degradedPhone = "+559984119070";
+  const canonicalPhone = "+5599984119070";
+
+  await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, degradedPhone]);
+  try {
+    const app = buildApp({ internalApiKey: "test-direct-key" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/customer-search/messages",
+      headers: { "x-internal-key": "test-direct-key" },
+      payload: { phone_e164: canonicalPhone, raw_text: "eletricista em Sinop" },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.customer_id, customerId);
+
+    const customerInDb = (await query<{ id: string; phone_e164: string }>(
+      "SELECT id, phone_e164 FROM customers WHERE id = $1",
+      [customerId]
+    )).rows[0];
+    assert.equal(customerInDb.phone_e164, canonicalPhone);
+    assert.equal(customerInDb.id, customerId);
+    await app.close();
+  } finally {
+    await withTransaction(async (db) => {
+      await db.query("DELETE FROM search_conversations WHERE customer_id = $1", [customerId]);
+      await db.query("DELETE FROM search_requests WHERE customer_id = $1", [customerId]);
+      await db.query("DELETE FROM customers WHERE id = $1", [customerId]);
+    });
+  }
+});
+
+test("Regression B: canonical + degraded duplicate customer rows produce deterministic collision / HTTP 409", async () => {
+  const cust1 = randomUUID(), cust2 = randomUUID();
+  const degradedPhone = "+559984119070";
+  const canonicalPhone = "+5599984119070";
+
+  await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [cust1, degradedPhone]);
+  await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [cust2, canonicalPhone]);
+  try {
+    const app = buildApp({ internalApiKey: "test-direct-key" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/customer-search/messages",
+      headers: { "x-internal-key": "test-direct-key" },
+      payload: { phone_e164: canonicalPhone, raw_text: "eletricista em Sinop" },
+    });
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(JSON.parse(response.body), { error: "customer_phone_identity_collision" });
+    await app.close();
+  } finally {
+    await query("DELETE FROM customers WHERE id IN ($1, $2)", [cust1, cust2]);
+  }
+});
+
+test("Regression E: new bilateral snapshot from historical degraded professional record stores canonical phone", async () => {
+  const degradedProfPhone = "+556699029086";
+  const canonicalProfPhone = "+5566999029086";
+  const customerId = randomUUID(), profId = randomUUID(), searchId = randomUUID(), convId = randomUUID(), choiceId = randomUUID();
+  const customerPhone = "+5566999990001";
+  const catId = randomUUID(), servId = randomUUID(), profServId = randomUUID(), matchId = randomUUID();
+
+  await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, customerPhone]);
+  await query("INSERT INTO service_categories (id, name, slug) VALUES ($1, 'Teste', $2)", [catId, `cat-${catId}`]);
+  await query("INSERT INTO services (id, category_id, name, slug) VALUES ($1, $2, 'Eletricista', $3)", [servId, catId, `serv-${servId}`]);
+  // Historical professional record with DEGRADED 8-digit phone
+  await query("INSERT INTO professionals (id, display_name, slug, phone_e164, status) VALUES ($1, 'Ana', $2, $3, 'active')", [profId, `ana-${profId}`, degradedProfPhone]);
+  await query("INSERT INTO professional_services (id, professional_id, service_id) VALUES ($1, $2, $3)", [profServId, profId, servId]);
+  await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, 'eletricista', 'selected')", [searchId, customerId]);
+  await query(`INSERT INTO search_conversations (id, customer_id, status, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at, completed_at)
+    VALUES ($1, $2, 'completed', 'eletricista', 'eletricista', 'BR', 3, $3, NOW() + INTERVAL '1 hour', NOW())`, [convId, customerId, searchId]);
+  await query("INSERT INTO matches (id, search_request_id, professional_id, service_id, score, rank_position, shown_at) VALUES ($1, $2, $3, $4, 1.0, 1, NOW())", [matchId, searchId, profId, servId]);
+  await query(`INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
+    VALUES ($1, 'test', $1, $2, '1', 'BR', 3, 'processed', NOW(), '{}'::jsonb)`, [choiceId, customerPhone]);
+
+  try {
+    const repo = new PostgresSelectionMatchRepository();
+    const result = await repo.selectShownMatch({
+      customerId,
+      customerPhone,
+      conversationId: convId,
+      searchRequestId: searchId,
+      position: 1,
+      lastMessageText: "1",
+      selectionKey: choiceId,
+    });
+    assert.equal(result.kind, "selected");
+
+    const contact = (await query<{ bilateral_snapshot: { professional_phone_e164: string; customer_phone_e164: string } }>(
+      "SELECT bilateral_snapshot FROM contacts WHERE search_request_id = $1",
+      [searchId]
+    )).rows[0];
+    assert.ok(contact);
+    // MUST store CANONICAL professional phone
+    assert.equal(contact.bilateral_snapshot.professional_phone_e164, canonicalProfPhone);
+    assert.equal(contact.bilateral_snapshot.customer_phone_e164, customerPhone);
+  } finally {
+    await withTransaction(async (db) => {
+      await db.query("DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id = $1 OR recipient_phone_e164 = $2", [choiceId, canonicalProfPhone]);
+      await db.query("DELETE FROM contacts WHERE search_request_id = $1", [searchId]);
+      await db.query("DELETE FROM matches WHERE id = $1", [matchId]);
+      await db.query("DELETE FROM channel_inbound_messages WHERE id = $1", [choiceId]);
+      await db.query("DELETE FROM search_conversations WHERE id = $1", [convId]);
+      await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
+      await db.query("DELETE FROM professional_services WHERE id = $1", [profServId]);
+      await db.query("DELETE FROM professionals WHERE id = $1", [profId]);
+      await db.query("DELETE FROM services WHERE id = $1", [servId]);
+      await db.query("DELETE FROM service_categories WHERE id = $1", [catId]);
+      await db.query("DELETE FROM customers WHERE id = $1", [customerId]);
+    });
+  }
+});

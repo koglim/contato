@@ -5,6 +5,7 @@ import type { CustomerSearchRouter } from "../customer-search/customer-search.ty
 import { DefaultChannelInboxService } from "./channel-inbox.service.js";
 import { DefaultMessagePresenter } from "../message-presentation/message-presentation.service.js";
 import { MatchReservationConflictError } from "../channel-outbox/channel-outbox.repository.js";
+import { CustomerPhoneIdentityCollisionError } from "../customers/customer.repository.js";
 import type { ChannelOutboundMessageRecord, ChannelOutboundMessageRepository } from "../channel-outbox/channel-outbox.types.js";
 import type {
   ChannelInboundMessageRecord,
@@ -393,4 +394,14 @@ test("controlled router failures are persisted as failed and can be reclaimed", 
   assert.equal(retry.kind, "response");
   assert.equal(current.router.calls, 2);
   assert.equal(current.repository.current.errorCode, null);
+});
+
+test("Regression C: customer phone identity collision is handled deterministically as non-retryable failed state without error loop", async () => {
+  const current = context();
+  current.router.route = async () => {
+    throw new CustomerPhoneIdentityCollisionError("+5566999999999");
+  };
+  const outcome = await current.service.receive(input);
+  assert.deepEqual(outcome, { kind: "customer_phone_identity_collision" });
+  assert.equal(current.repository.markedFailed, "customer_phone_identity_collision");
 });

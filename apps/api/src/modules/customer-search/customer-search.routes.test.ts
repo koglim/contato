@@ -39,3 +39,22 @@ test("customer search route validates canonical E.164, requires auth and never r
   assert.equal(response.body.includes("+5566999999999"), false);
   await app.close();
 });
+
+test("customer search route returns HTTP 409 on customer_phone_identity_collision", async () => {
+  const router: CustomerSearchRouter = {
+    async route() {
+      return { kind: "customer_phone_identity_collision" };
+    },
+  };
+  const app = buildApp({ customerSearchRouter: router, internalApiKey });
+  const url = "/internal/customer-search/messages";
+  const response = await app.inject({
+    method: "POST",
+    url,
+    headers: { "x-internal-key": internalApiKey },
+    payload: { phone_e164: "+5566999999999", raw_text: "preciso de eletricista" },
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "customer_phone_identity_collision" });
+  await app.close();
+});

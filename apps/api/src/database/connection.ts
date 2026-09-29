@@ -41,7 +41,7 @@ export async function withTransaction<T>(callback: (client: DatabaseClient) => P
 
   try {
     await client.query("BEGIN");
-    const result = await callback(client);
+    const result = await transactionScope.run(client, () => callback(client));
     await client.query("COMMIT");
     return result;
   } catch (error) {

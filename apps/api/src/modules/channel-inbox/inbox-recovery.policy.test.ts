@@ -9,7 +9,9 @@ test("Inbox recovery has five bounded effective attempts and stable backoff", ()
 test("Inbox error classification never persists arbitrary provider or user text", () => {
   assert.equal(inboxErrorCode("secret +5566999999999 raw message"), "internal_error");
   assert.equal(inboxErrorCode("geocoding_unavailable"), "geocoding_unavailable");
+  assert.equal(inboxErrorCode("customer_phone_identity_collision"), "customer_phone_identity_collision");
   assert.equal(isInboxPermanent("persisted_proposal_invalid"), true);
+  assert.equal(isInboxPermanent("customer_phone_identity_collision"), true);
   assert.equal(isInboxPermanent("internal_error"), false);
   assert.match(liveInboxLeaseSql, /clock_timestamp/);
 });

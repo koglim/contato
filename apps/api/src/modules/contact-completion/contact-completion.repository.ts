@@ -1,4 +1,4 @@
-import { getPhoneIdentityAliases } from "@contatocerto/shared";
+import { getPhoneIdentityAliases, normalizeBrazilianMobilePhone } from "@contatocerto/shared";
 import type { DatabaseClient } from "../../database/connection.js";
 import type {
   ContactCompletionRepository,
@@ -202,6 +202,7 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
     }
   ): Promise<string> {
     const businessKey = `inbound:${input.inboundId}:reply`;
+    const recipient = normalizeBrazilianMobilePhone(input.recipientPhoneE164);
     const res = await db.query<{ id: string }>(
       `INSERT INTO channel_outbound_messages (
          channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, business_key, completion_event_id
@@ -213,7 +214,7 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
         input.inboundId,
         input.purpose,
         input.provider,
-        input.recipientPhoneE164,
+        recipient,
         input.textContent,
         businessKey,
         input.completionEventId ?? null,
@@ -238,6 +239,7 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
       completionEventId?: string | null;
     }
   ): Promise<string> {
+    const recipient = normalizeBrazilianMobilePhone(input.recipientPhoneE164);
     const res = await db.query<{ id: string }>(
       `INSERT INTO channel_outbound_messages (
          purpose, provider, recipient_phone_e164, text_content, business_key, completion_event_id
@@ -248,7 +250,7 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
       [
         input.purpose,
         input.provider,
-        input.recipientPhoneE164,
+        recipient,
         input.textContent,
         input.businessKey,
         input.completionEventId ?? null,

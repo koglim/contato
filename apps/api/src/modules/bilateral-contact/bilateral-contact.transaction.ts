@@ -3,6 +3,7 @@ import {
   selectionMessageContractSchema,
   arePhoneIdentitiesEquivalent,
   getPhoneIdentityAliases,
+  normalizeBrazilianMobilePhone,
 } from "@contatocerto/shared";
 import type { DatabaseClient } from "../../database/connection.js";
 import type { ConsentOutcome, SelectShownMatchInput } from "../match-selection/match-selection.types.js";
@@ -117,7 +118,8 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
     const snapshot = bilateralSnapshotSchema.parse({
       public_code: generateCode(), service_name: safeOpportunityText(match.service_name, 120) || "Serviço solicitado",
       professional_name: safeOpportunityText(match.display_name, 120) || "Profissional escolhido",
-      professional_phone_e164: match.phone_e164, customer_phone_e164: context.inbound.phone_e164,
+      professional_phone_e164: normalizeBrazilianMobilePhone(match.phone_e164),
+      customer_phone_e164: normalizeBrazilianMobilePhone(context.inbound.phone_e164),
       city: textOrNull(location.city), state: textOrNull(location.state),
       // Only retain a neighborhood actually present in the customer's request.
       neighborhood: location.neighborhood && `${location.raw_text} ${location.location_text ?? ""}`.toLocaleLowerCase("pt-BR").includes(location.neighborhood.toLocaleLowerCase("pt-BR")) ? textOrNull(location.neighborhood) : null,
@@ -139,9 +141,9 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
       professional_name: snapshot.professional_name, professional_phone_e164: snapshot.professional_phone_e164, service_name: snapshot.service_name });
     await client.query(`INSERT INTO channel_outbound_messages
       (channel_inbound_message_id, provider, recipient_phone_e164, text_content)
-      VALUES ($1, $2, $3, $4)`, [input.selectionKey, context.inbound.provider, snapshot.customer_phone_e164, presentSelectionMessage(contract)]);
+      VALUES ($1, $2, $3, $4)`, [input.selectionKey, context.inbound.provider, normalizeBrazilianMobilePhone(snapshot.customer_phone_e164), presentSelectionMessage(contract)]);
     await createIndependentOutbound(client, { businessKey: `contact:${contactId}:initial`, purpose: "professional_contact_notification",
-      provider: context.inbound.provider, recipientPhoneE164: snapshot.professional_phone_e164, textContent: presentProfessionalOpportunity(snapshot) });
+      provider: context.inbound.provider, recipientPhoneE164: normalizeBrazilianMobilePhone(snapshot.professional_phone_e164), textContent: presentProfessionalOpportunity(snapshot) });
     return { contactId, snapshot };
   }
   throw new Error("Opportunity code allocation exhausted");

@@ -16,10 +16,12 @@ export const inboxErrorCode = (code: string) => new Set([
   "selection_show_more_pending", "show_more_reservation_conflict", "selection_idempotency_key_required",
   "channel_message_processing", "persisted_proposal_invalid", "persisted_draft_invalid", "conversation_state_invalid",
   "dependency_missing", "lease_abandoned", "attempts_exhausted", "channel_message_result_invalid",
+  "customer_phone_identity_collision",
 ]).has(code) ? code : "internal_error";
 
 export const isInboxPermanent = (code: string) => ["persisted_proposal_invalid", "persisted_draft_invalid",
-  "conversation_state_invalid", "dependency_missing", "channel_message_result_invalid", "selection_idempotency_key_required"].includes(code);
+  "conversation_state_invalid", "dependency_missing", "channel_message_result_invalid", "selection_idempotency_key_required",
+  "customer_phone_identity_collision"].includes(code);
 
 // Applies both to direct requests and recovery. An expired token has no rights even before reclaim.
 export const liveInboxLeaseSql = `status = 'processing' AND recovery_state = 'active'
