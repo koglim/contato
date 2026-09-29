@@ -648,7 +648,8 @@ test("persisted match revalidation: subscription revocation/expiration rejects s
     const contacts = await query(`SELECT id FROM contacts WHERE search_request_id = $1`, [searchRequestId]);
     assert.equal(contacts.rows.length, 0);
     const outbox = await query(
-      `SELECT id FROM channel_outbound_messages WHERE purpose = 'professional_contact_notification'`,
+      `SELECT id FROM channel_outbound_messages WHERE purpose = 'professional_contact_notification' AND recipient_phone_e164 = $1`,
+      [managed.phone],
     );
     assert.equal(outbox.rows.length, 0);
   });
