@@ -1411,3 +1411,51 @@ test("Scenario 16: Professional unavailability does NOT block completion; shared
     await f.cleanup();
   }
 });
+
+test("Scenario 17: Brazilian 8-digit degraded mobile sender recognizes professional and creates completion aggregate", async () => {
+  // Real regression case: professional registered with canonical +5566999029086,
+  // but Evolution API delivers inbound with degraded +556699029086.
+  const f = await createFixture();
+  try {
+    const contact = await f.getContact();
+    const canonicalProfPhone = "+5566999029086";
+    const degradedProfPhone = "+556699029086";
+    await query("UPDATE professionals SET phone_e164 = $1 WHERE id = $2", [canonicalProfPhone, f.professionalId]);
+    await query(
+      `UPDATE contacts
+          SET bilateral_snapshot = jsonb_set(bilateral_snapshot, '{professional_phone_e164}', to_jsonb($1::text))
+        WHERE id = $2`,
+      [canonicalProfPhone, f.contactId]
+    );
+
+    // Professional sends completion command using DEGRADED 8-digit phone (+556699029086)
+    const result = await f.send(`Concluído ${contact.public_code}`, degradedProfPhone);
+
+    // Assert: professional actor is recognized and completion aggregate is created
+    assert.equal(result.result.action, "declared");
+    assert.equal(result.result.actor_role, "professional");
+    assert.match(result.reply_text, /Aguardando confirmação do cliente/);
+
+    const completion = await f.getCompletion();
+    assert.ok(completion, "Completion aggregate must be created");
+    assert.equal(completion.state, "pending_confirmation");
+    assert.equal(completion.declared_by, "professional");
+
+    // Verify inbound message in DB was normalized to canonical +5566999029086
+    const inbound = (await query<{ phone_e164: string }>(
+      "SELECT phone_e164 FROM channel_inbound_messages WHERE id = $1",
+      [result.message_id]
+    )).rows[0];
+    assert.equal(inbound.phone_e164, canonicalProfPhone);
+  } finally {
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completion_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completions WHERE contact_id = $1", [f.contactId]);
+    });
+    await f.cleanup();
+  }
+});
+

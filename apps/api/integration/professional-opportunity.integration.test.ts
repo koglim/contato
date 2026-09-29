@@ -832,3 +832,49 @@ test("post-027 lifecycle: João unavailable then Carlos connection preserves bot
     });
   }
 });
+
+test("professional opportunity regression: degraded 8-digit Brazilian mobile sender resolves professional identity and declares unavailability", async () => {
+  // Scenario F: Professional registered with canonical +5566999029086,
+  // receives opportunity code CC-XXXX, and sends 'não consigo CC-XXXX'
+  // from degraded 8-digit sender +556699029086.
+  const f = await fixture();
+  try {
+    const canonicalProfPhone = "+5566999029086";
+    const degradedProfPhone = "+556699029086";
+
+    // Update professional and snapshot to canonical phone
+    await query("UPDATE professionals SET phone_e164 = $1 WHERE id = $2", [canonicalProfPhone, f.professionalId]);
+    await query(
+      `UPDATE contacts
+          SET bilateral_snapshot = jsonb_set(bilateral_snapshot, '{professional_phone_e164}', to_jsonb($1::text))
+        WHERE id = $2`,
+      [canonicalProfPhone, f.contactId]
+    );
+
+    // Professional sends unavailability declaration with DEGRADED phone
+    const response = await f.send(`não consigo ${f.code}`, degradedProfPhone);
+
+    // Assert: unavailability recognized and outbound created
+    assert.equal(response.result.route, "opportunity_response");
+    assert.equal(response.result.result.action, "unavailability_declared");
+    assert.equal(await f.countUnavailabilityEvents(), 1);
+
+    // Inbound record normalized to canonical phone in DB
+    const inbound = (await query<{ phone_e164: string }>(
+      "SELECT phone_e164 FROM channel_inbound_messages WHERE id = $1",
+      [response.message_id]
+    )).rows[0];
+    assert.equal(inbound.phone_e164, canonicalProfPhone);
+
+    // Customer notification outbound was queued
+    const customerOutbound = (await query<{ recipient_phone_e164: string; text_content: string }>(
+      "SELECT recipient_phone_e164, text_content FROM channel_outbound_messages WHERE recipient_phone_e164 = $1 AND purpose = 'customer_contact_update'",
+      [f.customerPhone]
+    )).rows;
+    assert.equal(customerOutbound.length, 1);
+    assert.match(customerOutbound[0].text_content, /não poderá atender/);
+  } finally {
+    await f.cleanup();
+  }
+});
+

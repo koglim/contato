@@ -27,6 +27,34 @@ test("gateway preserves conversation, escaping and historical instance:id idempo
   assert.deepEqual(normalize(JSON.parse(JSON.stringify(input))), result);
   assert.doesNotMatch(JSON.stringify(result), /jwtPayload|headers|apikey|server_url/);
 });
+
+test("gateway normalizes Brazilian degraded 8-digit mobile numbers while preserving fixed-line and canonical phones", () => {
+  // Scenario A: Degraded Brazilian mobile without 9th digit (e.g. Evolution 2.3.7 bug)
+  const degradedMobile = event();
+  degradedMobile.body.data.key.remoteJid = "556699029086@s.whatsapp.net";
+  assert.equal(normalize(degradedMobile).inbound.phone_e164, "+5566999029086");
+
+  // LID alternative with degraded Brazilian mobile
+  const lidDegraded = event();
+  lidDegraded.body.data.key.remoteJid = "123456789@lid";
+  lidDegraded.body.data.key.remoteJidAlt = "556699029086@s.whatsapp.net";
+  assert.equal(normalize(lidDegraded).inbound.phone_e164, "+5566999029086");
+
+  // Scenario B: Already canonical 9-digit Brazilian mobile
+  const canonicalMobile = event();
+  canonicalMobile.body.data.key.remoteJid = "5566999029086@s.whatsapp.net";
+  assert.equal(normalize(canonicalMobile).inbound.phone_e164, "+5566999029086");
+
+  // Scenario C: Brazilian fixed-line (prefix 3) remains 8-digit
+  const fixedLine = event();
+  fixedLine.body.data.key.remoteJid = "556635321234@s.whatsapp.net";
+  assert.equal(normalize(fixedLine).inbound.phone_e164, "+556635321234");
+
+  // Scenario D: Non-Brazilian international number
+  const intlPhone = event();
+  intlPhone.body.data.key.remoteJid = "14155552671@s.whatsapp.net";
+  assert.equal(normalize(intlPhone).inbound.phone_e164, "+14155552671");
+});
 test("extended text uses the reply, never the quoted message or a caption", () => {
   assert.equal(normalize(event({ extendedTextMessage: { text: "quero a Ana", contextInfo: { quotedMessage: { conversation: "cancelar" } } } })).inbound.raw_text, "quero a Ana");
   assert.equal(normalize(event({ imageMessage: { caption: "cancelar" } })).action, "ignore");

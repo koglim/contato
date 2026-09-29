@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mediaClaimSchema, mediaSummarySchema, type MediaAdmission, type MediaResult } from '@contatocerto/shared';
+import { mediaClaimSchema, mediaSummarySchema, normalizeBrazilianMobilePhone, type MediaAdmission, type MediaResult } from '@contatocerto/shared';
 import { withTransaction, type DatabaseClient } from '../../database/connection.js';
 import { createIndependentOutbound } from '../channel-outbox/channel-outbox.repository.js';
 import { classifyMedia, fingerprint, MEDIA_LEASE_SECONDS, MEDIA_MAX_ATTEMPTS, MEDIA_NOTICES } from './channel-media.policy.js';
@@ -47,12 +47,13 @@ async function notice(db:DatabaseClient,row:MediaRow,reason:keyof typeof MEDIA_N
 export class ChannelMediaService {
   constructor(private readonly contextualEnabled=false) {}
   async admit(input:MediaAdmission) {
+    const phoneE164 = normalizeBrazilianMobilePhone(input.phone_e164);
     const media=classifyMedia(input);
-    const hash=fingerprint(JSON.stringify([input.provider,input.provider_message_id,input.phone_e164,input.country_code,input.limit,media.hash,media.mime,input.duration_seconds]));
+    const hash=fingerprint(JSON.stringify([input.provider,input.provider_message_id,phoneE164,input.country_code,input.limit,media.hash,media.mime,input.duration_seconds]));
     return withTransaction(async db=>{
       const inserted=await db.query<{id:string}>(`INSERT INTO channel_inbound_messages(provider,provider_message_id,phone_e164,raw_text,country_code,limit_value,media_pending,contextual_queue)
         VALUES($1,$2,$3,'[audio pending]',$4,$5,TRUE,$6) ON CONFLICT(provider,provider_message_id) DO NOTHING RETURNING id`,
-      [input.provider,input.provider_message_id,input.phone_e164,input.country_code,input.limit,this.contextualEnabled]);
+      [input.provider,input.provider_message_id,phoneE164,input.country_code,input.limit,this.contextualEnabled]);
       if (!inserted.rows[0]) {
         const existing=(await db.query<MediaRow>(`SELECT m.* FROM channel_media_events m JOIN channel_inbound_messages i ON i.id=m.inbound_id
           WHERE i.provider=$1 AND i.provider_message_id=$2 FOR UPDATE OF m`,[input.provider,input.provider_message_id])).rows[0];

@@ -30,8 +30,11 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
   if (!jid) return reject("webhook_phone_invalid");
   if (typeof key.id !== "string" || !/^[A-Za-z0-9_-]+$/u.test(key.id)
     || `${config.instance}:${key.id}`.length > 255) return reject("webhook_id_invalid");
+  const rawPhone = `+${jid.split("@")[0]}`;
+  const matchBr = /^\+55([1-9]{2})([6-9]\d{7})$/.exec(rawPhone);
+  const phone_e164 = matchBr ? `+55${matchBr[1]}9${matchBr[2]}` : rawPhone;
   const inbound = { provider: config.provider, provider_message_id: `${config.instance}:${key.id}`,
-    phone_e164: `+${jid.split("@")[0]}`, country_code: "BR", limit: 3 };
+    phone_e164, country_code: "BR", limit: 3 };
   const message = body.data.message;
   if (!message || typeof message !== "object" || Array.isArray(message)) return reject("webhook_message_invalid");
   if (message.audioMessage) {
