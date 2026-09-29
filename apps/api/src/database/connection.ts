@@ -1,7 +1,7 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export type SqlValue = string | number | boolean | Date | null;
+export type SqlValue = string | number | boolean | Date | null | readonly string[] | string[] | readonly number[] | number[];
 export type DatabaseClient = Pick<PoolClient, "query">;
 
 let pool: Pool | undefined;

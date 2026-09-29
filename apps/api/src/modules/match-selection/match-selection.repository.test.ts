@@ -43,7 +43,7 @@ function fakeDatabase(results: QueryResultRow[][]) {
   const execute: SelectionMatchQuery = async <T extends QueryResultRow>(text: string, values = []) => {
     calls.push({ text, values });
     let bilateralRows: QueryResultRow[] | undefined;
-    if (text.includes("FROM channel_inbound_messages inbound")) bilateralRows = [{ id: selectInput.selectionKey, provider: "test", phone_e164: "+5566977777777", raw_text: selectInput.lastMessageText, created_at: selectedAtForTest, decision_at: selectedAtForTest }];
+    if (text.includes("FROM channel_inbound_messages inbound")) bilateralRows = [{ id: selectInput.selectionKey, provider: "test", phone_e164: "+5566977777777", customer_phone_e164: "+5566977777777", raw_text: selectInput.lastMessageText, created_at: selectedAtForTest, decision_at: selectedAtForTest }];
     if (text.includes("FROM channel_outbound_message_matches presentation")) bilateralRows = [{ id: conversationId, sent_at: shownAt }];
     if (text.includes("SELECT city, state, neighborhood, raw_text")) bilateralRows = [{ city: "Sinop", state: "MT", neighborhood: null, raw_text: "preciso de eletricista" }];
     if (text.includes("INSERT INTO channel_outbound_messages")) bilateralRows = [{ id: randomUUID() }];

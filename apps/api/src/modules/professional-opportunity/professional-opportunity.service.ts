@@ -1,4 +1,9 @@
-import { channelInboundMessageResponseSchema, opportunityMessageSchema, type ChannelInboundMessageResponse } from "@contatocerto/shared";
+import {
+  channelInboundMessageResponseSchema,
+  opportunityMessageSchema,
+  getPhoneIdentityAliases,
+  type ChannelInboundMessageResponse,
+} from "@contatocerto/shared";
 import { withTransaction, type DatabaseClient } from "../../database/connection.js";
 import { bilateralSnapshotSchema, createOpportunityCode, safeOpportunityText } from "../bilateral-contact/bilateral-contact.policy.js";
 import { parseGlobalConversationCommand } from "../conversation-commands/conversation-command.parser.js";
@@ -34,14 +39,15 @@ export class ProfessionalOpportunityService {
       if(record.contextFingerprint && fingerprint!==record.contextFingerprint) throw new InboxContextChangedError();
       if (parseGlobalConversationCommand(record.rawText)) return null;
       const parsed = parseOpportunityMessage(record.rawText);
-      const customer = (await db.query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = $1", [record.phoneE164])).rows[0];
+      const aliases = getPhoneIdentityAliases(record.phoneE164);
+      const customer = (await db.query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = ANY($1)", [aliases as string[]])).rows[0];
       const active = customer ? (await db.query<Conversation>(`SELECT *, expires_at > NOW() AS valid FROM search_conversations
         WHERE customer_id = $1 AND status = 'active' AND expires_at > NOW()`, [customer.id])).rows[0] : undefined;
       const owned = (await db.query<Contact>(`SELECT contacts.* FROM contacts JOIN professionals ON professionals.id = contacts.professional_id
-        WHERE professionals.phone_e164 = $1 AND contacts.bilateral_snapshot ->> 'professional_phone_e164' = $1
+        WHERE professionals.phone_e164 = $1 AND (contacts.bilateral_snapshot ->> 'professional_phone_e164' = ANY($3))
           AND contacts.bilateral_snapshot IS NOT NULL
           AND (contacts.status IN ('shared', 'requested', 'accepted', 'declined') OR lower(contacts.public_code) = ANY($2::text[]))
-        ORDER BY (contacts.status = 'shared') DESC, (contacts.status = 'requested') DESC, contacts.created_at DESC, contacts.id LIMIT 21`, [record.phoneE164, parsed.codes.map((code) => code.toLowerCase())])).rows;
+        ORDER BY (contacts.status = 'shared') DESC, (contacts.status = 'requested') DESC, contacts.created_at DESC, contacts.id LIMIT 21`, [record.phoneE164, parsed.codes.map((code) => code.toLowerCase()), aliases as string[]])).rows;
       const byCode = owned.filter((contact) => parsed.codes.includes(contact.public_code));
       if (parsed.codes.length === 1 && byCode.length === 1 && parsed.resume === null) {
         return this.decide(db, record, byCode[0], parsed.decision);
@@ -96,9 +102,10 @@ export class ProfessionalOpportunityService {
     const conversation = (await db.query<Conversation>(`SELECT *, expires_at > NOW() AS valid FROM search_conversations WHERE id = $1 FOR NO KEY UPDATE`, [found.selection_conversation_id])).rows[0];
     if (!conversation) return this.finish(db, record, "unavailable", "Essa oportunidade não está disponível para resposta.");
     await db.query("SELECT id FROM search_requests WHERE id = $1 FOR NO KEY UPDATE", [found.search_request_id]);
+    const aliases = getPhoneIdentityAliases(record.phoneE164);
     const contact = (await db.query<Contact>(`SELECT contacts.* FROM contacts JOIN professionals ON professionals.id = contacts.professional_id
-      WHERE contacts.id = $1 AND professionals.phone_e164 = $2 AND bilateral_snapshot ->> 'professional_phone_e164' = $2
-      FOR NO KEY UPDATE OF contacts`, [found.id, record.phoneE164])).rows[0];
+      WHERE contacts.id = $1 AND professionals.phone_e164 = $2 AND (bilateral_snapshot ->> 'professional_phone_e164' = ANY($3))
+      FOR NO KEY UPDATE OF contacts`, [found.id, record.phoneE164, aliases as string[]])).rows[0];
     if (!contact) return this.finish(db, record, "unavailable", "Não consegui identificar essa oportunidade para você.");
     const snapshot = bilateralSnapshotSchema.parse(contact.bilateral_snapshot);
     if (contact.status === "completed") {

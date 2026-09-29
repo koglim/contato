@@ -1457,3 +1457,140 @@ test("Scenario 17: Brazilian 8-digit degraded mobile sender recognizes professio
   }
 });
 
+test("Scenario 18: Historical degraded customer phone in snapshot matches canonical customer confirmation", async () => {
+  // Real bug reproduction:
+  // Historical snapshot has customer_phone_e164 = "+559984119070" (degraded 8-digit)
+  // Professional has canonical +5566999029086
+  const degradedCustomerPhone = "+559984119070";
+  const canonicalCustomerPhone = "+5599984119070";
+  const canonicalProfPhone = "+5566999029086";
+
+  const f = await createFixture({
+    customerPhone: degradedCustomerPhone,
+    professionalPhone: canonicalProfPhone,
+  });
+
+  try {
+    const contact = await f.getContact();
+
+    // 1. Professional declares completion: "Concluído CC-W98ZLLUP"
+    const declRes = await f.send(`Concluído ${contact.public_code}`, canonicalProfPhone);
+    assert.equal(declRes.result.action, "declared");
+    assert.match(declRes.reply_text, /Aguardando confirmação do cliente/);
+
+    const completionBefore = await f.getCompletion();
+    assert.equal(completionBefore?.state, "pending_confirmation");
+    assert.equal(completionBefore?.declared_by, "professional");
+
+    // 2. Customer confirms completion using canonical phone: "confirmar CC-W98ZLLUP"
+    const confRes = await f.send(`confirmar ${contact.public_code}`, canonicalCustomerPhone);
+    assert.equal(confRes.result.action, "confirmed");
+    assert.match(confRes.reply_text, /confirmada com sucesso/);
+
+    // 3. Contact is now 'completed' and completion state is 'confirmed'
+    const contactAfter = await f.getContact();
+    assert.equal(contactAfter.status, "completed");
+
+    const completionAfter = await f.getCompletion();
+    assert.equal(completionAfter?.state, "confirmed");
+    assert.ok(completionAfter?.confirmed_at !== null);
+
+    const events = await f.getEvents();
+    assert.equal(events.length, 2);
+    assert.equal(events[0].actor_role, "professional");
+    assert.equal(events[0].action, "declared");
+    assert.equal(events[1].actor_role, "customer");
+    assert.equal(events[1].action, "confirmed");
+  } finally {
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completion_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completions WHERE contact_id = $1", [f.contactId]);
+    });
+    await f.cleanup();
+  }
+});
+
+test("Scenario 19: Historical degraded customer phone in snapshot matches canonical customer contestation", async () => {
+  const degradedCustomerPhone = "+559984119070";
+  const canonicalCustomerPhone = "+5599984119070";
+  const canonicalProfPhone = "+5566999029086";
+
+  const f = await createFixture({
+    customerPhone: degradedCustomerPhone,
+    professionalPhone: canonicalProfPhone,
+  });
+
+  try {
+    const contact = await f.getContact();
+
+    // 1. Professional declares completion: "Concluído CC-..."
+    const declRes = await f.send(`Concluído ${contact.public_code}`, canonicalProfPhone);
+    assert.equal(declRes.result.action, "declared");
+
+    // 2. Customer contests completion using canonical phone: "contestar CC-..."
+    const contestRes = await f.send(`contestar ${contact.public_code}`, canonicalCustomerPhone);
+    assert.equal(contestRes.result.action, "contested");
+    assert.match(contestRes.reply_text, /A contestação da conclusão do serviço .* foi registrada/);
+
+    // 3. Contact remains 'shared' and completion state is 'contested'
+    const contactAfter = await f.getContact();
+    assert.equal(contactAfter.status, "shared");
+
+    const completionAfter = await f.getCompletion();
+    assert.equal(completionAfter?.state, "contested");
+    assert.ok(completionAfter?.contested_at !== null);
+
+    const events = await f.getEvents();
+    assert.equal(events.length, 2);
+    assert.equal(events[0].actor_role, "professional");
+    assert.equal(events[0].action, "declared");
+    assert.equal(events[1].actor_role, "customer");
+    assert.equal(events[1].action, "contested");
+  } finally {
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completion_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completions WHERE contact_id = $1", [f.contactId]);
+    });
+    await f.cleanup();
+  }
+});
+
+test("Scenario 20: Code-free completion declaration and confirmation with historical degraded snapshot phone", async () => {
+  const degradedCustomerPhone = "+559984119070";
+  const canonicalCustomerPhone = "+5599984119070";
+  const canonicalProfPhone = "+5566999029086";
+
+  const f = await createFixture({
+    customerPhone: degradedCustomerPhone,
+    professionalPhone: canonicalProfPhone,
+  });
+
+  try {
+    // 1. Professional declares without code: "concluído" (single active contact)
+    const declRes = await f.send("concluído", canonicalProfPhone);
+    assert.equal(declRes.result.action, "declared");
+
+    // 2. Customer confirms without code: "confirmar" (single pending completion)
+    const confRes = await f.send("confirmar", canonicalCustomerPhone);
+    assert.equal(confRes.result.action, "confirmed");
+
+    const contactAfter = await f.getContact();
+    assert.equal(contactAfter.status, "completed");
+  } finally {
+    await withTransaction(async (db) => {
+      await db.query("UPDATE channel_outbound_messages SET completion_event_id = NULL WHERE completion_event_id IN (SELECT id FROM contact_completion_events WHERE contact_id = $1)", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completion_events WHERE contact_id = $1", [f.contactId]);
+      await db.query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+      await db.query("DELETE FROM contact_completions WHERE contact_id = $1", [f.contactId]);
+    });
+    await f.cleanup();
+  }
+});
+

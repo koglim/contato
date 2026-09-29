@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { selectionMessageContractSchema } from "@contatocerto/shared";
+import {
+  selectionMessageContractSchema,
+  arePhoneIdentitiesEquivalent,
+  getPhoneIdentityAliases,
+} from "@contatocerto/shared";
 import type { DatabaseClient } from "../../database/connection.js";
 import type { ConsentOutcome, SelectShownMatchInput } from "../match-selection/match-selection.types.js";
 import { createIndependentOutbound } from "../channel-outbox/channel-outbox.repository.js";
@@ -17,12 +21,14 @@ export const pendingConsentSchema = z.object({
 
 type Inbound = { id: string; provider: string; phone_e164: string; raw_text: string; created_at: Date; decision_at: Date };
 export async function selectionInbound(client: DatabaseClient, input: SelectShownMatchInput) {
-  const result = await client.query<Inbound>(`SELECT inbound.id, inbound.provider, inbound.phone_e164,
-      inbound.raw_text, inbound.created_at, NOW() AS decision_at
-    FROM channel_inbound_messages inbound JOIN customers ON customers.phone_e164 = inbound.phone_e164
-    WHERE inbound.id = $1 AND customers.id = $2`, [input.selectionKey, input.customerId]);
+  const result = await client.query<Inbound & { customer_phone_e164?: string }>(`SELECT inbound.id, inbound.provider, inbound.phone_e164,
+      inbound.raw_text, inbound.created_at, NOW() AS decision_at, customers.phone_e164 AS customer_phone_e164
+    FROM channel_inbound_messages inbound JOIN customers ON customers.id = $2
+    WHERE inbound.id = $1`, [input.selectionKey, input.customerId]);
   const inbound = result.rows[0];
-  return inbound && inbound.raw_text === input.lastMessageText ? inbound : null;
+  if (!inbound) return null;
+  if (inbound.customer_phone_e164 && !arePhoneIdentitiesEquivalent(inbound.phone_e164, inbound.customer_phone_e164)) return null;
+  return inbound.raw_text === input.lastMessageText ? inbound : null;
 }
 
 export async function persistConsentResponse(client: DatabaseClient, input: SelectShownMatchInput, inbound: Inbound, outcome: ConsentOutcome) {
@@ -58,7 +64,7 @@ export async function prepareBilateralSelection(client: DatabaseClient, input: S
     const notice = await client.query<{ id: string; sent_at: Date }>(`SELECT outbound.id, outbound.sent_at
       FROM channel_outbound_messages outbound
       JOIN channel_inbound_messages prompt ON prompt.id = outbound.channel_inbound_message_id
-      WHERE outbound.status = 'sent' AND outbound.recipient_phone_e164 = $2
+      WHERE outbound.status = 'sent' AND outbound.recipient_phone_e164 = ANY($2)
         AND outbound.bilateral_notice_version = $3
         AND outbound.sent_at <= (SELECT created_at FROM channel_inbound_messages WHERE id = $4)
         AND strpos(outbound.text_content, $5) > 0
@@ -69,7 +75,7 @@ export async function prepareBilateralSelection(client: DatabaseClient, input: S
           AND prompt.result -> 'result' ->> 'kind' = 'consent_required'
           AND prompt.result -> 'result' ->> 'professional_name' = $10))
       ORDER BY outbound.sent_at DESC, outbound.id LIMIT 1`,
-    [pending.noticeOutboundId, inbound.phone_e164, BILATERAL_NOTICE_VERSION, inbound.id, BILATERAL_NOTICE,
+    [pending.noticeOutboundId, getPhoneIdentityAliases(inbound.phone_e164), BILATERAL_NOTICE_VERSION, inbound.id, BILATERAL_NOTICE,
       input.customerId, input.conversationId, input.searchRequestId, pending.choiceKey, pending.professionalDisplayName]);
     if (!notice.rows[0]) return { kind: "consent_required", professionalDisplayName: pending.professionalDisplayName };
     return { kind: "ready", context: { inbound, noticeId: notice.rows[0].id, noticeSentAt: notice.rows[0].sent_at,
@@ -82,11 +88,11 @@ export async function prepareBilateralSelection(client: DatabaseClient, input: S
     JOIN channel_inbound_messages original ON original.id = outbound.channel_inbound_message_id
     WHERE presentation.match_id = $1 AND original.customer_id = $2 AND original.search_request_id = $3
       AND original.conversation_id = $8
-      AND outbound.recipient_phone_e164 = $4 AND outbound.status = 'sent'
+      AND outbound.recipient_phone_e164 = ANY($4) AND outbound.status = 'sent'
       AND outbound.bilateral_notice_version = $5
       AND outbound.sent_at <= (SELECT created_at FROM channel_inbound_messages WHERE id = $6)
       AND strpos(outbound.text_content, $7) > 0`,
-  [match.match_id, input.customerId, input.searchRequestId, inbound.phone_e164, BILATERAL_NOTICE_VERSION, inbound.id, BILATERAL_NOTICE, input.conversationId]);
+  [match.match_id, input.customerId, input.searchRequestId, getPhoneIdentityAliases(inbound.phone_e164), BILATERAL_NOTICE_VERSION, inbound.id, BILATERAL_NOTICE, input.conversationId]);
   if (notice.rows[0]) return { kind: "ready", context: { inbound, noticeId: notice.rows[0].id,
     noticeSentAt: notice.rows[0].sent_at, choiceKey: inbound.id, chosenAt: inbound.decision_at.toISOString(), method: "selection_after_notice" } };
   const outcome: ConsentOutcome = { kind: "consent_required", professionalDisplayName: safeOpportunityText(match.display_name, 120) || "profissional escolhido" };

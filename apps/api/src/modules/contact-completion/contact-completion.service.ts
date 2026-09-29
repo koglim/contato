@@ -1,6 +1,7 @@
 import {
   channelInboundMessageResponseSchema,
   contactCompletionMessageSchema,
+  arePhoneIdentitiesEquivalent,
   type ChannelInboundMessageResponse,
 } from "@contatocerto/shared";
 import { withTransaction, type DatabaseClient } from "../../database/connection.js";
@@ -205,13 +206,13 @@ export class ContactCompletionService {
       let actorLabel = "";
       let counterpartLabel = "";
 
-      if (record.phoneE164 === snapshot.customer_phone_e164) {
+      if (arePhoneIdentitiesEquivalent(record.phoneE164, snapshot.customer_phone_e164)) {
         actorRole = "customer";
         counterpartRole = "professional";
         counterpartPhone = snapshot.professional_phone_e164;
         actorLabel = "O cliente";
         counterpartLabel = "do profissional";
-      } else if (record.phoneE164 === snapshot.professional_phone_e164) {
+      } else if (arePhoneIdentitiesEquivalent(record.phoneE164, snapshot.professional_phone_e164)) {
         actorRole = "professional";
         counterpartRole = "customer";
         counterpartPhone = snapshot.customer_phone_e164;

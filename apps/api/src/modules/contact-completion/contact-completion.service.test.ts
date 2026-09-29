@@ -963,3 +963,189 @@ test("contact completion service is decoupled from active-search context fingerp
   assert.equal(res.result.action, "declared");
   assert.match(res.reply_text, /Aguardando confirmação do profissional/);
 });
+
+test("contact completion service resolves customer with historical degraded phone in snapshot against canonical inbound", async () => {
+  // Snapshot has degraded 8-digit phone +559984119070
+  const contact = createMockContact({
+    public_code: "CC-W98ZLLUP",
+    bilateral_snapshot: {
+      public_code: "CC-W98ZLLUP",
+      service_name: "Eletricista",
+      city: "Imperatriz",
+      state: "MA",
+      neighborhood: "Centro",
+      summary: "Serviço elétrico",
+      professional_name: "Farol",
+      professional_phone_e164: "+5566999029086",
+      customer_phone_e164: "+559984119070",
+      notice_version: "bilateral-v1",
+      notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(),
+      choice_inbound_id: randomUUID(),
+      chosen_at: new Date().toISOString(),
+      consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice",
+    },
+  });
+
+  const mockRepo: ContactCompletionRepository = {
+    findLastClarification: async () => null,
+    findContactByPublicCode: async () => contact,
+    lockContact: async () => contact,
+    findCompletionByContactId: async () => ({
+      id: randomUUID(),
+      contact_id: contact.id,
+      state: "pending_confirmation",
+      declared_by: "professional",
+      declared_at: new Date(),
+      confirmed_at: null,
+      contested_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    createCompletion: async () => { throw new Error("not called"); },
+    updateCompletionState: async (_db, id, update) => ({
+      id,
+      contact_id: contact.id,
+      state: update.state,
+      declared_by: "professional",
+      declared_at: new Date(),
+      confirmed_at: update.confirmedAt ?? null,
+      contested_at: update.contestedAt ?? null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    updateContactStatus: async () => {},
+    createEvent: async () => ({
+      id: randomUUID(),
+      completion_id: randomUUID(),
+      contact_id: contact.id,
+      actor_role: "customer",
+      action: "confirmed",
+      inbound_message_id: randomUUID(),
+      created_at: new Date(),
+    }),
+    insertOutboundReply: async () => randomUUID(),
+    insertOutboundNotification: async () => randomUUID(),
+    markInboundProcessed: async () => {},
+    findEligibleContactsByPhone: async () => [contact],
+    findPendingCompletionsByPhone: async () => [],
+  };
+
+  const service = new ContactCompletionService(
+    mockRepo,
+    async (fn) => {
+      const db = createMockDb();
+      db.query = async (sql) => {
+        if (sql.includes("SELECT status, processing_token")) {
+          return { rows: [{ status: "processing", processing_token: "tok-cust", result: null, response_outbound_id: null }], rowCount: 1 };
+        }
+        if (sql.includes("channel_inbound_messages WHERE id")) {
+          return { rows: [{ id: "msg-cust" }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+      return fn(db);
+    }
+  );
+
+  // Customer sends confirmation with canonical 9-digit E.164: +5599984119070
+  const record = createInboundRecord({
+    rawText: "confirmar CC-W98ZLLUP",
+    phoneE164: "+5599984119070",
+    processingToken: "tok-cust",
+  });
+
+  const res = await service.handle(record);
+  assert.ok(res);
+  assert.equal(res.result.action, "confirmed");
+  assert.match(res.reply_text, /Conclusão do serviço CC-W98ZLLUP confirmada com sucesso/);
+});
+
+test("contact completion service resolves professional with historical degraded phone in snapshot against canonical inbound", async () => {
+  // Snapshot has degraded 8-digit professional phone +556699029086
+  const contact = createMockContact({
+    public_code: "CC-W98ZLLUP",
+    bilateral_snapshot: {
+      public_code: "CC-W98ZLLUP",
+      service_name: "Eletricista",
+      city: "Sinop",
+      state: "MT",
+      neighborhood: "Centro",
+      summary: "Serviço elétrico",
+      professional_name: "Farol",
+      professional_phone_e164: "+556699029086",
+      customer_phone_e164: "+5599984119070",
+      notice_version: "bilateral-v1",
+      notice_outbound_id: randomUUID(),
+      notice_sent_at: new Date().toISOString(),
+      choice_inbound_id: randomUUID(),
+      chosen_at: new Date().toISOString(),
+      consented_at: new Date().toISOString(),
+      consent_method: "selection_after_notice",
+    },
+  });
+
+  const mockRepo: ContactCompletionRepository = {
+    findLastClarification: async () => null,
+    findContactByPublicCode: async () => contact,
+    lockContact: async () => contact,
+    findCompletionByContactId: async () => null,
+    createCompletion: async (_db, input) => ({
+      id: randomUUID(),
+      contact_id: input.contactId,
+      state: input.state,
+      declared_by: input.declaredBy,
+      declared_at: new Date(),
+      confirmed_at: null,
+      contested_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    updateCompletionState: async () => { throw new Error("not called"); },
+    updateContactStatus: async () => {},
+    createEvent: async () => ({
+      id: randomUUID(),
+      completion_id: randomUUID(),
+      contact_id: contact.id,
+      actor_role: "professional",
+      action: "declared",
+      inbound_message_id: randomUUID(),
+      created_at: new Date(),
+    }),
+    insertOutboundReply: async () => randomUUID(),
+    insertOutboundNotification: async () => randomUUID(),
+    markInboundProcessed: async () => {},
+    findEligibleContactsByPhone: async () => [contact],
+    findPendingCompletionsByPhone: async () => [],
+  };
+
+  const service = new ContactCompletionService(
+    mockRepo,
+    async (fn) => {
+      const db = createMockDb();
+      db.query = async (sql) => {
+        if (sql.includes("SELECT status, processing_token")) {
+          return { rows: [{ status: "processing", processing_token: "tok-prof", result: null, response_outbound_id: null }], rowCount: 1 };
+        }
+        if (sql.includes("channel_inbound_messages WHERE id")) {
+          return { rows: [{ id: "msg-prof" }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      };
+      return fn(db);
+    }
+  );
+
+  // Professional sends declaration with canonical 9-digit E.164: +5566999029086
+  const record = createInboundRecord({
+    rawText: "concluido CC-W98ZLLUP",
+    phoneE164: "+5566999029086",
+    processingToken: "tok-prof",
+  });
+
+  const res = await service.handle(record);
+  assert.ok(res);
+  assert.equal(res.result.action, "declared");
+  assert.match(res.reply_text, /Aguardando confirmação do cliente/);
+});

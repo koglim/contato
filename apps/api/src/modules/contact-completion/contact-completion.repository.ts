@@ -1,3 +1,4 @@
+import { getPhoneIdentityAliases } from "@contatocerto/shared";
 import type { DatabaseClient } from "../../database/connection.js";
 import type {
   ContactCompletionRepository,
@@ -12,29 +13,31 @@ import type {
 
 export class PostgresContactCompletionRepository implements ContactCompletionRepository {
   async findEligibleContactsByPhone(db: DatabaseClient, phoneE164: string): Promise<ContactRow[]> {
+    const aliases = getPhoneIdentityAliases(phoneE164);
     const res = await db.query<ContactRow>(
       `SELECT c.id, c.customer_id, c.professional_id, c.search_request_id, c.selection_conversation_id, c.public_code, c.status, c.bilateral_snapshot
        FROM contacts c
        WHERE c.bilateral_snapshot IS NOT NULL
-         AND (c.bilateral_snapshot->>'customer_phone_e164' = $1 OR c.bilateral_snapshot->>'professional_phone_e164' = $1)
+         AND (c.bilateral_snapshot->>'customer_phone_e164' = ANY($1) OR c.bilateral_snapshot->>'professional_phone_e164' = ANY($1))
          AND c.status IN ('shared', 'accepted')
        ORDER BY c.created_at DESC`,
-      [phoneE164]
+      [aliases as string[]]
     );
     return res.rows;
   }
 
   async findPendingCompletionsByPhone(db: DatabaseClient, phoneE164: string): Promise<{ contact: ContactRow; completion: ContactCompletionRow }[]> {
+    const aliases = getPhoneIdentityAliases(phoneE164);
     const res = await db.query<ContactRow & { completion_id: string; state: ContactCompletionState; declared_by: ContactCompletionActorRole; declared_at: Date; confirmed_at: Date | null; contested_at: Date | null; completion_created_at: Date; completion_updated_at: Date }>(
       `SELECT c.id, c.customer_id, c.professional_id, c.search_request_id, c.selection_conversation_id, c.public_code, c.status, c.bilateral_snapshot,
               cc.id AS completion_id, cc.state, cc.declared_by, cc.declared_at, cc.confirmed_at, cc.contested_at, cc.created_at AS completion_created_at, cc.updated_at AS completion_updated_at
        FROM contacts c
        JOIN contact_completions cc ON cc.contact_id = c.id
        WHERE c.bilateral_snapshot IS NOT NULL
-         AND (c.bilateral_snapshot->>'customer_phone_e164' = $1 OR c.bilateral_snapshot->>'professional_phone_e164' = $1)
+         AND (c.bilateral_snapshot->>'customer_phone_e164' = ANY($1) OR c.bilateral_snapshot->>'professional_phone_e164' = ANY($1))
          AND cc.state = 'pending_confirmation'
        ORDER BY cc.created_at DESC`,
-      [phoneE164]
+      [aliases as string[]]
     );
     return res.rows.map((row) => ({
       contact: {
@@ -62,13 +65,14 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
   }
 
   async findLastClarification(db: DatabaseClient, provider: string, phoneE164: string): Promise<ContactCompletionMessage | null> {
+    const aliases = getPhoneIdentityAliases(phoneE164);
     const res = await db.query<{ result: unknown }>(
       `SELECT result
        FROM channel_inbound_messages
-       WHERE provider = $1 AND phone_e164 = $2 AND status = 'processed'
+       WHERE provider = $1 AND phone_e164 = ANY($2) AND status = 'processed'
        ORDER BY created_at DESC
        LIMIT 1`,
-      [provider, phoneE164]
+      [provider, aliases as string[]]
     );
     if (!res.rows[0]?.result) return null;
     const msg = res.rows[0].result as ContactCompletionMessage;
