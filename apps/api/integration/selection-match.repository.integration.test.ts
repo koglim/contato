@@ -852,6 +852,7 @@ test("Regression E: new bilateral snapshot from historical degraded professional
       position: 1,
       lastMessageText: "1",
       selectionKey: choiceId,
+      confirmBilateral: true,
     });
     assert.equal(result.kind, "selected");
 
