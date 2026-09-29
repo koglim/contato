@@ -1428,13 +1428,16 @@ test("Scenario 17: Brazilian 8-digit degraded mobile sender recognizes professio
 
     // Assert: professional actor is recognized and completion aggregate is created
     assert.equal(result.result.action, "declared");
-    assert.equal(result.result.actor_role, "professional");
     assert.match(result.reply_text, /Aguardando confirmação do cliente/);
 
     const completion = await f.getCompletion();
     assert.ok(completion, "Completion aggregate must be created");
     assert.equal(completion.state, "pending_confirmation");
     assert.equal(completion.declared_by, "professional");
+
+    const events = await f.getEvents();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].actor_role, "professional");
 
     // Verify inbound message in DB was normalized to canonical +5566999029086
     const inbound = (await query<{ phone_e164: string }>(

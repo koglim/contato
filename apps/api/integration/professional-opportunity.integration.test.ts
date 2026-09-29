@@ -845,8 +845,8 @@ test("professional opportunity regression: degraded 8-digit Brazilian mobile sen
     const response = await f.send(`não consigo ${f.code}`, degradedProfPhone);
 
     // Assert: unavailability recognized and outbound created
-    assert.equal(response.result.route, "opportunity_response");
-    assert.equal(response.result.result.action, "unavailability_declared");
+    assert.equal(response.result.route, "opportunity");
+    assert.equal(response.result.result.kind, "unavailability_declared");
     assert.equal(await f.countUnavailabilityEvents(), 1);
 
     // Inbound record normalized to canonical phone in DB
