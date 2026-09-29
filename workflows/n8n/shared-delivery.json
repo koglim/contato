@@ -26,7 +26,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction claimDecision(response, expectedProvider) {\n  response = httpResponse(response);\n  if (response?.statusCode === 204) return { action: \"stop\", reason: \"empty\" };\n  if (response?.statusCode === 409) return { action: \"stop\", reason: \"busy\" };\n  if (response?.statusCode !== 200) throw new Error(\"outbox_claim_unavailable\");\n  const message = response.body;\n  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;\n  const purposes = [\"customer_reply\", \"professional_contact_notification\", \"professional_reply\", \"customer_contact_update\", \"channel_notice\", \"professional_auth_challenge\"];\n  if (!uuid.test(message?.id ?? \"\") || !purposes.includes(message?.purpose)\n    || !Number.isInteger(message?.attempt_count) || message.attempt_count < 0) throw new Error(\"outbox_claim_invalid\");\n  if (message.status === \"sent\") return { action: \"stop\", reason: \"sent\" };\n  if (message.status !== \"processing\" || !uuid.test(message.processing_token ?? \"\")\n    || !/^[a-z][a-z0-9_-]{0,62}$/u.test(expectedProvider ?? \"\") || message.provider !== expectedProvider\n    || !/^\\+[1-9][0-9]{7,14}$/u.test(message.recipient_phone_e164 ?? \"\")\n    || message.message_type !== \"text\" || typeof message.text_content !== \"string\"\n    || !message.text_content.trim() || message.text_content.length > 2000) throw new Error(\"outbox_claim_invalid\");\n  return { action: \"send\", message: {\n    id: message.id, purpose: message.purpose, provider: message.provider,\n    recipient_phone_e164: message.recipient_phone_e164, text_content: message.text_content,\n    processing_token: message.processing_token,\n  } };\n}\nreturn { json: claimDecision($json, $vars.EVOLUTION_PROVIDER) };"
+        "jsCode": "function httpResponse(response) {\n  if (typeof response?.body !== \"string\") return response;\n  if (!response.body.trim()) return { ...response, body: null };\n  try { return { ...response, body: JSON.parse(response.body) }; }\n  catch { return { ...response, body: null }; }\n}\nfunction claimDecision(response, expectedProvider) {\n  response = httpResponse(response);\n  if (response?.statusCode === 204) return { action: \"stop\", reason: \"empty\" };\n  if (response?.statusCode === 409) return { action: \"stop\", reason: \"busy\" };\n  if (response?.statusCode !== 200) throw new Error(\"outbox_claim_unavailable\");\n  const message = response.body;\n  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;\n  const purposes = [\"customer_reply\", \"professional_contact_notification\", \"professional_reply\", \"customer_contact_update\", \"channel_notice\", \"professional_auth_challenge\"];\n  if (!uuid.test(message?.id ?? \"\") || !purposes.includes(message?.purpose)\n    || !Number.isInteger(message?.attempt_count) || message.attempt_count < 0) throw new Error(\"outbox_claim_invalid\");\n  if (message.status === \"sent\") return { action: \"stop\", reason: \"sent\" };\n  if (message.status !== \"processing\" || !uuid.test(message.processing_token ?? \"\")\n    || !/^[a-z][a-z0-9_-]{0,62}$/u.test(expectedProvider ?? \"\") || message.provider !== expectedProvider\n    || !/^\\+[1-9][0-9]{7,14}$/u.test(message.recipient_phone_e164 ?? \"\")\n    || message.message_type !== \"text\" || typeof message.text_content !== \"string\"\n    || !message.text_content.trim() || message.text_content.length > 2000) throw new Error(\"outbox_claim_invalid\");\n  return { action: \"send\", message: {\n    id: message.id, purpose: message.purpose, provider: message.provider,\n    recipient_phone_e164: message.recipient_phone_e164, text_content: message.text_content,\n    processing_token: message.processing_token,\n  } };\n}\nreturn { json: claimDecision($json, $env.EVOLUTION_PROVIDER) };"
       }
     },
     {
@@ -73,7 +73,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.EVOLUTION_API_BASE_URL + '/message/sendText/' + encodeURIComponent($vars.EVOLUTION_INSTANCE) }}",
+        "url": "={{ $env.EVOLUTION_API_BASE_URL + '/message/sendText/' + encodeURIComponent($env.EVOLUTION_INSTANCE) }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
@@ -129,7 +129,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.message.id + '/' + $json.outcome.action }}",
+        "url": "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.message.id + '/' + $json.outcome.action }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
@@ -220,7 +220,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.id + '/hold' }}",
+        "url": "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.id + '/hold' }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,

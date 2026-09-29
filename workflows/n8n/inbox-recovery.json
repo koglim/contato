@@ -47,7 +47,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/next/process' }}",
+        "url": "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/next/process' }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
