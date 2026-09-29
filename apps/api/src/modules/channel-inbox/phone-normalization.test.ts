@@ -41,6 +41,37 @@ test("normalizeBrazilianMobilePhone: preserves non-Brazilian E.164 phone numbers
   assert.equal(normalizeBrazilianMobilePhone("+4915123456789"), "+4915123456789"); // Germany
 });
 
+test("normalizeBrazilianMobilePhone: enforces Brazilian DDD validation strictly (67 valid DDDs)", () => {
+  // Valid DDDs with 8-digit mobile are repaired to 9 digits
+  assert.equal(normalizeBrazilianMobilePhone("+556699029086"), "+5566999029086"); // DDD 66 (Sinop/MT)
+  assert.equal(normalizeBrazilianMobilePhone("+551198765432"), "+5511998765432"); // DDD 11 (SP)
+  assert.equal(normalizeBrazilianMobilePhone("+552197654321"), "+5521997654321"); // DDD 21 (RJ)
+  assert.equal(normalizeBrazilianMobilePhone("+553196543210"), "+5531996543210"); // DDD 31 (BH/MG)
+  assert.equal(normalizeBrazilianMobilePhone("+554195432109"), "+5541995432109"); // DDD 41 (Curitiba/PR)
+  assert.equal(normalizeBrazilianMobilePhone("+555194321098"), "+5551994321098"); // DDD 51 (Porto Alegre/RS)
+  assert.equal(normalizeBrazilianMobilePhone("+557193210987"), "+5571993210987"); // DDD 71 (Salvador/BA)
+  assert.equal(normalizeBrazilianMobilePhone("+558192109876"), "+5581992109876"); // DDD 81 (Recife/PE)
+  assert.equal(normalizeBrazilianMobilePhone("+559191098765"), "+5591991098765"); // DDD 91 (Belém/PA)
+
+  // Invalid DDDs (not in Anatel official set) must NOT be repaired
+  assert.equal(normalizeBrazilianMobilePhone("+551099029086"), "+551099029086"); // DDD 10 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+552099029086"), "+552099029086"); // DDD 20 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+552399029086"), "+552399029086"); // DDD 23 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+552599029086"), "+552599029086"); // DDD 25 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+552699029086"), "+552699029086"); // DDD 26 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+552999029086"), "+552999029086"); // DDD 29 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+553099029086"), "+553099029086"); // DDD 30 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+553699029086"), "+553699029086"); // DDD 36 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+553999029086"), "+553999029086"); // DDD 39 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+554099029086"), "+554099029086"); // DDD 40 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+555099029086"), "+555099029086"); // DDD 50 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+555299029086"), "+555299029086"); // DDD 52 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+556099029086"), "+556099029086"); // DDD 60 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+557099029086"), "+557099029086"); // DDD 70 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+558099029086"), "+558099029086"); // DDD 80 (invalid)
+  assert.equal(normalizeBrazilianMobilePhone("+559099029086"), "+559099029086"); // DDD 90 (invalid)
+});
+
 test("normalizeBrazilianMobilePhone: handles edge cases and invalid inputs safely", () => {
   assert.equal(normalizeBrazilianMobilePhone(""), "");
   assert.equal(normalizeBrazilianMobilePhone("invalid"), "invalid");
