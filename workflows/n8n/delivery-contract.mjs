@@ -1,5 +1,39 @@
 // Pure functions embedded unchanged in n8n Code nodes by build-workflows.mjs.
 // No credentials, HTTP calls or model calls belong in this module.
+
+export const VALID_BRAZILIAN_DDDS = new Set([
+  "11", "12", "13", "14", "15", "16", "17", "18", "19",
+  "21", "22", "24", "27", "28",
+  "31", "32", "33", "34", "35", "37", "38",
+  "41", "42", "43", "44", "45", "46", "47", "48", "49",
+  "51", "53", "54", "55",
+  "61", "62", "63", "64", "65", "66", "67", "68", "69",
+  "71", "73", "74", "75", "77", "79",
+  "81", "82", "83", "84", "85", "86", "87", "88", "89",
+  "91", "92", "93", "94", "95", "96", "97", "98", "99",
+]);
+
+export function normalizeBrazilianMobilePhone(phone) {
+  if (typeof phone !== "string") return phone;
+  const match = /^\+55([1-9]{2})([6-9]\d{7})$/.exec(phone);
+  if (match && VALID_BRAZILIAN_DDDS.has(match[1])) {
+    return `+55${match[1]}9${match[2]}`;
+  }
+  return phone;
+}
+
+export function extractPhoneFromJid(jid) {
+  if (typeof jid !== "string") return null;
+  const match = /^([1-9]\d{7,14})(?::(\d+))?@s\.whatsapp\.net$/u.exec(jid);
+  if (!match) return null;
+  return normalizeBrazilianMobilePhone(`+${match[1]}`);
+}
+
+export function isOpaqueJid(jid) {
+  if (typeof jid !== "string") return false;
+  return /^[a-zA-Z0-9_.-]+(?::\d+)?@(lid|hosted|hosted\.lid)$/u.test(jid);
+}
+
 export function httpResponse(response) {
   if (typeof response?.body !== "string") return response;
   if (!response.body.trim()) return { ...response, body: null };
@@ -31,13 +65,80 @@ export function claimDecision(response, expectedProvider) {
 }
 
 export function transportDecision(response, message) {
+  const VALID_BRAZILIAN_DDDS = new Set([
+    "11", "12", "13", "14", "15", "16", "17", "18", "19",
+    "21", "22", "24", "27", "28",
+    "31", "32", "33", "34", "35", "37", "38",
+    "41", "42", "43", "44", "45", "46", "47", "48", "49",
+    "51", "53", "54", "55",
+    "61", "62", "63", "64", "65", "66", "67", "68", "69",
+    "71", "73", "74", "75", "77", "79",
+    "81", "82", "83", "84", "85", "86", "87", "88", "89",
+    "91", "92", "93", "94", "95", "96", "97", "98", "99",
+  ]);
+
+  const normalizeBr = (phone) => {
+    if (typeof phone !== "string") return phone;
+    const match = /^\+55([1-9]{2})([6-9]\d{7})$/.exec(phone);
+    if (match && VALID_BRAZILIAN_DDDS.has(match[1])) {
+      return `+55${match[1]}9${match[2]}`;
+    }
+    return phone;
+  };
+
+  const extractPhone = (jid) => {
+    if (typeof jid !== "string") return null;
+    const match = /^([1-9]\d{7,14})(?::(\d+))?@s\.whatsapp\.net$/u.exec(jid);
+    if (!match) return null;
+    return normalizeBr(`+${match[1]}`);
+  };
+
+  const isOpaque = (jid) => {
+    if (typeof jid !== "string") return false;
+    return /^[a-zA-Z0-9_.-]+(?::\d+)?@(lid|hosted|hosted\.lid)$/u.test(jid);
+  };
+
   response = httpResponse(response);
   const code = response?.statusCode;
   const key = response?.body?.key;
-  if (Number.isInteger(code) && code >= 200 && code < 300
-    && key?.fromMe === true && typeof key.id === "string" && key.id.trim()
-    && key.id.length <= 255 && key.remoteJid === `${message.recipient_phone_e164.slice(1)}@s.whatsapp.net`) {
-    return { action: "sent", payload: { processing_token: message.processing_token, provider_message_id: key.id } };
+  if (Number.isInteger(code) && code >= 200 && code < 300) {
+    if (key?.fromMe === true && typeof key?.id === "string" && key.id.trim() && key.id.length <= 255) {
+      if (key.addressingMode === undefined || (typeof key.addressingMode === "string" && ["lid", "pn"].includes(key.addressingMode))) {
+        const primaryPhone = extractPhone(key.remoteJid);
+        const primaryOpaque = isOpaque(key.remoteJid);
+        if (primaryPhone || primaryOpaque) {
+          let altPhone = null;
+          let altOpaque = false;
+          let altValid = true;
+          if (key.remoteJidAlt !== undefined && key.remoteJidAlt !== null && key.remoteJidAlt !== "") {
+            if (typeof key.remoteJidAlt === "string") {
+              altPhone = extractPhone(key.remoteJidAlt);
+              altOpaque = isOpaque(key.remoteJidAlt);
+              if (!altPhone && !altOpaque) altValid = false;
+            } else {
+              altValid = false;
+            }
+          }
+          if (altValid) {
+            let resolvedPhone = null;
+            if (primaryPhone && altPhone) {
+              if (primaryPhone === altPhone) {
+                resolvedPhone = primaryPhone;
+              }
+            } else if (primaryPhone) {
+              resolvedPhone = primaryPhone;
+            } else if (primaryOpaque && altPhone) {
+              resolvedPhone = altPhone;
+            }
+
+            const claimedCanonical = normalizeBr(message?.recipient_phone_e164);
+            if (resolvedPhone && claimedCanonical && resolvedPhone === claimedCanonical) {
+              return { action: "sent", payload: { processing_token: message.processing_token, provider_message_id: key.id } };
+            }
+          }
+        }
+      }
+    }
   }
   // Evolution 2.3.7 wraps even post-send exceptions in BadRequestException (400).
   // Status alone (including a proxy's 429) is NOT proof that sending never ran.
