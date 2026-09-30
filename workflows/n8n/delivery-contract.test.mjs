@@ -276,6 +276,244 @@ test("parity test: delivery-contract, gateway-contract and @contatocerto/shared 
   }
 });
 
+test("transportDecision runtime parity: exhaustive 67-DDD matrix across degraded mobile prefixes 6, 7, 8, 9", () => {
+  assert.equal(VALID_BRAZILIAN_DDDS.size, 67);
+  assert.equal(sharedValidDDDs.size, 67);
+
+  const prefixes = ["6", "7", "8", "9"];
+  let combinationsChecked = 0;
+
+  for (const ddd of sharedValidDDDs) {
+    for (const prefix of prefixes) {
+      const degradedPhone = `+55${ddd}${prefix}1234567`;
+      const canonicalPhone = sharedNormalizeBrazilianMobilePhone(degradedPhone);
+      assert.equal(canonicalPhone, `+55${ddd}9${prefix}1234567`);
+
+      const claimed = message(canonicalPhone);
+      const msgId = `msg-${ddd}-${prefix}`;
+
+      // 1. Direct standard degraded JID: 55<DDD><prefix>1234567@s.whatsapp.net
+      const directResp = response({
+        key: {
+          id: msgId,
+          fromMe: true,
+          remoteJid: `55${ddd}${prefix}1234567@s.whatsapp.net`,
+        },
+      }, 200);
+      const directDecision = transportDecision(directResp, claimed);
+      assert.deepEqual(directDecision, {
+        action: "sent",
+        payload: {
+          processing_token: claimed.processing_token,
+          provider_message_id: msgId,
+        },
+      });
+
+      // 2. Baileys device-qualified degraded JID: 55<DDD><prefix>1234567:1@s.whatsapp.net
+      const deviceResp = response({
+        key: {
+          id: `${msgId}-dev`,
+          fromMe: true,
+          remoteJid: `55${ddd}${prefix}1234567:1@s.whatsapp.net`,
+        },
+      }, 200);
+      const deviceDecision = transportDecision(deviceResp, claimed);
+      assert.deepEqual(deviceDecision, {
+        action: "sent",
+        payload: {
+          processing_token: claimed.processing_token,
+          provider_message_id: `${msgId}-dev`,
+        },
+      });
+
+      // 3. LID + remoteJidAlt degraded JID
+      const lidResp = response({
+        key: {
+          id: `${msgId}-lid`,
+          fromMe: true,
+          remoteJid: "123456789012345@lid",
+          remoteJidAlt: `55${ddd}${prefix}1234567@s.whatsapp.net`,
+          addressingMode: "lid",
+        },
+      }, 200);
+      const lidDecision = transportDecision(lidResp, claimed);
+      assert.deepEqual(lidDecision, {
+        action: "sent",
+        payload: {
+          processing_token: claimed.processing_token,
+          provider_message_id: `${msgId}-lid`,
+        },
+      });
+
+      combinationsChecked++;
+    }
+  }
+
+  assert.equal(combinationsChecked, 67 * 4); // 268 combinations tested
+});
+
+test("generated Classify transport Code node runtime parity: exhaustive 67-DDD matrix across degraded mobile prefixes 6, 7, 8, 9", () => {
+  const shared = JSON.parse(readFileSync(new URL("shared-delivery.json", import.meta.url), "utf8"));
+  const classifyNode = shared.nodes.find((node) => node.name === "Classify transport");
+  assert.ok(classifyNode, "Classify transport node must exist in shared-delivery.json");
+  const jsCode = classifyNode.parameters.jsCode;
+
+  const runClassify = (resp, msg) => {
+    return runInNewContext(
+      `(() => {
+        ${jsCode}
+      })()`,
+      {
+        $json: resp,
+        $: (name) => {
+          if (name === "Validate claim") {
+            return { item: { json: { message: msg } } };
+          }
+          throw new Error("unexpected node ref: " + name);
+        },
+      },
+    );
+  };
+
+  const prefixes = ["6", "7", "8", "9"];
+  let combinationsChecked = 0;
+
+  for (const ddd of sharedValidDDDs) {
+    for (const prefix of prefixes) {
+      const degradedPhone = `+55${ddd}${prefix}9876543`;
+      const canonicalPhone = sharedNormalizeBrazilianMobilePhone(degradedPhone);
+      assert.equal(canonicalPhone, `+55${ddd}9${prefix}9876543`);
+
+      const claimed = message(canonicalPhone);
+      const msgId = `code-node-${ddd}-${prefix}`;
+
+      // 1. Direct standard degraded JID in generated code node
+      const directResp = response({
+        key: {
+          id: msgId,
+          fromMe: true,
+          remoteJid: `55${ddd}${prefix}9876543@s.whatsapp.net`,
+        },
+      }, 200);
+      const directRes = runClassify(directResp, claimed);
+      assert.equal(directRes.json.outcome.action, "sent");
+      assert.equal(directRes.json.outcome.payload.provider_message_id, msgId);
+
+      // 2. Baileys device-qualified degraded JID in generated code node
+      const deviceResp = response({
+        key: {
+          id: `${msgId}-dev`,
+          fromMe: true,
+          remoteJid: `55${ddd}${prefix}9876543:2@s.whatsapp.net`,
+        },
+      }, 200);
+      const deviceRes = runClassify(deviceResp, claimed);
+      assert.equal(deviceRes.json.outcome.action, "sent");
+      assert.equal(deviceRes.json.outcome.payload.provider_message_id, `${msgId}-dev`);
+
+      // 3. LID + remoteJidAlt degraded JID in generated code node
+      const lidResp = response({
+        key: {
+          id: `${msgId}-lid`,
+          fromMe: true,
+          remoteJid: "987654321098765@lid",
+          remoteJidAlt: `55${ddd}${prefix}9876543@s.whatsapp.net`,
+          addressingMode: "lid",
+        },
+      }, 200);
+      const lidRes = runClassify(lidResp, claimed);
+      assert.equal(lidRes.json.outcome.action, "sent");
+      assert.equal(lidRes.json.outcome.payload.provider_message_id, `${msgId}-lid`);
+
+      combinationsChecked++;
+    }
+  }
+
+  assert.equal(combinationsChecked, 67 * 4);
+});
+
+test("transportDecision and generated Classify transport node preserve safety on invalid DDDs, fixed lines, and non-BR numbers", () => {
+  const shared = JSON.parse(readFileSync(new URL("shared-delivery.json", import.meta.url), "utf8"));
+  const classifyNode = shared.nodes.find((node) => node.name === "Classify transport");
+  assert.ok(classifyNode);
+  const jsCode = classifyNode.parameters.jsCode;
+
+  const runClassify = (resp, msg) => {
+    return runInNewContext(
+      `(() => {
+        ${jsCode}
+      })()`,
+      {
+        $json: resp,
+        $: (name) => {
+          if (name === "Validate claim") {
+            return { item: { json: { message: msg } } };
+          }
+          throw new Error("unexpected node ref: " + name);
+        },
+      },
+    );
+  };
+
+  // 1. Invalid Brazilian DDDs: no 9th-digit equivalence must be created
+  const invalidDDDs = ["00", "20", "23", "25", "26", "29", "36", "39", "40", "52", "56", "57", "58", "59", "72", "76", "78", "90"];
+  for (const invalidDdd of invalidDDDs) {
+    assert.equal(VALID_BRAZILIAN_DDDS.has(invalidDdd), false);
+    assert.equal(sharedValidDDDs.has(invalidDdd), false);
+
+    // Mismatched 8 vs 9 on invalid DDD must HOLD (no false equivalence)
+    const claimedWithNine = message(`+55${invalidDdd}991234567`);
+    const respEight = response({
+      key: { id: `inv-${invalidDdd}`, fromMe: true, remoteJid: `55${invalidDdd}91234567@s.whatsapp.net` },
+    }, 200);
+    assert.equal(transportDecision(respEight, claimedWithNine).action, "hold");
+    assert.equal(runClassify(respEight, claimedWithNine).json.outcome.action, "hold");
+
+    // Exact match on invalid DDD without mutation passes
+    const claimedExact = message(`+55${invalidDdd}91234567`);
+    assert.equal(transportDecision(respEight, claimedExact).action, "sent");
+    assert.equal(runClassify(respEight, claimedExact).json.outcome.action, "sent");
+  }
+
+  // 2. Fixed lines (prefixes 2, 3, 4, 5): no 9th digit inserted
+  const sampleValidDDDs = ["11", "21", "31", "41", "51", "61", "71", "81", "91", "66"];
+  const fixedPrefixes = ["2", "3", "4", "5"];
+  for (const ddd of sampleValidDDDs) {
+    for (const prefix of fixedPrefixes) {
+      // If claimed was incorrectly formatted with an inserted 9 (+55<DDD>9<prefix>...), it must HOLD against real fixed line
+      const claimedFakeNine = message(`+55${ddd}9${prefix}1234567`);
+      const respFixed = response({
+        key: { id: `fix-${ddd}-${prefix}`, fromMe: true, remoteJid: `55${ddd}${prefix}1234567@s.whatsapp.net` },
+      }, 200);
+      assert.equal(transportDecision(respFixed, claimedFakeNine).action, "hold");
+      assert.equal(runClassify(respFixed, claimedFakeNine).json.outcome.action, "hold");
+
+      // Exact fixed line claimed vs response succeeds
+      const claimedFixed = message(`+55${ddd}${prefix}1234567`);
+      assert.equal(transportDecision(respFixed, claimedFixed).action, "sent");
+      assert.equal(runClassify(respFixed, claimedFixed).json.outcome.action, "sent");
+    }
+  }
+
+  // 3. Non-BR numbers (international): exact matching only
+  const intlNumbers = [
+    { claimed: "+14155552671", jid: "14155552671@s.whatsapp.net" },
+    { claimed: "+442071838750", jid: "442071838750@s.whatsapp.net" },
+    { claimed: "+351912345678", jid: "351912345678@s.whatsapp.net" },
+  ];
+  for (const { claimed: intlClaimed, jid: intlJid } of intlNumbers) {
+    const claimedIntl = message(intlClaimed);
+    const respIntl = response({ key: { id: "intl-1", fromMe: true, remoteJid: intlJid } }, 200);
+    assert.equal(transportDecision(respIntl, claimedIntl).action, "sent");
+    assert.equal(runClassify(respIntl, claimedIntl).json.outcome.action, "sent");
+
+    // Mismatched international must HOLD
+    const respIntlMismatch = response({ key: { id: "intl-2", fromMe: true, remoteJid: "14155559999@s.whatsapp.net" } }, 200);
+    assert.equal(transportDecision(respIntlMismatch, claimedIntl).action, "hold");
+    assert.equal(runClassify(respIntlMismatch, claimedIntl).json.outcome.action, "hold");
+  }
+});
+
 test("a lost sent confirmation never triggers another transport call or failure", () => {
   const item = message();
   const sent = { action: "sent", payload: { processing_token: item.processing_token, provider_message_id: "accepted" } };
