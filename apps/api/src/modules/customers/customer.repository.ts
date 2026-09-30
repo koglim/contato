@@ -1,7 +1,19 @@
+import {
+  normalizeBrazilianMobilePhone,
+  getPhoneIdentityAliases,
+} from "@contatocerto/shared";
 import type { QueryResultRow } from "pg";
-import { query, type SqlValue } from "../../database/connection.js";
+import { withTransaction, type SqlValue, type DatabaseClient } from "../../database/connection.js";
 
-type CustomerRow = { id: string };
+type CustomerRow = { id: string; phone_e164: string };
+
+export class CustomerPhoneIdentityCollisionError extends Error {
+  readonly code = "customer_phone_identity_collision" as const;
+  constructor(readonly phoneE164: string) {
+    super(`Multiple conflicting customer records found for phone aliases of ${phoneE164}`);
+    this.name = "CustomerPhoneIdentityCollisionError";
+  }
+}
 
 export type Customer = { id: string };
 export type CustomerQuery = <T extends QueryResultRow>(
@@ -14,16 +26,50 @@ export interface CustomerRepository {
 }
 
 export class PostgresCustomerRepository implements CustomerRepository {
-  constructor(private readonly execute: CustomerQuery = query) {}
+  constructor(
+    private readonly execute?: CustomerQuery,
+    private readonly transaction: <T>(callback: (client: DatabaseClient) => Promise<T>) => Promise<T> = withTransaction,
+  ) {}
 
   async findOrCreateByPhoneE164(phoneE164: string): Promise<Customer> {
-    const result = await this.execute<CustomerRow>(
-      `INSERT INTO customers (phone_e164)
-       VALUES ($1)
-       ON CONFLICT (phone_e164) DO UPDATE SET phone_e164 = EXCLUDED.phone_e164
-       RETURNING id`,
-      [phoneE164],
-    );
-    return { id: result.rows[0]!.id };
+    const canonicalPhone = normalizeBrazilianMobilePhone(phoneE164);
+    const aliases = getPhoneIdentityAliases(canonicalPhone);
+
+    const runInScope = async (db: { query: CustomerQuery }) => {
+      const existing = await db.query<CustomerRow>(
+        `SELECT id, phone_e164 FROM customers WHERE phone_e164 = ANY($1) FOR UPDATE`,
+        [aliases as string[]],
+      );
+
+      if (existing.rows.length > 1) {
+        throw new CustomerPhoneIdentityCollisionError(phoneE164);
+      }
+
+      if (existing.rows.length === 1) {
+        const row = existing.rows[0]!;
+        if (row.phone_e164 !== canonicalPhone) {
+          await db.query(
+            `UPDATE customers SET phone_e164 = $1 WHERE id = $2`,
+            [canonicalPhone, row.id],
+          );
+        }
+        return { id: row.id };
+      }
+
+      const result = await db.query<{ id: string }>(
+        `INSERT INTO customers (phone_e164)
+         VALUES ($1)
+         ON CONFLICT (phone_e164) DO UPDATE SET phone_e164 = EXCLUDED.phone_e164
+         RETURNING id`,
+        [canonicalPhone],
+      );
+      return { id: result.rows[0]!.id };
+    };
+
+    if (this.execute) {
+      return runInScope({ query: this.execute });
+    }
+
+    return this.transaction(async (client) => runInScope(client));
   }
 }

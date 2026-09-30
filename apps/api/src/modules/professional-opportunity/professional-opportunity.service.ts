@@ -1,8 +1,15 @@
-import { channelInboundMessageResponseSchema, opportunityMessageSchema, type ChannelInboundMessageResponse } from "@contatocerto/shared";
+import {
+  channelInboundMessageResponseSchema,
+  opportunityMessageSchema,
+  getPhoneIdentityAliases,
+  normalizeBrazilianMobilePhone,
+  type ChannelInboundMessageResponse,
+} from "@contatocerto/shared";
 import { withTransaction, type DatabaseClient } from "../../database/connection.js";
 import { bilateralSnapshotSchema, createOpportunityCode, safeOpportunityText } from "../bilateral-contact/bilateral-contact.policy.js";
 import { parseGlobalConversationCommand } from "../conversation-commands/conversation-command.parser.js";
 import type { ChannelInboundMessageRecord } from "../channel-inbox/channel-inbox.types.js";
+import { CustomerPhoneIdentityCollisionError } from "../customers/customer.repository.js";
 import { normalizeOpportunityCommand, parseOpportunityMessage } from "./professional-opportunity.parser.js";
 import { resolveResumeTarget } from "./resume-target.js";
 import { resumedMatchEligibilitySql } from "./resumed-match-eligibility.js";
@@ -34,14 +41,19 @@ export class ProfessionalOpportunityService {
       if(record.contextFingerprint && fingerprint!==record.contextFingerprint) throw new InboxContextChangedError();
       if (parseGlobalConversationCommand(record.rawText)) return null;
       const parsed = parseOpportunityMessage(record.rawText);
-      const customer = (await db.query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = $1", [record.phoneE164])).rows[0];
+      const aliases = getPhoneIdentityAliases(record.phoneE164);
+      const customerRows = (await db.query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = ANY($1)", [aliases as string[]])).rows;
+      if (customerRows.length > 1) {
+        throw new CustomerPhoneIdentityCollisionError(record.phoneE164);
+      }
+      const customer = customerRows[0];
       const active = customer ? (await db.query<Conversation>(`SELECT *, expires_at > NOW() AS valid FROM search_conversations
         WHERE customer_id = $1 AND status = 'active' AND expires_at > NOW()`, [customer.id])).rows[0] : undefined;
       const owned = (await db.query<Contact>(`SELECT contacts.* FROM contacts JOIN professionals ON professionals.id = contacts.professional_id
-        WHERE professionals.phone_e164 = $1 AND contacts.bilateral_snapshot ->> 'professional_phone_e164' = $1
+        WHERE professionals.phone_e164 = ANY($1) AND (contacts.bilateral_snapshot ->> 'professional_phone_e164' = ANY($1))
           AND contacts.bilateral_snapshot IS NOT NULL
           AND (contacts.status IN ('shared', 'requested', 'accepted', 'declined') OR lower(contacts.public_code) = ANY($2::text[]))
-        ORDER BY (contacts.status = 'shared') DESC, (contacts.status = 'requested') DESC, contacts.created_at DESC, contacts.id LIMIT 21`, [record.phoneE164, parsed.codes.map((code) => code.toLowerCase())])).rows;
+        ORDER BY (contacts.status = 'shared') DESC, (contacts.status = 'requested') DESC, contacts.created_at DESC, contacts.id LIMIT 21`, [aliases as string[], parsed.codes.map((code) => code.toLowerCase())])).rows;
       const byCode = owned.filter((contact) => parsed.codes.includes(contact.public_code));
       if (parsed.codes.length === 1 && byCode.length === 1 && parsed.resume === null) {
         return this.decide(db, record, byCode[0], parsed.decision);
@@ -96,9 +108,10 @@ export class ProfessionalOpportunityService {
     const conversation = (await db.query<Conversation>(`SELECT *, expires_at > NOW() AS valid FROM search_conversations WHERE id = $1 FOR NO KEY UPDATE`, [found.selection_conversation_id])).rows[0];
     if (!conversation) return this.finish(db, record, "unavailable", "Essa oportunidade não está disponível para resposta.");
     await db.query("SELECT id FROM search_requests WHERE id = $1 FOR NO KEY UPDATE", [found.search_request_id]);
+    const aliases = getPhoneIdentityAliases(record.phoneE164);
     const contact = (await db.query<Contact>(`SELECT contacts.* FROM contacts JOIN professionals ON professionals.id = contacts.professional_id
-      WHERE contacts.id = $1 AND professionals.phone_e164 = $2 AND bilateral_snapshot ->> 'professional_phone_e164' = $2
-      FOR NO KEY UPDATE OF contacts`, [found.id, record.phoneE164])).rows[0];
+      WHERE contacts.id = $1 AND professionals.phone_e164 = ANY($2) AND (bilateral_snapshot ->> 'professional_phone_e164' = ANY($2))
+      FOR NO KEY UPDATE OF contacts`, [found.id, aliases as string[]])).rows[0];
     if (!contact) return this.finish(db, record, "unavailable", "Não consegui identificar essa oportunidade para você.");
     const snapshot = bilateralSnapshotSchema.parse(contact.bilateral_snapshot);
     if (contact.status === "completed") {
@@ -169,7 +182,7 @@ export class ProfessionalOpportunityService {
 
         await db.query(`INSERT INTO channel_outbound_messages (purpose, provider, recipient_phone_e164, text_content, business_key, professional_unavailability_event_id)
           VALUES ('customer_contact_update', $1, $2, $3, $4, $5)`,
-        [provider, snapshot.customer_phone_e164, customerText, `unavailability:${event.id}:customer`, event.id]);
+        [provider, normalizeBrazilianMobilePhone(snapshot.customer_phone_e164), customerText, `unavailability:${event.id}:customer`, event.id]);
 
         const profReplyText = `Indisponibilidade registrada para ${contact.public_code}. O cliente foi avisado.`;
         return this.finish(db, record, "unavailability_declared", profReplyText, contact.public_code, undefined, undefined, event.id);
@@ -217,7 +230,7 @@ export class ProfessionalOpportunityService {
     const provider = (await db.query<{ provider: string }>("SELECT provider FROM channel_inbound_messages WHERE id = (SELECT selection_key FROM contacts WHERE id = $1)", [contact.id])).rows[0]?.provider;
     if (!provider) throw new Error("Opportunity delivery context is unavailable");
     await db.query(`INSERT INTO channel_outbound_messages (purpose, provider, recipient_phone_e164, text_content, business_key, opportunity_event_id)
-      VALUES ('customer_contact_update', $1, $2, $3, $4, $5)`, [provider, snapshot.customer_phone_e164, customerText, `opportunity:${event.id}:customer`, event.id]);
+      VALUES ('customer_contact_update', $1, $2, $3, $4, $5)`, [provider, normalizeBrazilianMobilePhone(snapshot.customer_phone_e164), customerText, `opportunity:${event.id}:customer`, event.id]);
     const text = decision === "accepted" ? `Oportunidade ${contact.public_code} aceita. Combine o atendimento diretamente com o cliente.` : `Recusa registrada para ${contact.public_code}. O cliente será avisado.`;
     return this.finish(db, record, decision, text, contact.public_code, undefined, event.id);
   }
@@ -262,7 +275,7 @@ export class ProfessionalOpportunityService {
     const outboundId = reuseId ?? (await db.query<{ id: string }>(`INSERT INTO channel_outbound_messages
       (channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, opportunity_event_id, professional_unavailability_event_id, business_key)
       VALUES ($1, $7, $2, $3, $4, $5, $8, $6) RETURNING id`,
-    [record.id, record.provider, record.phoneE164, text, eventId ?? null, businessKey, purpose, unavailabilityEventId ?? null])).rows[0].id;
+    [record.id, record.provider, normalizeBrazilianMobilePhone(record.phoneE164), text, eventId ?? null, businessKey, purpose, unavailabilityEventId ?? null])).rows[0].id;
     const finished = await db.query(`UPDATE channel_inbound_messages SET status = 'processed', result = $2::jsonb, response_outbound_id = $3,
       processing_token = NULL, processing_started_at = NULL, error_code = NULL, processed_at = NOW(), lease_expires_at = NULL,
       next_attempt_at = NULL, recovered_at = CASE WHEN total_attempts > 1 THEN NOW() END

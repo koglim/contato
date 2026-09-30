@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   normalizeBrazilianMobilePhone,
+  getPhoneIdentityAliases,
+  arePhoneIdentitiesEquivalent,
   channelInboundMessageRequestSchema,
   mediaAdmissionSchema,
   customerSearchMessageRequestSchema,
@@ -107,4 +109,34 @@ test("customerSearchMessageRequestSchema: automatically normalizes degraded Braz
     raw_text: "preciso de encanador",
   });
   assert.equal(parsed.phone_e164, "+5566999029086");
+});
+
+test("getPhoneIdentityAliases: returns [canonical, degraded] for Brazilian mobile numbers", () => {
+  // From degraded input
+  assert.deepEqual(getPhoneIdentityAliases("+559984119070"), ["+5599984119070", "+559984119070"]);
+  assert.deepEqual(getPhoneIdentityAliases("+556699029086"), ["+5566999029086", "+556699029086"]);
+
+  // From canonical input
+  assert.deepEqual(getPhoneIdentityAliases("+5599984119070"), ["+5599984119070", "+559984119070"]);
+  assert.deepEqual(getPhoneIdentityAliases("+5566999029086"), ["+5566999029086", "+556699029086"]);
+
+  // Non-mobile, fixed-line, invalid DDD, international numbers return single original element
+  assert.deepEqual(getPhoneIdentityAliases("+551123456789"), ["+551123456789"]);
+  assert.deepEqual(getPhoneIdentityAliases("+551099029086"), ["+551099029086"]);
+  assert.deepEqual(getPhoneIdentityAliases("+14155552671"), ["+14155552671"]);
+  assert.deepEqual(getPhoneIdentityAliases("invalid"), ["invalid"]);
+});
+
+test("arePhoneIdentitiesEquivalent: evaluates equivalence across canonical and degraded Brazilian mobile numbers", () => {
+  assert.equal(arePhoneIdentitiesEquivalent("+559984119070", "+5599984119070"), true);
+  assert.equal(arePhoneIdentitiesEquivalent("+5599984119070", "+559984119070"), true);
+  assert.equal(arePhoneIdentitiesEquivalent("+556699029086", "+5566999029086"), true);
+  assert.equal(arePhoneIdentitiesEquivalent("+5566999029086", "+5566999029086"), true);
+  assert.equal(arePhoneIdentitiesEquivalent("+556699029086", "+556699029086"), true);
+
+  // Different numbers
+  assert.equal(arePhoneIdentitiesEquivalent("+5599984119070", "+5566999029086"), false);
+  assert.equal(arePhoneIdentitiesEquivalent("+551123456789", "+5511923456789"), false);
+  assert.equal(arePhoneIdentitiesEquivalent("+14155552671", "+14155552671"), true);
+  assert.equal(arePhoneIdentitiesEquivalent("+14155552671", "+14155552672"), false);
 });

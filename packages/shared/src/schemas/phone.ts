@@ -25,6 +25,7 @@ export const VALID_BRAZILIAN_DDDS: ReadonlySet<string> = new Set([
 ]);
 
 const BRAZILIAN_DEGRADED_MOBILE_REGEX = /^\+55([1-9]{2})([6-9]\d{7})$/;
+const BRAZILIAN_CANONICAL_MOBILE_REGEX = /^\+55([1-9]{2})9([6-9]\d{7})$/;
 
 /**
  * Normalizes Brazilian mobile phone numbers degraded by upstream WhatsApp / Evolution API
@@ -49,6 +50,33 @@ export function normalizeBrazilianMobilePhone(phone: string): string {
     }
   }
   return phone;
+}
+
+/**
+ * Returns all equivalent phone identity representations for database queries.
+ * For valid Brazilian mobile numbers, returns [canonical, degraded] (e.g. ['+5599984119070', '+559984119070']).
+ * For non-mobile, invalid DDD, or international numbers, returns [phone].
+ */
+export function getPhoneIdentityAliases(phone: string): readonly string[] {
+  if (typeof phone !== "string") return [phone];
+  const canonical = normalizeBrazilianMobilePhone(phone);
+  const match = BRAZILIAN_CANONICAL_MOBILE_REGEX.exec(canonical);
+  if (match) {
+    const [, ddd, subscriber8] = match;
+    if (VALID_BRAZILIAN_DDDS.has(ddd)) {
+      const degraded = `+55${ddd}${subscriber8}`;
+      return [canonical, degraded];
+    }
+  }
+  return [phone];
+}
+
+/**
+ * Checks whether two phone numbers represent the same canonical identity.
+ */
+export function arePhoneIdentitiesEquivalent(a: string, b: string): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  return normalizeBrazilianMobilePhone(a) === normalizeBrazilianMobilePhone(b);
 }
 
 export const phoneE164Schema = z.string().regex(

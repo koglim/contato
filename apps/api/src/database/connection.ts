@@ -1,7 +1,7 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export type SqlValue = string | number | boolean | Date | null;
+export type SqlValue = string | number | boolean | Date | null | readonly string[] | string[] | readonly number[] | number[];
 export type DatabaseClient = Pick<PoolClient, "query">;
 
 let pool: Pool | undefined;
@@ -41,7 +41,23 @@ export async function withTransaction<T>(callback: (client: DatabaseClient) => P
 
   try {
     await client.query("BEGIN");
-    const result = await callback(client);
+    const result = await transactionScope.run(client, () => callback(client));
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function withIndependentTransaction<T>(callback: (client: DatabaseClient) => Promise<T>) {
+  const client = await getPool().connect();
+
+  try {
+    await client.query("BEGIN");
+    const result = await transactionScope.run(client, () => callback(client));
     await client.query("COMMIT");
     return result;
   } catch (error) {

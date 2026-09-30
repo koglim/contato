@@ -4,7 +4,7 @@ import { mapGlobalConversationCommandOutcome } from "../global-conversation-comm
 import type { GlobalConversationCommandService } from "../global-conversation-commands/global-conversation-command.types.js";
 import { mapSelectionCommandOutcome } from "../selection-message/selection-message.mapper.js";
 import type { SelectionCommandService } from "../selection-command/selection-command.types.js";
-import type { CustomerRepository } from "../customers/customer.repository.js";
+import { CustomerPhoneIdentityCollisionError, type CustomerRepository } from "../customers/customer.repository.js";
 import type { SearchConversationRepository, SearchConversationService } from "../search-conversations/search-conversation.types.js";
 import type { CustomerSearchRouteInput, CustomerSearchRouteOutcome, CustomerSearchRouter } from "./customer-search.types.js";
 
@@ -39,7 +39,15 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
   ) {}
 
   async route(input: CustomerSearchRouteInput): Promise<CustomerSearchRouteOutcome> {
-    const customer = await this.customers.findOrCreateByPhoneE164(input.phone_e164);
+    let customer;
+    try {
+      customer = await this.customers.findOrCreateByPhoneE164(input.phone_e164);
+    } catch (error) {
+      if (error instanceof CustomerPhoneIdentityCollisionError) {
+        return { kind: "customer_phone_identity_collision" };
+      }
+      throw error;
+    }
     const globalCommand = parseGlobalConversationCommand(input.raw_text);
     if (globalCommand) {
       const outcome = await this.globalConversationCommandService.execute({ customerId: customer.id, command: globalCommand });

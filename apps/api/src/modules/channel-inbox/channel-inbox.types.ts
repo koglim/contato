@@ -61,6 +61,7 @@ export type ChannelInboxOutcome =
   | { kind: "channel_message_payload_conflict" }
   | { kind: "channel_message_result_invalid" }
   | { kind: "customer_conversation_conflict" }
+  | { kind: "customer_phone_identity_collision" }
   | { kind: "conversation_processing" }
   | { kind: "service_unavailable" }
   | { kind: "selection_idempotency_key_required" }

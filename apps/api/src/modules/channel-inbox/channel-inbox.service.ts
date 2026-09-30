@@ -8,7 +8,7 @@ import {
   type ChannelInboundMessageInput,
 } from "@contatocerto/shared";
 import { InboxFenceError, InboxPermanentError, InboxContextChangedError } from "./inbox-recovery.policy.js";
-import { PostgresCustomerRepository } from "../customers/customer.repository.js";
+import { PostgresCustomerRepository, CustomerPhoneIdentityCollisionError } from "../customers/customer.repository.js";
 import type { ContextualInboxHandler } from "../contextual-conversation/contextual.service.js";
 import type { ProfessionalOpportunityService } from "../professional-opportunity/professional-opportunity.service.js";
 import type { ContactCompletionService } from "../contact-completion/contact-completion.service.js";
@@ -190,6 +190,10 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       if (error instanceof InboxOutcomeError) {
         await this.failOrDefer(claimed.id, processingToken, error.outcome.kind);
         return error.outcome;
+      }
+      if (error instanceof CustomerPhoneIdentityCollisionError) {
+        await this.repository.markFailed(claimed.id, processingToken, "customer_phone_identity_collision");
+        return { kind: "customer_phone_identity_collision" };
       }
       if (error instanceof InboxPermanentError) {
         await this.repository.markFailed(claimed.id, processingToken, error.code);

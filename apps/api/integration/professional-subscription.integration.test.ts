@@ -5,8 +5,32 @@ import {
   closeDatabaseConnection,
   inDatabaseTransaction,
   query,
+  withIndependentTransaction,
   withTransaction,
 } from "../src/database/connection.js";
+
+async function waitForBarrierWithTimeout<T>(promise: Promise<T>, timeoutMs = 5000, description = "Barrier"): Promise<T> {
+  let timeoutHandle: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(`${description} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
+}
+
+async function waitForBlockedPid(client: DatabaseClient, blockedPid: number, blockerPid: number, timeoutMs = 5000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const blockersRes = await client.query<{ blockers: number[] }>(
+      "SELECT pg_blocking_pids($1) AS blockers",
+      [blockedPid],
+    );
+    if (blockersRes.rows[0]?.blockers?.includes(blockerPid)) {
+      return;
+    }
+    await new Promise((r) => setImmediate(r));
+  }
+  throw new Error(`PID ${blockedPid} was not blocked by PID ${blockerPid} within ${timeoutMs}ms`);
+}
 import { PostgresMatchingRepository } from "../src/modules/matching/matching.repository.js";
 import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
 import type { SelectShownMatchOutcome } from "../src/modules/match-selection/match-selection.types.js";
@@ -624,7 +648,8 @@ test("persisted match revalidation: subscription revocation/expiration rejects s
     const contacts = await query(`SELECT id FROM contacts WHERE search_request_id = $1`, [searchRequestId]);
     assert.equal(contacts.rows.length, 0);
     const outbox = await query(
-      `SELECT id FROM channel_outbound_messages WHERE purpose = 'professional_contact_notification'`,
+      `SELECT id FROM channel_outbound_messages WHERE purpose = 'professional_contact_notification' AND recipient_phone_e164 = $1`,
+      [managed.phone],
     );
     assert.equal(outbox.rows.length, 0);
   });
@@ -803,7 +828,7 @@ test("concurrency Scenario A: REVOKE VENCE - selection blocks on professional ro
     const trackingSelectionRepo = new PostgresSelectionMatchRepository(
       undefined,
       async (callback) => {
-        return withTransaction(async (realClientB) => {
+        return withIndependentTransaction(async (realClientB) => {
           clientBPid = (await realClientB.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
           const proxyClientB: DatabaseClient = {
             query: async (text: string, values?: SqlValue[]) => {
@@ -838,19 +863,13 @@ test("concurrency Scenario A: REVOKE VENCE - selection blocks on professional ro
       });
 
       // Deterministic barrier: wait until selection reaches the professional row lock
-      await reachedLockPromise;
+      await waitForBarrierWithTimeout(reachedLockPromise, 5000, "Selection reaching professional FOR UPDATE lock");
+
+      assert.ok(clientBPid, "clientB PID must be initialized");
+      assert.notEqual(clientAPid, clientBPid, "clientA and clientB must have distinct PostgreSQL backend PIDs");
 
       // Confirm via PostgreSQL that connection B is actively blocked waiting on clientAPid
-      while (true) {
-        const blockersRes = await clientA.query<{ blockers: number[] }>(
-          `SELECT pg_blocking_pids($1) AS blockers`,
-          [clientBPid],
-        );
-        if (blockersRes.rows[0]?.blockers?.includes(clientAPid)) {
-          break;
-        }
-        await new Promise((r) => setImmediate(r));
-      }
+      await waitForBlockedPid(clientA, clientBPid, clientAPid, 5000);
 
       // While holding lock, revoke the subscription using clientA
       await subRepo.revoke(professionalId, clientA);
@@ -985,7 +1004,7 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
         // Dispatched in background on an independent connection B with query interceptor
         const subRepoB = new PostgresProfessionalSubscriptionRepository(
           async (callback) => {
-            return withTransaction(async (realClientB) => {
+            return withIndependentTransaction(async (realClientB) => {
               clientBPid = (await realClientB.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
               const proxyClientB: DatabaseClient = {
                 query: async (text: string, values?: SqlValue[]) => {
@@ -1002,19 +1021,13 @@ test("concurrency Scenario B: SELECTION VENCE - selection locks professional fir
         revokePromise = subRepoB.revoke(profId);
 
         // Deterministic barrier: wait until revoke reaches the lock on professionals
-        await revokeReachedLockPromise;
+        await waitForBarrierWithTimeout(revokeReachedLockPromise, 5000, "Revoke reaching professional FOR UPDATE lock");
+
+        assert.ok(clientBPid, "clientB PID must be initialized");
+        assert.notEqual(clientAPid, clientBPid, "clientA and clientB must have distinct PostgreSQL backend PIDs");
 
         // Confirm via PostgreSQL that connection B is blocked by connection A
-        while (true) {
-          const blockersRes = await clientA.query<{ blockers: number[] }>(
-            `SELECT pg_blocking_pids($1) AS blockers`,
-            [clientBPid],
-          );
-          if (blockersRes.rows[0]?.blockers?.includes(clientAPid)) {
-            break;
-          }
-          await new Promise((r) => setImmediate(r));
-        }
+        await waitForBlockedPid(clientA, clientBPid, clientAPid, 5000);
       },
     );
 

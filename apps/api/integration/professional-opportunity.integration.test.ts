@@ -94,8 +94,8 @@ async function fixture(other = false, customProfPhone?: string) {
   async function cleanup() {
     await app.close();
     await withTransaction(async (db) => {
-      await db.query("UPDATE channel_inbound_messages SET response_outbound_id=NULL WHERE phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
-      await db.query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2)", [customerPhone, professionalPhone]);
+      await db.query("UPDATE channel_inbound_messages SET response_outbound_id=NULL WHERE phone_e164 IN ($1,$2) OR response_outbound_id IN (SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2) OR professional_unavailability_event_id IN (SELECT id FROM professional_unavailability_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$3)))", [customerPhone, professionalPhone, customerId]);
+      await db.query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 IN ($1,$2) OR professional_unavailability_event_id IN (SELECT id FROM professional_unavailability_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$3))", [customerPhone, professionalPhone, customerId]);
       // Fixture teardown only; production never bypasses the append-only guard.
       await db.query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
       await db.query("DELETE FROM professional_unavailability_events WHERE contact_id IN (SELECT id FROM contacts WHERE customer_id=$1)", [customerId]);
@@ -865,6 +865,43 @@ test("professional opportunity regression: degraded 8-digit Brazilian mobile sen
     assert.match(customerOutbound[0].text_content, /não poderá atender/);
   } finally {
     await f.cleanup();
+  }
+});
+
+test("professional opportunity regression: historical degraded professional row + canonical inbound declares unavailability", async () => {
+  // Scenario D: Professional stored in DB with historical degraded phone +556699029086,
+  // receives canonical inbound +5566999029086 after PR #21 normalization.
+  const degradedProfPhone = "+556699029086";
+  const canonicalProfPhone = "+5566999029086";
+  const f = await fixture(false, degradedProfPhone);
+  try {
+    // Professional sends unavailability declaration with CANONICAL phone
+    const response = await f.send(`não consigo ${f.code}`, canonicalProfPhone);
+
+    // Assert: professional recognized, contact owned, unavailability event created
+    assert.equal(response.result.route, "opportunity");
+    assert.equal(response.result.result.kind, "unavailability_declared");
+    assert.equal(await f.countUnavailabilityEvents(), 1);
+
+    // Unavailability event exists and is linked
+    const event = (await query<{ professional_id: string }>(
+      "SELECT professional_id FROM professional_unavailability_events WHERE contact_id = $1",
+      [f.contactId]
+    )).rows[0];
+    assert.ok(event);
+
+    // Customer notification outbound was queued with canonical recipient
+    const customerOutbound = (await query<{ recipient_phone_e164: string; text_content: string }>(
+      "SELECT recipient_phone_e164, text_content FROM channel_outbound_messages WHERE recipient_phone_e164 = $1 AND purpose = 'customer_contact_update'",
+      [f.customerPhone]
+    )).rows;
+    assert.equal(customerOutbound.length, 1);
+    assert.match(customerOutbound[0].text_content, /não poderá atender/);
+  } finally {
+    await f.cleanup();
+    await query("UPDATE channel_inbound_messages SET response_outbound_id = NULL WHERE phone_e164 = $1", [canonicalProfPhone]);
+    await query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164 = $1", [canonicalProfPhone]);
+    await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [canonicalProfPhone]);
   }
 });
 

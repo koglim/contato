@@ -37,3 +37,18 @@ test("channel inbox route requires auth, validates inputs and hides inbound PII"
   assert.equal(response.body.includes("preciso de eletricista"), false);
   await app.close();
 });
+
+test("channel inbox route returns HTTP 409 on customer_phone_identity_collision", async () => {
+  const inbox: ChannelInboxService = {
+    async receive() {
+      return { kind: "customer_phone_identity_collision" };
+    },
+  };
+  const app = buildApp({ channelInboxService: inbox, internalApiKey });
+  const url = "/internal/channel/inbound/messages";
+  const payload = { provider: "test", provider_message_id: "msg-collision", phone_e164: "+5566999999999", raw_text: "preciso de eletricista" };
+  const response = await app.inject({ method: "POST", url, headers: { "x-internal-key": internalApiKey }, payload });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "customer_phone_identity_collision" });
+  await app.close();
+});
