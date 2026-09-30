@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { query, withTransaction, type DatabaseClient } from "../../database/connection.js";
 import { CONTEXTUAL_POLICY, CONTEXTUAL_VERSION, contextualMemorySchema, contextualProposalSchema, type ContextualMemory } from "./contextual.contract.js";
 import { InboxFenceError, InboxPermanentError, InboxContextChangedError, liveInboxLeaseSql } from "../channel-inbox/inbox-recovery.policy.js";
+import { getPhoneIdentityAliases } from "@contatocerto/shared";
+import { resolveCustomerByPhoneE164 } from "../customers/customer.repository.js";
 import type { ChannelInboundMessageRecord } from "../channel-inbox/channel-inbox.types.js";
 
 export class ContextualBusyError extends Error {}
@@ -25,9 +27,8 @@ export class PostgresContextualRepository {
     const customerId = await withTransaction(async client => {
       await this.fence(client, record);
       await client.query(`UPDATE channel_inbound_messages SET contextual_queue = TRUE WHERE id = $1`, [record.id]);
-      const customer = await client.query<{ id: string }>(`INSERT INTO customers(phone_e164) VALUES ($1)
-        ON CONFLICT(phone_e164) DO UPDATE SET phone_e164 = EXCLUDED.phone_e164 RETURNING id`, [record.phoneE164]);
-      const customerId = customer.rows[0].id;
+      const customer = await resolveCustomerByPhoneE164(client, record.phoneE164);
+      const customerId = customer.id;
       await client.query(`INSERT INTO contextual_memories(customer_id) VALUES ($1) ON CONFLICT DO NOTHING`, [customerId]);
       await client.query(`INSERT INTO contextual_turns(inbound_id, customer_id, context_revision, model, version)
         SELECT $1, customer_id, revision, $3, $4 FROM contextual_memories WHERE customer_id = $2
@@ -45,8 +46,8 @@ export class PostgresContextualRepository {
       // Arrival order, not UUID or completion order. A later turn stays recoverable in the Inbox.
       const older = await client.query(`SELECT i.id FROM channel_inbound_messages i
         JOIN channel_inbound_messages current ON current.id = $2
-        WHERE i.phone_e164 = $1 AND (i.status <> 'processed' OR i.recovery_state = 'quarantined') AND i.recovery_state <> 'closed'
-          AND (i.created_at, i.id) < (current.created_at, current.id) LIMIT 1`, [record.phoneE164, record.id]);
+        WHERE i.phone_e164 = ANY($1) AND (i.status <> 'processed' OR i.recovery_state = 'quarantined') AND i.recovery_state <> 'closed'
+          AND (i.created_at, i.id) < (current.created_at, current.id) LIMIT 1`, [getPhoneIdentityAliases(record.phoneE164) as string[], record.id]);
       if (older.rows.length) throw new ContextualBusyError();
       const current = await contextualFingerprint(client, customerId);
       if (record.contextFingerprint && record.contextFingerprint !== (current?.fingerprint ?? "none")) throw new InboxContextChangedError();
