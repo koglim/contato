@@ -763,10 +763,15 @@ test("bilateral choice delivers customer reply and independent professional noti
   } finally { await app.close(); await fixture.cleanup(); }
 });
 
+function randomSubscriber8() {
+  return "9" + Math.floor(1000000 + Math.random() * 9000000).toString();
+}
+
 test("Regression A: direct customer-search updates historical degraded phone to canonical and preserves customer ID atomically", async () => {
   const customerId = randomUUID();
-  const degradedPhone = "+559984119070";
-  const canonicalPhone = "+5599984119070";
+  const sub = randomSubscriber8();
+  const degradedPhone = `+5599${sub}`;
+  const canonicalPhone = `+55999${sub}`;
 
   await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, degradedPhone]);
   try {
@@ -799,8 +804,9 @@ test("Regression A: direct customer-search updates historical degraded phone to 
 
 test("Regression B: canonical + degraded duplicate customer rows produce deterministic collision / HTTP 409", async () => {
   const cust1 = randomUUID(), cust2 = randomUUID();
-  const degradedPhone = "+559984119070";
-  const canonicalPhone = "+5599984119070";
+  const sub = randomSubscriber8();
+  const degradedPhone = `+5599${sub}`;
+  const canonicalPhone = `+55999${sub}`;
 
   await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [cust1, degradedPhone]);
   await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [cust2, canonicalPhone]);
@@ -821,10 +827,12 @@ test("Regression B: canonical + degraded duplicate customer rows produce determi
 });
 
 test("Regression E: new bilateral snapshot from historical degraded professional record stores canonical phone", async () => {
-  const degradedProfPhone = "+556699029086";
-  const canonicalProfPhone = "+5566999029086";
-  const customerId = randomUUID(), profId = randomUUID(), searchId = randomUUID(), convId = randomUUID(), choiceId = randomUUID();
-  const customerPhone = "+5566999990001";
+  const sub = randomSubscriber8();
+  const degradedProfPhone = `+5566${sub}`;
+  const canonicalProfPhone = `+55669${sub}`;
+  const customerId = randomUUID(), profId = randomUUID(), searchId = randomUUID(), convId = randomUUID();
+  const presInboundId = randomUUID(), presOutboundId = randomUUID(), choiceId = randomUUID();
+  const customerPhone = `+55669${randomSubscriber8()}`;
   const catId = randomUUID(), servId = randomUUID(), profServId = randomUUID(), matchId = randomUUID();
 
   await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, customerPhone]);
@@ -839,6 +847,15 @@ test("Regression E: new bilateral snapshot from historical degraded professional
   await query(`INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, search_request_id, expires_at)
     VALUES ($1, $2, 'active', 'selection', 'eletricista', 'eletricista', 'BR', 3, $3, NOW() + INTERVAL '1 hour')`, [convId, customerId, searchId]);
   await query("INSERT INTO matches (id, search_request_id, professional_id, rank_position, shown_at) VALUES ($1, $2, $3, 1, NOW())", [matchId, searchId, profId]);
+  
+  await query(`INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result, customer_id, conversation_id, search_request_id)
+    VALUES ($1, 'test', $2, $3, 'eletricista', 'BR', 3, 'processed', NOW() - INTERVAL '10 seconds', jsonb_build_object('route','contextual','customer_id',$4::uuid,'status','matched'), $4, $5, $6)`,
+    [presInboundId, `msg-${presInboundId}`, customerPhone, customerId, convId, searchId]);
+  await query(`INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, text_content, status, sent_at, bilateral_notice_version, provider_message_id)
+    VALUES ($1, $2, 'test', $3, $4, 'sent', NOW() - INTERVAL '5 seconds', $5, $6)`,
+    [presOutboundId, presInboundId, customerPhone, `1. Ana\n${BILATERAL_NOTICE}`, BILATERAL_NOTICE_VERSION, `out-${presOutboundId}`]);
+  await query("INSERT INTO channel_outbound_message_matches (channel_outbound_message_id, match_id) VALUES ($1, $2)", [presOutboundId, matchId]);
+
   await query(`INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, processed_at, result)
     VALUES ($1, 'test', $2, $3, '1', 'BR', 3, 'processed', NOW(), '{}'::jsonb)`, [choiceId, `msg-${choiceId}`, customerPhone]);
 
@@ -852,7 +869,6 @@ test("Regression E: new bilateral snapshot from historical degraded professional
       position: 1,
       lastMessageText: "1",
       selectionKey: choiceId,
-      confirmBilateral: true,
     });
     assert.equal(result.kind, "selected");
 
@@ -866,10 +882,11 @@ test("Regression E: new bilateral snapshot from historical degraded professional
     assert.equal(contact.bilateral_snapshot.customer_phone_e164, customerPhone);
   } finally {
     await withTransaction(async (db) => {
-      await db.query("DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id = $1 OR recipient_phone_e164 = $2", [choiceId, canonicalProfPhone]);
+      await db.query("DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN ($1, $2) OR recipient_phone_e164 = $3", [choiceId, presInboundId, canonicalProfPhone]);
       await db.query("DELETE FROM contacts WHERE search_request_id = $1", [searchId]);
+      await db.query("DELETE FROM channel_outbound_message_matches WHERE channel_outbound_message_id = $1", [presOutboundId]);
       await db.query("DELETE FROM matches WHERE id = $1", [matchId]);
-      await db.query("DELETE FROM channel_inbound_messages WHERE id = $1", [choiceId]);
+      await db.query("DELETE FROM channel_inbound_messages WHERE id IN ($1, $2)", [choiceId, presInboundId]);
       await db.query("DELETE FROM search_conversations WHERE id = $1", [convId]);
       await db.query("DELETE FROM search_requests WHERE id = $1", [searchId]);
       await db.query("DELETE FROM professional_service_areas WHERE professional_id = $1", [profId]);
@@ -884,8 +901,9 @@ test("Regression E: new bilateral snapshot from historical degraded professional
 
 test("Regression H: ChannelInbox.runAtomic shares transaction with PostgresCustomerRepository and rollback reverts customer mutation", async () => {
   const customerId = randomUUID();
-  const degradedPhone = "+559984119070";
-  const canonicalPhone = "+5599984119070";
+  const sub = randomSubscriber8();
+  const degradedPhone = `+5599${sub}`;
+  const canonicalPhone = `+55999${sub}`;
   const inboundId = randomUUID();
   const token = randomUUID();
 
@@ -918,7 +936,9 @@ test("Regression H: ChannelInbox.runAtomic shares transaction with PostgresCusto
   assert.ok(customerAfterRollback);
   assert.equal(customerAfterRollback.phone_e164, degradedPhone, "Customer phone must remain degraded after outer transaction rollback");
 
-  await query("DELETE FROM channel_inbound_messages WHERE id = $1", [inboundId]);
-  await query("DELETE FROM customers WHERE id = $1", [customerId]);
+  await withTransaction(async (db) => {
+    await db.query("DELETE FROM channel_inbound_messages WHERE id = $1", [inboundId]);
+    await db.query("DELETE FROM customers WHERE id = $1", [customerId]);
+  });
 });
 
