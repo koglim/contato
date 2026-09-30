@@ -10,8 +10,6 @@ import {
   confirmationDecision,
   normalizeEvolutionText,
   normalizeBrazilianMobilePhone,
-  extractPhoneFromJid,
-  isOpaqueJid,
   VALID_BRAZILIAN_DDDS,
 } from "./delivery-contract.mjs";
 import {
