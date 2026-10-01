@@ -328,7 +328,6 @@ for (const byId of [false, true]) {
 }
 
 test("messages to the same recipient are delivered in creation order across concurrent consumers", async () => {
-  await query("DELETE FROM channel_outbound_messages WHERE status = 'pending'");
   const first = await insertIndependent();
   const second = await insertIndependent();
   const repository = new PostgresChannelOutboundMessageRepository();
@@ -355,7 +354,6 @@ test("uncertain delivery is held beyond its lease and only its original token ca
     assert.equal(await repository.holdDelivery(id, input), true);
     assert.equal(await repository.holdDelivery(id, input), true);
     await query("UPDATE channel_outbound_messages SET processing_started_at = NOW() - INTERVAL '1 hour' WHERE id = $1", [id]);
-    await query("DELETE FROM channel_outbound_messages WHERE status = 'pending' AND id != $1", [id]);
     assert.equal(await repository.claimNextPending(randomUUID(), 60), null);
     assert.equal(await repository.claim(id, randomUUID(), 60), null);
     assert.equal(await repository.markFailed(id, { processing_token: token, error_code: "transport_failure" }), false);
@@ -384,8 +382,8 @@ for (const state of ["receipt", "hold"] as const) {
       const before = await fingerprint();
       await assert.rejects(rollbackThrough("017_add_outbound_delivery_receipt"), (error: unknown) => {
         assert.ok(error instanceof Error && "stderr" in error);
-        assert.match(String(error.stderr), /P0017|P0020|P0026|P0027/u);
-        assert.match(String(error.stderr), /OUTBOUND_RECEIPT_ROLLBACK_BLOCKED|MEDIA_ROLLBACK_BLOCKED|OUTBOX_026_ROLLBACK_BLOCKED|CONTACT_COMPLETION_ROLLBACK_BLOCKED|CONNECTION_LIFECYCLE_V2_ROLLBACK_BLOCKED/u);
+        assert.match(String(error.stderr), /P0017/u);
+        assert.match(String(error.stderr), /OUTBOUND_RECEIPT_ROLLBACK_BLOCKED/u);
         return true;
       });
       assert.deepEqual(await fingerprint(), before);

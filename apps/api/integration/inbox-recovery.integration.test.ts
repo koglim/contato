@@ -220,10 +220,7 @@ test("Migration 019 refuses destructive rollback and preserves evidence/schema/0
   const f=await fixture();try {
     const a=await f.register(),claim=await repo.claim(a.id,randomUUID(),60);assert.ok(claim);await repo.markFailed(a.id,claim.processingToken!,"dependency_missing");
     const before=await f.state(a.id);
-    await assert.rejects(rollbackThrough('019_add_inbox_recovery'),(error: unknown)=>{
-      const e = error as {stderr?:string; message?: string};
-      return /P0018|P0019|P0020|P0021|P0025|P0026|P0027|BLOCKED/.test(String(e.stderr ?? e.message ?? ""));
-    });
+    await assert.rejects(rollbackThrough('019_add_inbox_recovery'),error=>/P0019/.test(String((error as {stderr?:string}).stderr)));
     assert.deepEqual(await f.state(a.id),before);
     assert.equal((await query("SELECT name FROM pgmigrations WHERE name IN ('018_add_contextual_conversation','019_add_inbox_recovery')")).rows.length,2);
     const index=(await query("SELECT pg_get_expr(indpred,indrelid) AS predicate FROM pg_index WHERE indexrelid='channel_inbound_recovery_phone_idx'::regclass")).rows[0];

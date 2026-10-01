@@ -133,7 +133,7 @@ export class ContextualConversationService implements ContextualInboxHandler {
       if (!criticalDelegate && !snapshot.conversationId && !snapshot.pendingSlot) {
         const recentExpired = await new PostgresSearchConversationRepository().findRecentExpiredWithShownMatches(snapshot.customerId);
         if (recentExpired) {
-          const shown = await new PostgresSelectionMatchRepository().listShown(recentExpired.searchRequestId);
+          const shown = await new PostgresSearchConversationRepository().listHistoricallyShownForExpiredSearch(recentExpired.searchRequestId);
           const named = resolveProfessionalSelection(record.rawText, shown).kind !== "unresolved";
           const inquiry = deterministicSelectionFastPath(record.rawText).kind !== "none";
           if (command !== null || named || inquiry) {

@@ -58,7 +58,6 @@ for(const [label,changes,reason] of [
     const authorized=claimDecision({statusCode:200,body:claim.body},f.provider);assert.equal(authorized.action,'send');
     const outcome=transportDecision({error:'timeout'},authorized.message);assert.equal(outcome.action,'hold');
     assert.equal((await f.post(`/outbound/${row.notice_outbound_id}/hold`,outcome.payload)).statusCode,200);
-    await query("DELETE FROM channel_outbound_messages WHERE status = 'pending' AND provider != $1", [f.provider]);
     assert.equal(await outbox.claimNextPending(randomUUID(),60),null);
   }finally{await f.cleanup();}
 });
@@ -260,7 +259,7 @@ test('migration 020 refuses destructive rollback and preserves media, audit and 
       (SELECT md5(jsonb_agg(to_jsonb(e) ORDER BY id)::text) FROM channel_transport_events e) audit,
       (SELECT md5(jsonb_agg(to_jsonb(p) ORDER BY id)::text) FROM pgmigrations p) migrations`)).rows;
     const before=await snapshot();
-    await assert.rejects(rollbackThrough('020_add_durable_channel_media'),(e:unknown)=>{assert.ok(e instanceof Error && 'stderr' in e);assert.match(String(e.stderr),/P0020|P0026|P0027/);return true;});
+    await assert.rejects(rollbackThrough('020_add_durable_channel_media'),(e:unknown)=>{assert.ok(e instanceof Error && 'stderr' in e);assert.match(String(e.stderr),/P0020/);return true;});
     assert.deepEqual(await snapshot(),before);assert.ok((await f.state(id)).media_bytes);
   }finally{await f.cleanup();}
 });
