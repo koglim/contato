@@ -272,3 +272,34 @@ simulados; versões fixadas e exports inativos. Nenhuma variável/credential nov
 Publicação futura: todas as migrations pendentes (017–020 quando aplicável) antes
 da API; depois cinco workflows ainda inativos e homologação autorizada. B2 off.
 Não houve deploy/merge/envio/avaliação paga. V1 comercial continua incompleta.
+
+---
+
+## Homologação em Produção — Golden E2E #2 (2026-10-01)
+
+Em 2026-10-01, após a unificação da consistência de identidade de cliente no fluxo contextual (PR #24) e atualização do contrato de transporte (PR #23), foi realizado o ensaio formal autorizado de ponta a ponta com instâncias ativas do n8n (`v1.123.21`), Evolution API (`v2.3.7`) e ContatoCerto API (`contatocerto-api` @ `909ab53853a5df2f5da2795ff86a653041fc7863`).
+
+### 1. Arquitetura em Execução Validada
+* **WhatsApp Gateway (`HwNYhTmAUT2NI7HW`):** Webhook de entrada ativo, validando payloads da Evolution API e despachando inbounds para o Channel Inbox (`/internal/channel/inbound`).
+* **Shared Outbox Delivery (`qQYr6YpBsCttwO1S`):** Subworkflow de entrega unificada, executando classificação estrita de transporte (SHA-256 `09e44b9c8a618bc557e9697951b174c4728bba1ea9b4cf641675020c561b49b0`), envio HTTP para a Evolution API e confirmação idempotente via `/sent`.
+* **Outbox Dispatcher (`L6aOjHDfdztAslwT`):** Worker periódico ativo (Schedule Trigger 30s) com orçamento e dreno de mensagens assíncronas de notificação.
+
+### 2. Evidências do Ciclo E2E em Produção
+
+| Etapa do Ciclo | Inbound / Gatilho | Gateway Exec ID | Outbound ID / Finalidade | Shared Delivery Exec ID | Dispatcher Exec ID | Evolution Provider Msg ID | Status Transporte |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1. Busca / Apresentação** | Inbound texto "Preciso de um eletricista em Sinop" (`Contato Certo:3A4C00420AE15018A405`) | `957356` | `72ffe433-10e6-4890-ac29-3a9a2e18cf40` (`customer_reply`) | `957357` | N/A (entrega direta via Gateway) | `3EB033290A4CC069A552D0` | `sent` (201 Created) |
+| **2. Seleção do Cliente (Farol)** | Inbound texto "2" (`Contato Certo:3ACC301E46EF43654338`) | `957450` | `c294a30f-11f3-4fe5-9917-c6260896f577` (`customer_reply`) | `957451` | N/A (entrega direta via Gateway) | `3EB0D8866D13B8800C9199` | `sent` (201 Created) |
+| **3. Notificação ao Profissional** | Fila Outbox assíncrona gerada pela seleção | N/A | `efccaf96-e7ec-4947-86d8-85aa1a6b8d6d` (`professional_contact_notification`) | `957461` | `957460` | `3EB0B8E7A96BFA9E134B92` | `sent` (201 Created) |
+| **4. Declaração de Conclusão** | Inbound profissional "Concluído CC-XKVLBBTF" (`Contato Certo:A54F9E724C150127401A9C8F595E34AD`) | `972785` | `600df159-2bec-4596-b0ac-62e28b49f6c9` (`professional_reply`) | `972786` | N/A (entrega direta via Gateway) | `3EB0597FA10F48B3059293` | `sent` (201 Created) |
+| **5. Solicitação ao Cliente** | Fila Outbox assíncrona gerada pela declaração | N/A | `bd1efb81-7e89-4f25-a402-fa7eb7f866fb` (`customer_contact_update`) | `972794` | `972791` | `3EB07DAC2F01B9EE979CE6` | `sent` (201 Created) |
+| **6. Confirmação do Cliente** | Inbound cliente "confirmar CC-XKVLBBTF" (`Contato Certo:3A8C35510FB1F1913F20`) | `973235` | `4653ae1a-f77e-487c-85fd-8c3600323462` (`customer_reply`) | `973236` | N/A (entrega direta via Gateway) | `3EB0D18D9F44920DA0E700` | `sent` (201 Created) |
+| **7. Notificação Final Profissional** | Fila Outbox assíncrona gerada pela confirmação | N/A | `a1bd9919-a4d1-4049-899f-467492c25b43` (`professional_contact_notification`) | `973243` | `973240` | `3EB0C8A8F5BDE736DD95D1` | `sent` (201 Created) |
+
+### 3. Invariantes de Transporte Comprovados em Produção
+* **Zero Falhas de Transporte / Zero Holds:** Todas as 6 mensagens outbounds transitadas foram aceitas pela Evolution API com HTTP 201 e confirmadas no backend com HTTP 200 via `POST /internal/channel/outbound/:id/sent` sem retenção em hold (`delivery_hold_reason IS NULL`).
+* **Conexão Estabelecida sem Aceite Prévio:** Contato `35c4ab81-fb23-4562-bb96-a09258546f31` estabelecido imediatamente como `shared` com código público `CC-XKVLBBTF`, notificando ambas as partes simultaneamente.
+* **Ciclo Bilateral de Conclusão Confirmado:** A transição `pending_confirmation` -> `confirmed` -> `completed` ocorreu com total rastreabilidade de eventos no banco de dados e notificação recíproca.
+* **Diferenciação Estrita de Evidências:**
+  * **EVIDÊNCIA AUTOMATIZADA / CI:** Testes unitários, de arquitetura e integração (`apps/api/integration/`, 53 testes de workflow, mocks e banco isolado de CI).
+  * **EVIDÊNCIA REAL DE PRODUÇÃO:** Execuções no n8n / EasyPanel documentadas na tabela acima com números e instâncias reais do WhatsApp e banco PostgreSQL de produção.
