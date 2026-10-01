@@ -95,7 +95,7 @@ export function hasTrailingNonGeographicModifier(location: string): boolean {
 }
 
 export type ContextualDecision = {
-  kind: "delegate" | "search" | "clarify" | "greeting" | "small_talk" | "faq_cost" | "catalog_info" | "out_of_scope" | "selection_inquiry";
+  kind: "delegate" | "search" | "clarify" | "greeting" | "small_talk" | "faq_cost" | "catalog_info" | "out_of_scope" | "selection_inquiry" | "expired_selection";
   memory: ContextualMemory;
   correction: boolean;
   catalogServices?: string[];

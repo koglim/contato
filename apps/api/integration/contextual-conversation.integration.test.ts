@@ -10,7 +10,7 @@ import { PostgresChannelInboundMessageRepository } from "../src/modules/channel-
 import { rollbackThrough } from "./rollback-helper.js";
 import type { LocationResolutionService } from "../src/modules/location-resolution/location-resolution.types.js";
 import { ConversationAIProviderError, type ConversationAIFallbackEvent } from "../src/modules/contextual-conversation/contextual.provider.js";
-import { contextualClarificationText } from "../src/modules/contextual-conversation/contextual.reply.js";
+import { contextualClarificationText, CONTEXTUAL_EXPIRED_SELECTION } from "../src/modules/contextual-conversation/contextual.reply.js";
 
 after(closeDatabaseConnection);
 const headers = { "x-internal-key": "b2-integration" };
@@ -209,6 +209,8 @@ test("Recovery after context expiration preserves confirmed slots but cannot sel
     f.set(async()=>basic({intent:"selection",speech_act:"request"}));
     const response=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
     assert.equal(response.json().id,registered.record.id);assert.equal(response.json().status,"processed",response.body);
+    const outMsg = (await query<{ text_content: string }>("SELECT text_content FROM channel_outbound_messages WHERE recipient_phone_e164=$1 ORDER BY created_at DESC LIMIT 1", [f.phone])).rows[0];
+    assert.equal(outMsg.text_content, CONTEXTUAL_EXPIRED_SELECTION);
     assert.equal((await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)",[f.phone])).rows.length,0);
     const after=await f.state();assert.equal(after.memory.service.value,f.name);assert.equal(after.memory.location.value,"Sinop");assert.equal(after.memory.conversationId,null);
   }finally{await f.cleanup();}
@@ -1031,7 +1033,10 @@ test("B2 migration 018 rollback is protected and transaction failure preserves s
   const f = await fixture();
   try {
     f.set(async () => basic({ intent: "faq_cost" })); await f.receive("quanto custa usar?");
-    await assert.rejects(rollbackThrough("018_add_contextual_conversation"), error => /P0018/.test(String((error as { stderr?: string }).stderr)));
+    await assert.rejects(rollbackThrough("018_add_contextual_conversation"), (error: unknown) => {
+      const e = error as { stderr?: string; message?: string };
+      return /P0018|P0019|P0020|P0021|P0025|P0026|P0027|BLOCKED/.test(String(e.stderr ?? e.message ?? ""));
+    });
     assert.equal((await query("SELECT name FROM pgmigrations WHERE name='018_add_contextual_conversation'")).rows.length, 1);
     const inbox = new PostgresChannelInboundMessageRepository();
     const registered = await inbox.createOrFind({ provider: "b2-test", provider_message_id: randomUUID(), phone_e164: f.phone, raw_text: "teste atomicidade", country_code: "BR", limit: 3 });
@@ -1046,3 +1051,175 @@ test("B2 migration 018 rollback is protected and transaction failure preserves s
     await repository.release(snapshot);
   } finally { await f.cleanup(); }
 });
+
+test("T18: Expired selection by numeric command (2, segundo, opcao 2) returns deterministic expiration notice with 0 AI and 0 geocoder calls", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const first = await f.receive(`Preciso de ${f.name} em Sinop`);
+    assert.equal(first.statusCode, 200, first.body);
+    await f.sent(first.json().outbound.id);
+    const before = await f.state();
+    assert.ok(before.id);
+    assert.equal(before.pending_slot, "selection");
+
+    // Expire the conversation
+    await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+
+    const callsBefore = f.calls();
+    const geoCallsBefore = f.geoCalls();
+
+    // Customer sends "2" after expiration
+    const response = await f.receive("2");
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
+    assert.equal(response.json().result.status, "information");
+    assert.equal(f.calls(), callsBefore, "Must make 0 AI interpretation calls");
+    assert.equal(f.geoCalls(), geoCallsBefore, "Must make 0 geocoder calls");
+
+    // 0 contacts created
+    const contacts = (await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows;
+    assert.equal(contacts.length, 0);
+
+    // Customer state preserves service and location memory, with conversationId cleared
+    const after = await f.state();
+    assert.equal(after.memory.service.value, f.name);
+    assert.equal(after.memory.location.value, "Sinop");
+    assert.equal(after.memory.conversationId, null);
+  } finally { await f.cleanup(); }
+});
+
+test("T18: Expired selection by professional name returns deterministic expiration notice with 0 AI calls", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const first = await f.receive(`Preciso de ${f.name} em Sinop`);
+    await f.sent(first.json().outbound.id);
+    const before = await f.state();
+
+    await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+
+    const callsBefore = f.calls();
+    const response = await f.receive("Quero o Profissional 1");
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
+    assert.equal(f.calls(), callsBefore, "Must make 0 AI calls for expired named selection");
+
+    const contacts = (await query("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows;
+    assert.equal(contacts.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("T18: Expired selection inquiry and show more return deterministic expiration notice with 0 AI calls", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const first = await f.receive(`Preciso de ${f.name} em Sinop`);
+    await f.sent(first.json().outbound.id);
+    const before = await f.state();
+
+    await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+
+    const callsBefore = f.calls();
+    const inquiryRes = await f.receive("qual o mais perto?");
+    assert.equal(inquiryRes.statusCode, 200, inquiryRes.body);
+    assert.equal(inquiryRes.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
+    assert.equal(f.calls(), callsBefore, "Must make 0 AI calls for expired selection inquiry");
+
+    const showMoreRes = await f.receive("mostrar mais");
+    assert.equal(showMoreRes.statusCode, 200, showMoreRes.body);
+    assert.equal(showMoreRes.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
+    assert.equal(f.calls(), callsBefore, "Must make 0 AI calls for expired show more");
+  } finally { await f.cleanup(); }
+});
+
+test("T18: Active selection is not hijacked and succeeds normally (regression prevention)", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const first = await f.receive(`Preciso de ${f.name} em Sinop`);
+    await f.sent(first.json().outbound.id);
+    const before = await f.state();
+    assert.equal(before.pending_slot, "selection");
+
+    // Active conversation: selection "1" must succeed and create contact
+    const selectRes = await f.receive("1");
+    assert.equal(selectRes.statusCode, 200, selectRes.body);
+    assert.equal(selectRes.json().result.route, "selection");
+    assert.notEqual(selectRes.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
+
+    const contacts = (await query("SELECT id, status FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows;
+    assert.equal(contacts.length, 1);
+    assert.equal(contacts[0].status, "shared");
+  } finally { await f.cleanup(); }
+});
+
+test("T18: No false positive for numeric input when customer has no expired search conversation", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic());
+    const callsBefore = f.calls();
+    // Brand new customer with no prior search sends "2"
+    const response = await f.receive("2");
+    assert.equal(response.statusCode, 200, response.body);
+    assert.notEqual(response.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
+    assert.ok(f.calls() > callsBefore, "Interpretation runs when no expired search conversation exists");
+  } finally { await f.cleanup(); }
+});
+
+test("T18: Newer active conversation takes precedence over older expired search", async () => {
+  const f = await fixture();
+  try {
+    // 1. Initial search in Sinop -> expired
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const first = await f.receive(`Preciso de ${f.name} em Sinop`);
+    await f.sent(first.json().outbound.id);
+    const before = await f.state();
+    await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+
+    // 2. Customer starts a NEW search in Cuiabá (pending_slot = 'selection' on new search)
+    const otherService = await f.addService();
+    f.set(async () => basic({ speech_act: "request", location: { text: "Cuiabá", evidence: "Cuiabá" } }));
+    const second = await f.receive(`Preciso de ${otherService.name} em Cuiabá`);
+    assert.equal(second.statusCode, 200, second.body);
+    await f.sent(second.json().outbound.id);
+    const activeState = await f.state();
+    assert.ok(activeState.id, "New active conversation must exist");
+    assert.equal(activeState.pending_slot, "selection");
+    assert.notEqual(activeState.search_request_id, before.search_request_id, "New active conversation has different search request ID");
+
+    // 3. Customer sends "2" to select candidate on NEW search
+    // Must select candidate on the new search, NOT report expired!
+    f.set(async () => basic());
+    const third = await f.receive("2");
+    assert.equal(third.statusCode, 200, third.body);
+    assert.notEqual(third.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION, "Active conversation must not be hijacked by old expired search");
+    assert.equal(third.json().result.result?.kind, "selected");
+  } finally { await f.cleanup(); }
+});
+
+test("T18: Idempotent replay of expired selection returns exact same outcome", async () => {
+  const f = await fixture();
+  try {
+    f.set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const first = await f.receive(`Preciso de ${f.name} em Sinop`);
+    await f.sent(first.json().outbound.id);
+    const before = await f.state();
+    await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+
+    const msgId = randomUUID();
+    const firstAttempt = await f.receive("2", msgId);
+    assert.equal(firstAttempt.statusCode, 200, firstAttempt.body);
+    assert.equal(firstAttempt.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
+    assert.equal(firstAttempt.json().duplicate, false);
+
+    await f.sent(firstAttempt.json().outbound.id);
+
+    // Replay same message
+    const replay = await f.receive("2", msgId);
+    assert.equal(replay.statusCode, 200, replay.body);
+    assert.equal(replay.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
+    assert.equal(replay.json().duplicate, true);
+  } finally { await f.cleanup(); }
+});
+

@@ -84,6 +84,9 @@ export interface SearchConversationRepository {
   findById(id: string): Promise<SearchConversationRecord | null>;
   expireStaleForCustomer(customerId: string): Promise<void>;
   findActiveByCustomerId(customerId: string): Promise<SearchConversationRecord | null>;
+  findRecentExpiredWithShownMatches(
+    customerId: string,
+  ): Promise<{ id: string; searchRequestId: string } | null>;
   claim(
     id: string,
     processingToken: string,

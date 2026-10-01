@@ -1582,9 +1582,10 @@ test("Scenario 19: Historical degraded customer phone in snapshot matches canoni
 });
 
 test("Scenario 20: Code-free completion declaration and confirmation with historical degraded snapshot phone", async () => {
-  const degradedCustomerPhone = "+559984119070";
-  const canonicalCustomerPhone = "+5599984119070";
-  const canonicalProfPhone = "+5566999029086";
+  const suffix = Math.floor(80000000 + Math.random() * 9999999);
+  const degradedCustomerPhone = `+5599${suffix}`;
+  const canonicalCustomerPhone = `+55999${suffix}`;
+  const canonicalProfPhone = randomPhone();
 
   const f = await createFixture({
     customerPhone: degradedCustomerPhone,
