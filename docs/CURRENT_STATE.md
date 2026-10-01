@@ -107,18 +107,25 @@ Auditoria remota read-only e reconciliação de evidências (detalhada em [`docs
 * **Autenticação OTP:** `PROFESSIONAL_AUTH_ENABLED` desativado (`false`).
 * **Áudio:** O pipeline de transcrição opera via credentials do n8n (`ContatoCerto Groq` e `ContatoCerto OpenAI`), independente da variável `GROK_API_KEY` listada no EasyPanel.
 
-### D. Ainda Requer Verificação Autenticada de Runtime
-* Nível de migração no banco de dados de produção (confirmação da Migration 027).
-* SHA exato do commit das imagens da API e Web em execução no EasyPanel.
-* Estado de pareamento e sessão ativa do WhatsApp na Evolution API.
-* Contadores ao vivo de filas de mensagens (`/internal/channel/inbound/queue-status`).
+### D. Verificações de Runtime Concluídas em Produção
+* **Nível de Migração no Banco:** Migrations até 027 aplicadas e ativas (`027_add_connection_lifecycle_v2.js`).
+* **Resolução de Identidade Contextual (PR #24):** Unificação da resolução de identidade por telefone brasileiro no repositório contextual, eliminando duplicidade de clientes por formato 8/9 dígitos antes da homologação.
+* **Integridade de Fila:** Fila limpa e sem quarentenas ativas após encerramento administrativo de mensagens históricas de teste.
+
+### E. Homologação em Produção — Golden E2E #2 (2026-10-01)
+Em 2026-10-01, foi executado com sucesso o ensaio autorizado de ponta a ponta em ambiente de produção real (**Golden E2E #2**), validando o happy path completo do marketplace:
+* **Busca e Apresentação:** Inbound do cliente recebido via WhatsApp Gateway (Execução 957356), processado pelo motor contextual e respondido via Shared Delivery (Execução 957357, mensagem `72ffe433-10e6-4890-ac29-3a9a2e18cf40`, Evolution ID `3EB033290A4CC069A552D0`) com 3 opções de profissionais em Sinop/MT sem criação de hold.
+* **Seleção e Conexão Imediata (Ciclo v2):** Seleção "2" (Farol) processada via Gateway (Execução 957450). Conexão bilateral estabelecida imediatamente no status `shared` gerando código público `CC-XKVLBBTF` (`contact_id: 35c4ab81-fb23-4562-bb96-a09258546f31`) sem exigência de aceite prévio do prestador. Confirmação ao cliente enviada via Shared Delivery (Execução 957451, Outbound `c294a30f-11f3-4fe5-9917-c6260896f577`, Evolution ID `3EB0D8866D13B8800C9199`) e notificação ao profissional despachada pelo Outbox Dispatcher (Execução 957460 / Shared Delivery 957461, Outbound `efccaf96-e7ec-4947-86d8-85aa1a6b8d6d`, Evolution ID `3EB0B8E7A96BFA9E134B92`).
+* **Declaração de Conclusão pelo Profissional:** Mensagem "Concluído CC-XKVLBBTF" de Farol recebida via Gateway (Execução 972785). Agregado de conclusão criado em `pending_confirmation` (`completion_id: e6bba7b4-dc9e-41a8-a063-cc69d5daf2ca`, evento `e545cf74-08f7-4123-baab-05025f373f72`, contato mantido em `shared`). Resposta ao profissional enviada via Shared Delivery (Execução 972786, Outbound `600df159-2bec-4596-b0ac-62e28b49f6c9`, Evolution ID `3EB0597FA10F48B3059293`) e prompt de confirmação enviado ao cliente via Dispatcher (Execução 972791 / Shared Delivery 972794, Outbound `bd1efb81-7e89-4f25-a402-fa7eb7f866fb`, Evolution ID `3EB07DAC2F01B9EE979CE6`).
+* **Confirmação Bilateral pelo Cliente:** Mensagem "confirmar CC-XKVLBBTF" do cliente recebida via Gateway (Execução 973235). Evento de confirmação registrado (`event_id: 769e4a1b-76bb-4651-8554-9e4a67337129`), estado de conclusão promovido para `confirmed` e contato finalizado para `completed`. Resposta final ao cliente enviada via Shared Delivery (Execução 973236, Outbound `4653ae1a-f77e-487c-85fd-8c3600323462`, Evolution ID `3EB0D18D9F44920DA0E700`) e notificação de encerramento enviada ao profissional via Dispatcher (Execução 973240 / Shared Delivery 973243, Outbound `a1bd9919-a4d1-4049-899f-467492c25b43`, Evolution ID `3EB0C8A8F5BDE736DD95D1`).
+* **Resultado Consolidado:** 7/7 outbounds observados no Golden E2E #2 ficaram `status=sent`, com `provider_message_id` persistido, `contact_completed=true`, `completion_confirmed=true`, 0 divergências de identidade e zero transport holds.
 
 ---
 
 ## 4. Testes Operacionais e Homologação Pendente
 
-* **Transporte WhatsApp Real:** Embora testes manuais reais com números físicos de WhatsApp tenham sido reportados pelo operador, a **homologação formal de ponta a ponta da esteira de lançamento**, testes de carga/concorrência sob múltiplos números simultâneos e certificação de produção completa permanecem pendentes.
-* **Avaliação de Modelos de Linguagem Reais:** Avaliação empírica de latência, precisão e custos com tráfego real.
+* **Transporte WhatsApp Real (Happy Path Validado):** O fluxo feliz ponta a ponta (busca, apresentação, seleção bilateral v2, notificação de oportunidade, declaração de conclusão, solicitação de confirmação e encerramento bilateral) foi formalmente homologado em produção real em 2026-10-01. **Permanecem pendentes:** testes de carga/estresse com alta concorrência de números simultâneos, injeção de falhas controladas no provider, homologação do pipeline de transcrição de áudio em produção, homologação do OTP de login profissional ao vivo (`PROFESSIONAL_AUTH_ENABLED=false`) e certificação comercial irrestrita.
+* **Avaliação de Modelos de Linguagem Reais:** Avaliação contínua de latência, precisão e custos com tráfego volumétrico real.
 * **Testes E2E de Navegador:** Cobertura automatizada do portal web via Playwright.
 
 ---
