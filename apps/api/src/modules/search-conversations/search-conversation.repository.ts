@@ -4,6 +4,7 @@ import type {
   CompleteSearchConversation,
   CreateAwaitingSelectionConversation,
   CreatePendingConversation,
+  HistoricallyShownCandidate,
   MoveToAwaitingSelectionConversation,
   SearchConversationRecord,
   SearchConversationRepository,
@@ -137,6 +138,52 @@ export class PostgresSearchConversationRepository implements SearchConversationR
       [customerId],
     );
     return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  async findRecentExpiredWithShownMatches(customerId: string): Promise<{ id: string; searchRequestId: string } | null> {
+    const result = await this.execute<{ id: string; search_request_id: string }>(
+      `SELECT c.id, c.search_request_id
+         FROM search_conversations c
+        WHERE c.customer_id = $1
+          AND (c.status = 'expired' OR (c.status = 'active' AND c.expires_at <= NOW()))
+          AND c.search_request_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM matches m
+             WHERE m.search_request_id = c.search_request_id
+               AND m.shown_at IS NOT NULL
+          )
+        ORDER BY c.created_at DESC
+        LIMIT 1`,
+      [customerId],
+    );
+    return result.rows[0] ? { id: result.rows[0].id, searchRequestId: result.rows[0].search_request_id } : null;
+  }
+
+  async listHistoricallyShownForExpiredSearch(searchRequestId: string): Promise<HistoricallyShownCandidate[]> {
+    const result = await this.execute<{
+      match_id: string;
+      professional_id: string;
+      rank_position: number;
+      display_name: string;
+    }>(
+      `SELECT matches.id AS match_id,
+              matches.professional_id,
+              matches.rank_position,
+              professionals.display_name
+         FROM matches
+         JOIN professionals ON professionals.id = matches.professional_id
+        WHERE matches.search_request_id = $1
+          AND matches.shown_at IS NOT NULL
+          AND matches.rank_position IS NOT NULL
+        ORDER BY matches.rank_position ASC`,
+      [searchRequestId],
+    );
+    return result.rows.map((row) => ({
+      matchId: row.match_id,
+      professionalId: row.professional_id,
+      rankPosition: row.rank_position,
+      displayName: row.display_name,
+    }));
   }
 
   async claim(id: string, processingToken: string, processingLeaseSeconds: number) {

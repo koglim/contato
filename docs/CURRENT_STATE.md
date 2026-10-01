@@ -166,9 +166,9 @@ Em 2026-10-01, foram executados os ensaios autorizados para os cenários de exce
   * O workflow `workflows/n8n/shared-delivery.json` versionado em `main` suporta o propósito de mensagem `professional_auth_challenge` (desafio de login OTP).
   * O arquivo exportado da instância n8n instalada pelo operador ainda não contém suporte a esse propósito de mensagem.
   * **Ação Necessária:** O operador precisará atualizar o workflow instalado no n8n antes de habilitar `PROFESSIONAL_AUTH_ENABLED=true` em produção. (Registrado no [ROADMAP.md](ROADMAP.md) sob `# NOW`).
-* **Tratamento de Contexto Obsoleto / Seleção Expirada (T18 — Débito de Launch Readiness Aberto):**
-  * Em ensaio de produção real, observou-se que quando o cliente tenta selecionar um profissional ("2", "Quero o farol") após o TTL de 30 minutos da conversa de seleção ter expirado, o domínio rejeita a seleção corretamente, mas a camada conversacional responde com um pedido genérico de esclarecimento ("Pode esclarecer o que você quer mudar ou qual opção quer escolher?") em vez de emitir uma mensagem explícita informando a expiração da lista de opções (ex: *"Essa lista de profissionais expirou. Posso buscar eletricistas em Sinop novamente para você?"*).
-  * O item permanece documentado como débito aberto de Launch Readiness para implementação de tratamento explícito de expiração de seleção.
+* **Tratamento de Contexto Obsoleto / Seleção Expirada (T18 — Tratamento Implementado no Repositório):**
+  * Em ensaio de produção real, observou-se que quando o cliente tentava selecionar um profissional ("2", "Quero o farol") após o TTL de 30 minutos da conversa de seleção ter expirado, o domínio rejeitava a seleção corretamente, mas a camada conversacional respondia com um pedido genérico de esclarecimento em vez de mensagem explícita.
+  * O tratamento foi implementado no repositório através de fast-path determinístico no serviço contextual (`CONTEXTUAL_EXPIRED_SELECTION`: *"Essa lista de profissionais expirou. Envie uma nova mensagem com o serviço e a cidade para eu buscar opções atualizadas."*), executado com 0 chamadas de IA, 0 geocodificações e zero mutações de domínio/negócio (zero contatos criados, zero novas buscas, zero matches selecionados, zero notificações a profissionais). Validado por testes automatizados de integração, com revalidação em produção real pendente.
 
 ---
 

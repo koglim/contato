@@ -78,12 +78,25 @@ export type CompleteSearchConversation = {
   searchRequestId: string;
 };
 
+export type HistoricallyShownCandidate = {
+  matchId: string;
+  professionalId: string;
+  rankPosition: number;
+  displayName: string;
+};
+
 export interface SearchConversationRepository {
   createPending(input: CreatePendingConversation): Promise<SearchConversationRecord>;
   createAwaitingSelection(input: CreateAwaitingSelectionConversation): Promise<SearchConversationRecord>;
   findById(id: string): Promise<SearchConversationRecord | null>;
   expireStaleForCustomer(customerId: string): Promise<void>;
   findActiveByCustomerId(customerId: string): Promise<SearchConversationRecord | null>;
+  findRecentExpiredWithShownMatches(
+    customerId: string,
+  ): Promise<{ id: string; searchRequestId: string } | null>;
+  listHistoricallyShownForExpiredSearch(
+    searchRequestId: string,
+  ): Promise<HistoricallyShownCandidate[]>;
   claim(
     id: string,
     processingToken: string,

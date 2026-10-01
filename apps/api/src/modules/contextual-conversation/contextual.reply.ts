@@ -8,6 +8,7 @@ export const CONTEXTUAL_HYPOTHESIS_REJECTED = "Entendi. Qual serviço você prec
 export const CONTEXTUAL_SCOPE = "Posso ajudar você a encontrar e escolher profissionais de serviços na sua região. Sua busca continua salva. Qual atendimento você precisa?";
 export const CONTEXTUAL_GREETING = "Olá! Me conta como posso ajudar. Qual serviço você procura para sua casa ou empresa?";
 export const CONTEXTUAL_SMALL_TALK = "Estou por aqui para ajudar você a encontrar um profissional. Qual serviço está precisando?";
+export const CONTEXTUAL_EXPIRED_SELECTION = "Essa lista de profissionais expirou. Envie uma nova mensagem com o serviço e a cidade para eu buscar opções atualizadas.";
 
 // Shared by runtime and evaluation. Only the domain/controller decides what may be asked.
 export function contextualQuestionContext(decision: ContextualDecision, serviceResolved: boolean, locationResolved: boolean): ContextualReplyContext | null {

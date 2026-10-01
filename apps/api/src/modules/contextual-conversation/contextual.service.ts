@@ -26,7 +26,7 @@ import { parseBilateralConfirmation } from "../bilateral-contact/bilateral-conta
 import { resolveProfessionalSelection } from "../selection-command/professional-selection.resolver.js";
 import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider } from "./contextual.contract.js";
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
-import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, CONTEXTUAL_HYPOTHESIS_REJECTED, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
+import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, CONTEXTUAL_HYPOTHESIS_REJECTED, CONTEXTUAL_EXPIRED_SELECTION, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 import { classifyConversationAIError, withConversationAITimeout, type ConversationAIFallbackEvent, type ConversationAIFallbackReason, type ConversationAIStage } from "./contextual.provider.js";
 import { deterministicSearchProposal, deterministicSelectionFastPath } from "./contextual.fast-path.js";
 import { presentSelectionInquiry, type CandidateInquiryFact } from "../selection-message/selection-inquiry.presenter.js";
@@ -34,7 +34,7 @@ import type { ContextualShownCandidate } from "./contextual.contract.js";
 import { confirmedUniqueHypothesis, rejectedUniqueHypothesis } from "./contextual.confirmation.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
-export { CONTEXTUAL_COST_POLICY } from "./contextual.reply.js";
+export { CONTEXTUAL_COST_POLICY, CONTEXTUAL_EXPIRED_SELECTION } from "./contextual.reply.js";
 const stripPrivate = (text: string) => text.replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/giu, "[email omitido]").replace(/\+?\d[\d\s().-]{7,}\d/gu, "[número omitido]").replace(/https?:\/\/\S+/gu, "[link omitido]");
 type ContextualConversationOptions = {
   timeoutMs?: number;
@@ -129,8 +129,20 @@ export class ContextualConversationService implements ContextualInboxHandler {
       const selectionFastPath = snapshot.pendingSlot === "selection" ? deterministicSelectionFastPath(record.rawText) : { kind: "none" as const };
       const criticalDelegate = global || recoveredSelection || (snapshot.pendingSlot === "selection"
         && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null));
+      let expiredSelection = false;
+      if (!criticalDelegate && !snapshot.conversationId && !snapshot.pendingSlot) {
+        const recentExpired = await new PostgresSearchConversationRepository().findRecentExpiredWithShownMatches(snapshot.customerId);
+        if (recentExpired) {
+          const shown = await new PostgresSearchConversationRepository().listHistoricallyShownForExpiredSearch(recentExpired.searchRequestId);
+          const named = resolveProfessionalSelection(record.rawText, shown).kind !== "unresolved";
+          const inquiry = deterministicSelectionFastPath(record.rawText).kind !== "none";
+          if (command !== null || named || inquiry) {
+            expiredSelection = true;
+          }
+        }
+      }
       let rejection: Awaited<ReturnType<typeof rejectedUniqueHypothesis>> = null;
-      if (!criticalDelegate && snapshot.pendingSlot !== "selection" && !confirmedHypothesis) {
+      if (!criticalDelegate && !expiredSelection && snapshot.pendingSlot !== "selection" && !confirmedHypothesis) {
         try { rejection = await rejectedUniqueHypothesis(record.rawText, snapshot.memory.hypotheses, this.services); }
         catch { /* Resolver failure leaves the normal interpretation path available. */ }
       }
@@ -145,6 +157,9 @@ export class ContextualConversationService implements ContextualInboxHandler {
       if (criticalDelegate) {
         path = "critical_delegate";
         decision = { kind: "delegate", memory: snapshot.memory, correction: false };
+      } else if (expiredSelection) {
+        path = "deterministic_fast_path";
+        decision = { kind: "expired_selection", memory: snapshot.memory, correction: false };
       } else if (selectionFastPath.kind !== "none") {
         path = "deterministic_fast_path";
         decision = {
@@ -360,6 +375,8 @@ export class ContextualConversationService implements ContextualInboxHandler {
           }
           text = presentSelectionInquiry(decision.inquiryType ?? "details", shownMatches, decision.targetPositions ?? []);
           status = "information";
+        } else if (!fallback && decision.kind === "expired_selection") {
+          text = CONTEXTUAL_EXPIRED_SELECTION; status = "information";
         } else if (!fallback && decision.kind === "faq_cost") {
           text = CONTEXTUAL_COST_POLICY; status = "information";
         } else if (!fallback && decision.kind === "catalog_info") {
