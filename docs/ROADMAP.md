@@ -29,7 +29,9 @@ Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
 0. **Launch Readiness / Homologação (FASE ATIVA):**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
-   * Próximos passos operacionais: confirmar pareamento WhatsApp no Evolution, checar tag/commit no EasyPanel para certificar `b9e48582`, e reimportar `shared-delivery.json` no n8n antes de habilitar OTP.
+   * **Homologação em Produção Real (2026-10-01):** Happy path Golden E2E #2 (busca, apresentação, conexão imediata v2 e confirmação bilateral de conclusão), subfluxo de indisponibilidade profissional com reescolha na mesma busca (T29 parcial em produção) e contestação bilateral de conclusão (T34) validados em produção real com mensagens observadas em status=sent e zero holds. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
+   * **Tratamento de Contexto Obsoleto / Seleção Expirada (T18):** Implementação de tratamento conversacional explícito para seleções enviadas após o vencimento do TTL da conversa de busca (30 min), substituindo pedido genérico de esclarecimento por aviso claro de expiração da lista com oferta de reinício da busca.
+   * Próximos passos operacionais: reimportar `shared-delivery.json` no n8n antes de habilitar OTP (`PROFESSIONAL_AUTH_ENABLED=true`), homologação do pipeline de áudio em produção e testes de carga/estresse.
 1. **Localização v2 (Fundação de Entrada):**
    * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
 3. **Reconciliação n8n / Evolution / Workflows Versionados:**
@@ -47,7 +49,7 @@ Funcionalidades planejadas para a sequência imediata após a conclusão do bloc
 * **Telemetria e Analytics do Funil:** Instrumentação e produto de visualização de métricas de conversão ao longo do funil (*candidate → match → shown → selected → bilateral connection → completion*).
 * **Painel Web do Profissional v2:** Expansão do `/dashboard` com tela visual de atendimentos, métricas de exposição, taxa de seleção, histórico financeiro de assinatura e status de reputação.
 * **Painel Administrativo para Operadores:** Interface para auditoria de quarentena da Inbox, moderação de perfis e suporte ao cliente.
-* **Homologação Formal de Transporte de Lançamento:** Embora testes manuais com WhatsApp real tenham sido reportados pelo operador, a homologação formal de ponta a ponta da esteira de lançamento sob carga concorrente e múltiplos números permanece pendente.
+* **Homologação de Carga e Resiliência de Transporte:** Testes de estresse com alta concorrência de números simultâneos e injeção de falhas controladas no provedor de mensageria.
 * **Automação de Testes E2E Web:** Cobertura de fluxos do painel via Playwright.
 * **Endurecimento de Confiabilidade:** Estratégias de backup/restore testadas, tolerância a particionamento de rede e observabilidade aprimorada com tracing distribuído.
 

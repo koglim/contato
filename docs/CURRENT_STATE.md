@@ -120,11 +120,22 @@ Em 2026-10-01, foi executado com sucesso o ensaio autorizado de ponta a ponta em
 * **Confirmação Bilateral pelo Cliente:** Mensagem "confirmar CC-XKVLBBTF" do cliente recebida via Gateway (Execução 973235). Evento de confirmação registrado (`event_id: 769e4a1b-76bb-4651-8554-9e4a67337129`), estado de conclusão promovido para `confirmed` e contato finalizado para `completed`. Resposta final ao cliente enviada via Shared Delivery (Execução 973236, Outbound `4653ae1a-f77e-487c-85fd-8c3600323462`, Evolution ID `3EB0D18D9F44920DA0E700`) e notificação de encerramento enviada ao profissional via Dispatcher (Execução 973240 / Shared Delivery 973243, Outbound `a1bd9919-a4d1-4049-899f-467492c25b43`, Evolution ID `3EB0C8A8F5BDE736DD95D1`).
 * **Resultado Consolidado:** 7/7 outbounds observados no Golden E2E #2 ficaram `status=sent`, com `provider_message_id` persistido, `contact_completed=true`, `completion_confirmed=true`, 0 divergências de identidade e zero transport holds.
 
+### F. Homologação em Produção — Edge Flows: Indisponibilidade (T29) e Contestação (T34) (2026-10-01)
+Em 2026-10-01, foram executados os ensaios autorizados para os cenários de exceção e borda em produção real:
+* **Indisponibilidade Profissional e Segunda Seleção na Mesma Busca (Subfluxo de mesma busca de T29):**
+  * Busca `5f95b215-2e79-4bd9-9217-12f38af8f7f7` (conversa `f444c327-fb07-4d7b-a3dd-ef8bda3286a5`).
+  * Profissional Farol declarou indisponibilidade no contato `d85e04ba-850f-487e-8cbf-f3e8e6703350` (`CC-PT89QEVJ`) via inbound `233fa962-b22c-4eb5-9e78-342607454363`. Criado evento imutável `db1716e6-2198-4a81-8b4a-5471a8f53c08`, preservado contato como `shared`, reaberta busca para `matched` e conversa para `active` (`pending_slot=selection`). Notificação ao cliente (Evolution ID `3EB0FD05F2E627D1ADF900`) e resposta ao profissional (Evolution ID `3EB06B006337332801CBF1`) observadas com status=sent no transporte e zero holds.
+  * Cliente realizou nova seleção na mesma busca escolhendo a profissional Julia via inbound `1a4dd56b-ab7a-4b1a-94f2-eb2db1072a31`, gerando segundo contato `cc13a85c-e79f-469c-8519-c43316bf437c` (`CC-HMRKEW65`) no status `shared`. Resposta ao cliente (Evolution ID `3EB0F257061714E96418E6`) e notificação inicial à profissional (Evolution ID `3EB015831CCA09F6E1CF1C`) observadas com status=sent no transporte e zero holds. Busca finalizada como `selected` e conversa como `completed`. O ramo de T29 que trata de preservação/retomada com outra busca ativa não foi exercitado em produção e permanece pendente de ensaio real.
+* **Contestação Bilateral de Conclusão (T34):**
+  * Profissional declarou conclusão no contato `cc13a85c-e79f-469c-8519-c43316bf437c` (`CC-HMRKEW65`) gerando evento `59915c03-b55d-45ff-b6fc-3a482eae1f5c` e agregado `9d24efd9-82bf-4f2e-a67d-e72cf70dc09d` (`pending_confirmation`).
+  * Cliente contestou via comando de contestação gerando evento `6a9571b8-816b-4244-af46-1eb51f9cbe7b`, promovendo o estado para `contested`, mantendo contato em `shared`, `confirmed_at=null` e preenchendo `contested_at`.
+  * Todos os 4 outbounds (prompt ao cliente `02a05352-27bb-4fd1-9bf0-b6ffb6b5642f` / Evolution `3EB0684D55715F234C2460`, resposta de declaração ao profissional `74f7f047-008d-4342-8a5e-dd30ed240a66` / Evolution `3EB04DB9CAE74E1FB85A02`, notificação de contestação ao profissional `77188dbf-40de-4ab6-9aa4-660b78f1425d` / Evolution `3EB0DB236CAC0299155F86` e resposta de contestação ao cliente `e71bb54b-aac3-498d-9332-332feb5b1f32` / Evolution `3EB0DE3F82BED016915D03`) observados com status=sent no transporte e zero holds.
+
 ---
 
 ## 4. Testes Operacionais e Homologação Pendente
 
-* **Transporte WhatsApp Real (Happy Path Validado):** O fluxo feliz ponta a ponta (busca, apresentação, seleção bilateral v2, notificação de oportunidade, declaração de conclusão, solicitação de confirmação e encerramento bilateral) foi formalmente homologado em produção real em 2026-10-01. **Permanecem pendentes:** testes de carga/estresse com alta concorrência de números simultâneos, injeção de falhas controladas no provider, homologação do pipeline de transcrição de áudio em produção, homologação do OTP de login profissional ao vivo (`PROFESSIONAL_AUTH_ENABLED=false`) e certificação comercial irrestrita.
+* **Transporte WhatsApp Real (Happy Path e Edge Flows Validados):** O fluxo feliz ponta a ponta (Golden E2E #2), o subfluxo de indisponibilidade com reescolha na mesma busca (T29 parcial em produção) e os dois caminhos de conclusão bilateral — confirmação e contestação (T34) — foram homologados em produção real em 2026-10-01, com mensagens observadas em status=sent e zero holds. **Permanecem pendentes:** o ramo de preservação/retomada de T29 com outra busca ativa, testes de carga/estresse com alta concorrência de números simultâneos, injeção de falhas controladas no provider, homologação do pipeline de transcrição de áudio em produção, homologação do OTP de login profissional ao vivo (`PROFESSIONAL_AUTH_ENABLED=false`) e certificação comercial irrestrita.
 * **Avaliação de Modelos de Linguagem Reais:** Avaliação contínua de latência, precisão e custos com tráfego volumétrico real.
 * **Testes E2E de Navegador:** Cobertura automatizada do portal web via Playwright.
 
@@ -149,12 +160,15 @@ Em 2026-10-01, foi executado com sucesso o ensaio autorizado de ponta a ponta em
 
 ---
 
-## 7. Débitos de Versão e Divergências Conhecidas (Drift)
+## 7. Débitos de Versão e Divergências Conhecidas (Drift & Launch Readiness)
 
 * **Divergência entre n8n Versionado e n8n Instalado:**
   * O workflow `workflows/n8n/shared-delivery.json` versionado em `main` suporta o propósito de mensagem `professional_auth_challenge` (desafio de login OTP).
   * O arquivo exportado da instância n8n instalada pelo operador ainda não contém suporte a esse propósito de mensagem.
   * **Ação Necessária:** O operador precisará atualizar o workflow instalado no n8n antes de habilitar `PROFESSIONAL_AUTH_ENABLED=true` em produção. (Registrado no [ROADMAP.md](ROADMAP.md) sob `# NOW`).
+* **Tratamento de Contexto Obsoleto / Seleção Expirada (T18 — Débito de Launch Readiness Aberto):**
+  * Em ensaio de produção real, observou-se que quando o cliente tenta selecionar um profissional ("2", "Quero o farol") após o TTL de 30 minutos da conversa de seleção ter expirado, o domínio rejeita a seleção corretamente, mas a camada conversacional responde com um pedido genérico de esclarecimento ("Pode esclarecer o que você quer mudar ou qual opção quer escolher?") em vez de emitir uma mensagem explícita informando a expiração da lista de opções (ex: *"Essa lista de profissionais expirou. Posso buscar eletricistas em Sinop novamente para você?"*).
+  * O item permanece documentado como débito aberto de Launch Readiness para implementação de tratamento explícito de expiração de seleção.
 
 ---
 

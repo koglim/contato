@@ -303,3 +303,48 @@ Em 2026-10-01, após a unificação da consistência de identidade de cliente no
 * **Diferenciação Estrita de Evidências:**
   * **EVIDÊNCIA AUTOMATIZADA / CI:** Testes unitários, de arquitetura e integração (`apps/api/integration/`, 53 testes de workflow, mocks e banco isolado de CI).
   * **EVIDÊNCIA REAL DE PRODUÇÃO:** Execuções no n8n / EasyPanel documentadas na tabela acima com números e instâncias reais do WhatsApp e banco PostgreSQL de produção.
+
+---
+
+## Homologação em Produção — Edge Flows: Indisponibilidade (T29) e Contestação (T34) (2026-10-01)
+
+Em 2026-10-01, após a homologação do happy path no Golden E2E #2, foram executados ensaios formais autorizados em produção real para os fluxos de exceção/borda:
+
+### 1. Edge Flow #1: Indisponibilidade Profissional e Segunda Seleção na Mesma Busca (Subfluxo de Mesma Busca de T29)
+
+* **Contexto de Busca:** `search_request_id: 5f95b215-2e79-4bd9-9217-12f38af8f7f7`, `conversation_id: f444c327-fb07-4d7b-a3dd-ef8bda3286a5`.
+* **Primeiro Contato (Farol — `d85e04ba-850f-487e-8cbf-f3e8e6703350`, `CC-PT89QEVJ`):**
+  * Inbound do profissional: `233fa962-b22c-4eb5-9e78-342607454363` (`unavailability_declared`).
+  * Evento de indisponibilidade imutável criado: `db1716e6-2198-4a81-8b4a-5471a8f53c08`.
+  * Notificação ao cliente (Evolution ID `3EB0FD05F2E627D1ADF900`) e resposta ao profissional (Evolution ID `3EB06B006337332801CBF1`) observadas com status=sent no transporte e zero holds.
+  * Estado intermediário: `search_request.status=matched`, `conversation.status=active`, `conversation.pending_slot=selection`, contato anterior mantido como `shared` e 0 transport holds.
+* **Segundo Contato (Julia — `cc13a85c-e79f-469c-8519-c43316bf437c`, `CC-HMRKEW65`):**
+  * Inbound de seleção do cliente na mesma busca: `1a4dd56b-ab7a-4b1a-94f2-eb2db1072a31`.
+  * Segundo contato estabelecido diretamente como `shared` na mesma busca (`5f95b215-2e79-4bd9-9217-12f38af8f7f7`).
+  * Resposta de seleção ao cliente (Evolution ID `3EB0F257061714E96418E6`) e notificação inicial à profissional (Evolution ID `3EB015831CCA09F6E1CF1C`) observadas com status=sent no transporte e zero holds.
+  * Estado final: `same_search_request=true`, `different_professionals=true`, `farol_contact_still_shared=true`, `farol_unavailability_preserved=true`, `julia_second_contact_shared=true`, `transport_holds=0`, `search_final_status=selected`, `conversation_final_status=completed`. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
+
+### 2. Edge Flow #2: Contestação Bilateral de Conclusão (T34)
+
+* **Contato Alvo:** `cc13a85c-e79f-469c-8519-c43316bf437c` (`CC-HMRKEW65`).
+* **Agregado de Conclusão:** `9d24efd9-82bf-4f2e-a67d-e72cf70dc09d`.
+* **Declaração pelo Profissional:** Evento `59915c03-b55d-45ff-b6fc-3a482eae1f5c` registrado.
+  * Prompt de confirmação ao cliente: Outbound `02a05352-27bb-4fd1-9bf0-b6ffb6b5642f` (Evolution ID `3EB0684D55715F234C2460`, `status=sent`).
+  * Resposta de registro ao profissional: Outbound `74f7f047-008d-4342-8a5e-dd30ed240a66` (Evolution ID `3EB04DB9CAE74E1FB85A02`, `status=sent`).
+* **Contestação pelo Cliente:** Evento `6a9571b8-816b-4244-af46-1eb51f9cbe7b` registrado.
+  * Notificação de contestação ao profissional: Outbound `77188dbf-40de-4ab6-9aa4-660b78f1425d` (Evolution ID `3EB0DB236CAC0299155F86`, `status=sent`).
+  * Resposta de contestação ao cliente: Outbound `e71bb54b-aac3-498d-9332-332feb5b1f32` (Evolution ID `3EB0DE3F82BED016915D03`, `status=sent`).
+* **Estado Final Comprovado:** `completion.state=contested`, `declared_by=professional`, `confirmed_at=null`, `contested_at` preenchido, `contact.status=shared`, 1 evento de declaração profissional, 1 evento de contestação de cliente, 0 eventos de confirmação, todos os inbounds processados sem erro e 0 transport holds.
+
+### 3. Tabela Consolidada de Transporte dos Edge Flows
+
+| Etapa | Inbound / Gatilho | Outbound ID / Finalidade | Evolution Provider Msg ID | Status Transporte |
+| :--- | :--- | :---: | :---: | :---: |
+| **Indisponibilidade (Farol) — Notificação Cliente** | Inbound recusa Farol (`233fa962-b22c-4eb5-9e78-342607454363`) | Outbound (`customer_contact_update`) | `3EB0FD05F2E627D1ADF900` | `sent` |
+| **Indisponibilidade (Farol) — Resposta Profissional** | Inbound recusa Farol (`233fa962-b22c-4eb5-9e78-342607454363`) | Outbound (`professional_reply`) | `3EB06B006337332801CBF1` | `sent` |
+| **Reescolha (Julia) — Resposta Cliente** | Inbound seleção Julia (`1a4dd56b-ab7a-4b1a-94f2-eb2db1072a31`) | Outbound (`customer_reply`) | `3EB0F257061714E96418E6` | `sent` |
+| **Reescolha (Julia) — Notificação Profissional** | Fila Outbox assíncrona gerada pela seleção | Outbound (`professional_contact_notification`) | `3EB015831CCA09F6E1CF1C` | `sent` |
+| **Conclusão — Prompt Cliente** | Inbound declaração Julia | `02a05352-27bb-4fd1-9bf0-b6ffb6b5642f` (`customer_contact_update`) | `3EB0684D55715F234C2460` | `sent` |
+| **Conclusão — Resposta Profissional** | Inbound declaração Julia | `74f7f047-008d-4342-8a5e-dd30ed240a66` (`professional_reply`) | `3EB04DB9CAE74E1FB85A02` | `sent` |
+| **Contestação — Notificação Profissional** | Inbound contestação cliente | `77188dbf-40de-4ab6-9aa4-660b78f1425d` (`professional_contact_notification`) | `3EB0DB236CAC0299155F86` | `sent` |
+| **Contestação — Resposta Cliente** | Inbound contestação cliente | `e71bb54b-aac3-498d-9332-332feb5b1f32` (`customer_reply`) | `3EB0DE3F82BED016915D03` | `sent` |
