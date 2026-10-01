@@ -29,7 +29,7 @@ Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
 0. **Launch Readiness / Homologação (FASE ATIVA):**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
-   * **Homologação em Produção Real (2026-10-01):** Happy path Golden E2E #2 (busca, apresentação, conexão imediata v2 e confirmação bilateral de conclusão), Edge Flow #1 (indisponibilidade profissional com reabertura de seleção na mesma busca — T29) e Edge Flow #2 (contestação bilateral de conclusão — T34) formalmente homologados ao vivo via n8n e Evolution API com zero transport holds.
+   * **Homologação em Produção Real (2026-10-01):** Happy path Golden E2E #2 (busca, apresentação, conexão imediata v2 e confirmação bilateral de conclusão), subfluxo de indisponibilidade profissional com reescolha na mesma busca (T29 parcial em produção) e contestação bilateral de conclusão (T34) validados em produção real com mensagens observadas em status=sent e zero holds. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
    * **Tratamento de Contexto Obsoleto / Seleção Expirada (T18):** Implementação de tratamento conversacional explícito para seleções enviadas após o vencimento do TTL da conversa de busca (30 min), substituindo pedido genérico de esclarecimento por aviso claro de expiração da lista com oferta de reinício da busca.
    * Próximos passos operacionais: reimportar `shared-delivery.json` no n8n antes de habilitar OTP (`PROFESSIONAL_AUTH_ENABLED=true`), homologação do pipeline de áudio em produção e testes de carga/estresse.
 1. **Localização v2 (Fundação de Entrada):**

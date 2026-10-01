@@ -310,19 +310,19 @@ Em 2026-10-01, após a unificação da consistência de identidade de cliente no
 
 Em 2026-10-01, após a homologação do happy path no Golden E2E #2, foram executados ensaios formais autorizados em produção real para os fluxos de exceção/borda:
 
-### 1. Edge Flow #1: Indisponibilidade Profissional e Segunda Seleção na Mesma Busca (T29)
+### 1. Edge Flow #1: Indisponibilidade Profissional e Segunda Seleção na Mesma Busca (Subfluxo de Mesma Busca de T29)
 
 * **Contexto de Busca:** `search_request_id: 5f95b215-2e79-4bd9-9217-12f38af8f7f7`, `conversation_id: f444c327-fb07-4d7b-a3dd-ef8bda3286a5`.
 * **Primeiro Contato (Farol — `d85e04ba-850f-487e-8cbf-f3e8e6703350`, `CC-PT89QEVJ`):**
   * Inbound do profissional: `233fa962-b22c-4eb5-9e78-342607454363` (`unavailability_declared`).
   * Evento de indisponibilidade imutável criado: `db1716e6-2198-4a81-8b4a-5471a8f53c08`.
-  * Notificação ao cliente (Evolution ID `3EB0FD05F2E627D1ADF900`) e resposta ao profissional (Evolution ID `3EB06B006337332801CBF1`) enviadas com sucesso (`status=sent`).
+  * Notificação ao cliente (Evolution ID `3EB0FD05F2E627D1ADF900`) e resposta ao profissional (Evolution ID `3EB06B006337332801CBF1`) observadas com status=sent no transporte e zero holds.
   * Estado intermediário: `search_request.status=matched`, `conversation.status=active`, `conversation.pending_slot=selection`, contato anterior mantido como `shared` e 0 transport holds.
 * **Segundo Contato (Julia — `cc13a85c-e79f-469c-8519-c43316bf437c`, `CC-HMRKEW65`):**
   * Inbound de seleção do cliente na mesma busca: `1a4dd56b-ab7a-4b1a-94f2-eb2db1072a31`.
   * Segundo contato estabelecido diretamente como `shared` na mesma busca (`5f95b215-2e79-4bd9-9217-12f38af8f7f7`).
-  * Resposta de seleção ao cliente (Evolution ID `3EB0F257061714E96418E6`) e notificação inicial à profissional (Evolution ID `3EB015831CCA09F6E1CF1C`) entregues (`sent`).
-  * Estado final: `same_search_request=true`, `different_professionals=true`, `farol_contact_still_shared=true`, `farol_unavailability_preserved=true`, `julia_second_contact_shared=true`, `transport_holds=0`, `search_final_status=selected`, `conversation_final_status=completed`.
+  * Resposta de seleção ao cliente (Evolution ID `3EB0F257061714E96418E6`) e notificação inicial à profissional (Evolution ID `3EB015831CCA09F6E1CF1C`) observadas com status=sent no transporte e zero holds.
+  * Estado final: `same_search_request=true`, `different_professionals=true`, `farol_contact_still_shared=true`, `farol_unavailability_preserved=true`, `julia_second_contact_shared=true`, `transport_holds=0`, `search_final_status=selected`, `conversation_final_status=completed`. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
 
 ### 2. Edge Flow #2: Contestação Bilateral de Conclusão (T34)
 
