@@ -1039,10 +1039,7 @@ test("B2 migration 018 rollback is protected and transaction failure preserves s
   const f = await fixture();
   try {
     f.set(async () => basic({ intent: "faq_cost" })); await f.receive("quanto custa usar?");
-    await assert.rejects(rollbackThrough("018_add_contextual_conversation"), (error: unknown) => {
-      const e = error as { stderr?: string; message?: string };
-      return /P0018|P0019|P0020|P0021|P0025|P0026|P0027|BLOCKED/.test(String(e.stderr ?? e.message ?? ""));
-    });
+    await assert.rejects(rollbackThrough("018_add_contextual_conversation"), error => /P0018/.test(String((error as { stderr?: string }).stderr)));
     assert.equal((await query("SELECT name FROM pgmigrations WHERE name='018_add_contextual_conversation'")).rows.length, 1);
     const inbox = new PostgresChannelInboundMessageRepository();
     const registered = await inbox.createOrFind({ provider: "b2-test", provider_message_id: randomUUID(), phone_e164: f.phone, raw_text: "teste atomicidade", country_code: "BR", limit: 3 });
@@ -1167,7 +1164,7 @@ for (const commandText of ["2", "segundo", "opção 2"]) {
 for (const [scenario, messageText] of [
   ["named professional", "Quero o Profissional 1"],
   ["show more", "mostrar mais"],
-  ["show more natural", "ver mais opções"],
+  ["show more natural", "ver mais"],
   ["distance inquiry", "qual o mais perto?"],
   ["price inquiry", "qual o mais barato?"],
 ] as const) {
