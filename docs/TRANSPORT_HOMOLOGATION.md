@@ -297,7 +297,7 @@ Em 2026-10-01, após a unificação da consistência de identidade de cliente no
 | **7. Notificação Final Profissional** | Fila Outbox assíncrona gerada pela confirmação | N/A | `a1bd9919-a4d1-4049-899f-467492c25b43` (`professional_contact_notification`) | `973243` | `973240` | `3EB0C8A8F5BDE736DD95D1` | `sent` (201 Created) |
 
 ### 3. Invariantes de Transporte Comprovados em Produção
-* **Zero Falhas de Transporte / Zero Holds:** Todas as 6 mensagens outbounds transitadas foram aceitas pela Evolution API com HTTP 201 e confirmadas no backend com HTTP 200 via `POST /internal/channel/outbound/:id/sent` sem retenção em hold (`delivery_hold_reason IS NULL`).
+* **Zero Falhas de Transporte / Zero Holds:** Todos os 7 outbounds do Golden E2E #2 ficaram `status=sent`, com `provider_message_id` persistido e `delivery_hold_reason IS NULL`.
 * **Conexão Estabelecida sem Aceite Prévio:** Contato `35c4ab81-fb23-4562-bb96-a09258546f31` estabelecido imediatamente como `shared` com código público `CC-XKVLBBTF`, notificando ambas as partes simultaneamente.
 * **Ciclo Bilateral de Conclusão Confirmado:** A transição `pending_confirmation` -> `confirmed` -> `completed` ocorreu com total rastreabilidade de eventos no banco de dados e notificação recíproca.
 * **Diferenciação Estrita de Evidências:**

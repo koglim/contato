@@ -49,7 +49,7 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T31 | Duas contas no painel | Aprovado automatizado (PRs #10–#13: contas de usuário isoladas, sessões e vínculo via memberships) |
 | T32 | Revogação/troca de telefone | Parcial: troca bloqueada no autosserviço; identidade com auditoria em professional_membership_events |
 | T33 | Autoativação administrativa | Aprovado no handler real do BFF com dependências simuladas: status/identidade rejeitados antes do proxy |
-| T34 | Conclusão/contestação | Aprovado em produção real (Golden E2E #2, 2026-10-01): declaração do profissional via Gateway (972785), prompt ao cliente (Dispatcher 972791 / Shared Delivery 972794, Evolution ID 3EB07DAC2F01B9EE979CE6), confirmação pelo cliente via Gateway (973235), conclusão confirmada (completed) e notificação de encerramento ao profissional (Dispatcher 973240 / Shared Delivery 973243, Evolution ID 3EB0C8A8F5BDE736DD95D1) com zero holds |
+| T34 | Conclusão/contestação | Parcial em produção: declaração e confirmação bilateral homologadas no Golden E2E #2 (2026-10-01), com contact=completed e zero holds. Contestação permanece aprovada apenas por testes automatizados; ensaio real de contestação em produção pendente |
 | T35 | Avaliação elegível/única | Próxima etapa (PR #16: Reviews & Ratings v1; condicionado a contact completion) |
 | T36 | Moderação auditada | Não implementado |
 | T37 | Pagamento fora de ordem | Congelado: gateways de pagamento suspensos por decisão de produto |
@@ -118,8 +118,8 @@ Em 2026-10-01, o fluxo happy-path ponta a ponta do marketplace foi validado em a
 
 1. **Busca e Apresentação:** Inbound `Contato Certo:3A4C00420AE15018A405` via Gateway (Execução 957356), resposta de 3 opções entregue via Shared Delivery (Execução 957357, Evolution ID `3EB033290A4CC069A552D0`).
 2. **Seleção Bilateral (T25):** Inbound "2" `Contato Certo:3ACC301E46EF43654338` via Gateway (Execução 957450), contato `35c4ab81-fb23-4562-bb96-a09258546f31` estabelecido diretamente como `shared` (`CC-XKVLBBTF`). Confirmação ao cliente (Execução 957451, Evolution ID `3EB0D8866D13B8800C9199`) e notificação ao profissional (Dispatcher Execução 957460 / Shared Delivery Execução 957461, Evolution ID `3EB0B8E7A96BFA9E134B92`) enviadas com sucesso.
-3. **Ciclo de Conclusão Bilateral (T34):**
+3. **Ciclo de Conclusão Bilateral (T34 — Declaração e Confirmação):**
    - Declaração pelo profissional via Gateway (Execução 972785, `Contato Certo:A54F9E724C150127401A9C8F595E34AD`), resposta de registro ao profissional (Execução 972786, Evolution ID `3EB0597FA10F48B3059293`) e prompt de confirmação ao cliente (Dispatcher Execução 972791 / Shared Delivery Execução 972794, Evolution ID `3EB07DAC2F01B9EE979CE6`).
    - Confirmação pelo cliente via Gateway (Execução 973235, `Contato Certo:3A8C35510FB1F1913F20`), resposta final ao cliente (Execução 973236, Evolution ID `3EB0D18D9F44920DA0E700`) e notificação final de encerramento ao profissional (Dispatcher Execução 973240 / Shared Delivery Execução 973243, Evolution ID `3EB0C8A8F5BDE736DD95D1`).
-4. **Resultado da Homologação:** `contact_completed=true`, `completion_confirmed=true`, 100% de entregas no Evolution API (`status: sent`), 0 transport holds gerados e integridade total de identidade (sem criação de clientes duplicados após correção no PR #24).
+4. **Resultado da Homologação:** 7/7 outbounds observados no Golden E2E #2 ficaram com `status: sent`, `contact_completed=true`, `completion_confirmed=true`, 0 transport holds gerados e integridade total de identidade (sem criação de clientes duplicados após correção no PR #24). O caminho de contestação permanece coberto por testes automatizados, sem ensaio real em produção.
 
