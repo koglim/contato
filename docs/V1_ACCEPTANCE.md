@@ -33,7 +33,7 @@ dos testes é simulado; PostgreSQL/PostGIS é real e descartável no CI.
 | T15 | Confirmação HTTP perdida | Parcial: recibo e repetição sem transporte provados; crash externo exige homologação/reconciliação |
 | T16 | Token/resultado conflitante | Aprovado automatizado: mutação rejeitada, recibos/timestamps preservados |
 | T17 | Ordenação por destinatário | Parcial: FIFO das notificações independentes; respostas inline preservam exceção de consentimento |
-| T18 | Pergunta de contexto obsoleto | Aprovado automatizado: resposta determinística explícita com 0 chamadas de IA, 0 geocodificações e zero mutações de domínio/negócio (zero contatos criados, zero novas buscas, zero matches selecionados, zero notificações a profissionais) quando o cliente tenta selecionar a partir de lista expirada. Revalidação em produção real pendente |
+| T18 | Pergunta de contexto obsoleto | Aprovado em produção real (2026-10-01/2026-10-02 UTC): resposta determinística explícita ("Essa lista de profissionais expirou...") com 0 chamadas de IA/geocodificação, 0 mutações de domínio/negócio (zero contatos criados, zero novas buscas, zero matches selecionados, zero notificações) e outbound status=sent (Evolution ID 3EB0341F401FF10E9E72E8, zero holds) quando o cliente seleciona a partir de lista expirada (conversa d65c8a4a-06d3-484f-b94a-0d3806ce99bf). A suíte automatizada cobre a matriz ampla (numéricos, ordinais, nomes, dúvidas de preço/distância, comandos de ver mais, precedência de contexto ativo, profissional histórico inativo, replay idempotente e recovery); o ensaio de produção real validou o caminho concreto de seleção numérica ("2") |
 | T19 | Pool/páginas/teto | Aprovado automatizado na suíte existente de ranking/paginação |
 | T20 | Página retida/terminal | Parcial: reserva/concorrência e disposição auditada de holds implementadas; política de obsolescência e fechamento de páginas terminais ainda exige definição/homologação |
 | T21 | Escolha antes de aviso enviado | Aprovado automatizado: shown_at e consentimento exigidos |
@@ -139,6 +139,21 @@ Também em 2026-10-01, foram executados ensaios autorizados em produção real p
    - **Declaração do Profissional:** Evento `59915c03-b55d-45ff-b6fc-3a482eae1f5c` criou agregado de conclusão `9d24efd9-82bf-4f2e-a67d-e72cf70dc09d` (`pending_confirmation`). Prompt ao cliente (Outbound `02a05352-27bb-4fd1-9bf0-b6ffb6b5642f`, Evolution ID `3EB0684D55715F234C2460`) e resposta ao profissional (Outbound `74f7f047-008d-4342-8a5e-dd30ed240a66`, Evolution ID `3EB04DB9CAE74E1FB85A02`) observados com status=sent no transporte.
    - **Contestação pelo Cliente:** Evento `6a9571b8-816b-4244-af46-1eb51f9cbe7b` registrou contestação do cliente, promovendo `completion.state=contested`, preservando `contact.status=shared`, `confirmed_at=null` e preenchendo `contested_at`. Notificação de contestação ao profissional (Outbound `77188dbf-40de-4ab6-9aa4-660b78f1425d`, Evolution ID `3EB0DB236CAC0299155F86`) e resposta ao cliente (Outbound `e71bb54b-aac3-498d-9332-332feb5b1f32`, Evolution ID `3EB0DE3F82BED016915D03`) observadas com status=sent no transporte.
    - **Totais de Conclusão:** 1 declaração profissional, 1 contestação cliente, 0 confirmações, 0 holds de transporte.
-3. **Achado Operacional de UX — Expiração de Contexto de Seleção (T18 Tratado):**
-   - Observou-se que quando o cliente tentava selecionar ("2", "Quero o farol") após o TTL de 30 minutos da conversa de seleção expirar, a camada conversacional respondia solicitando esclarecimento genérico ("Pode esclarecer o que você quer mudar ou qual opção quer escolher?") em vez de emitir aviso explícito. O domínio impedia a seleção indevida corretamente. Foi implementado o tratamento determinístico via fast-path no serviço contextual (retornando mensagem explícita de expiração sem chamadas de IA e com zero mutações de domínio/negócio), validado por testes de integração automatizados e com revalidação em produção real pendente.
+3. **Revalidação em Produção — Contexto Obsoleto / Seleção Expirada (T18) (2026-10-01 / 2026-10-02 UTC):**
+   - **Runtime em Produção:** `contatocerto-api` @ `69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`.
+   - **Contexto de Busca Expirada:** `search_request_id: 81ace3cf-b8c8-434f-a0d4-a9837e663431`, `conversation_id: d65c8a4a-06d3-484f-b94a-0d3806ce99bf` (TTL de 30 minutos esgotado; sem conversa de busca ativa aberta no momento do teste).
+   - **Lista Apresentada Historicamente:** 1. Julia, 2. Farol, 3. Richard.
+   - **Inbound do Cliente:** Mensagem "2" recebida via inbound `ca42f314-2ed0-49ca-8960-8c03285bc9c7` (Provider message ID `Contato Certo:3ADBCBBB4F159D366BEB`).
+   - **Processamento:** Roteado para rota contextual (`route=contextual`, `status=information`), finalizado com `status=processed`, `error_code=null`, `recovery_state=active`.
+   - **Resposta Determinística Enviada:** *"Essa lista de profissionais expirou. Envie uma nova mensagem com o serviço e a cidade para eu buscar opções atualizadas."*
+   - **Outbound:** Mensagem `02979644-88d5-4976-a3e6-509b5807e035` (`purpose=customer_reply`), Evolution Provider Message ID `3EB0341F401FF10E9E72E8`, `status=sent`, `delivery_hold_reason=null`.
+   - **Verificação de Domínio e Invariantes:**
+     - `contacts_created = 0`
+     - `searches_created = 0`
+     - `expired_matches_selected = 0`
+     - `professional_notifications_created = 0`
+     - `transport_hold = null`
+     - `T18_REAL_PRODUCTION_FINAL = PASS`
+   - **Escopo e Diferenciação:** Os testes de integração automatizados cobrem a matriz ampla de variações de T18 (seleção numérica, ordinais, seleção por nome, dúvidas de preço/distância/detalhes, comandos de ver mais, precedência de contexto ativo, profissional histórico inativo/suspenso, replay idempotente e recovery sem side-effects); o ensaio de produção real validou com precisão o caminho concreto de seleção numérica ("2") após expiração do TTL de 30 minutos da conversa.
+
 

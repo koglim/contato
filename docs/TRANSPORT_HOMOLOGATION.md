@@ -348,3 +348,22 @@ Em 2026-10-01, após a homologação do happy path no Golden E2E #2, foram execu
 | **Conclusão — Resposta Profissional** | Inbound declaração Julia | `74f7f047-008d-4342-8a5e-dd30ed240a66` (`professional_reply`) | `3EB04DB9CAE74E1FB85A02` | `sent` |
 | **Contestação — Notificação Profissional** | Inbound contestação cliente | `77188dbf-40de-4ab6-9aa4-660b78f1425d` (`professional_contact_notification`) | `3EB0DB236CAC0299155F86` | `sent` |
 | **Contestação — Resposta Cliente** | Inbound contestação cliente | `e71bb54b-aac3-498d-9332-332feb5b1f32` (`customer_reply`) | `3EB0DE3F82BED016915D03` | `sent` |
+
+---
+
+## Homologação em Produção — Contexto Obsoleto / Seleção Expirada (T18) (2026-10-01 / 2026-10-02)
+
+Em 2026-10-01 / 2026-10-02 UTC, foi executada a revalidação em produção real do tratamento determinístico de seleção contra lista expirada (T18) no runtime `contatocerto-api` @ `69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`:
+
+### 1. Evidências do Ciclo T18 em Produção
+
+| Etapa | Inbound / Gatilho | Outbound ID / Finalidade | Evolution Provider Msg ID | Status Transporte |
+| :--- | :--- | :---: | :---: | :---: |
+| **Seleção em Lista Expirada ("2")** | Inbound texto "2" (`ca42f314-2ed0-49ca-8960-8c03285bc9c7`, `Contato Certo:3ADBCBBB4F159D366BEB`) | `02979644-88d5-4976-a3e6-509b5807e035` (`customer_reply`) | `3EB0341F401FF10E9E72E8` | `sent` (201 Created) |
+
+### 2. Invariantes Comprovados
+* **Zero Chamadas a IA / Geocodificador:** Execução via fast-path determinístico (`CONTEXTUAL_EXPIRED_SELECTION`).
+* **Zero Mutações de Negócio:** 0 contatos criados, 0 novas buscas, 0 matches selecionados, 0 notificações a profissionais.
+* **Transporte Concluído:** Mensagem com `status=sent`, `provider_message_id` persistido e `delivery_hold_reason=null`.
+* **Resultado:** `T18_REAL_PRODUCTION_FINAL=PASS`.
+
