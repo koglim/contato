@@ -1,6 +1,6 @@
 # ADR-005: Soft Expiry / Apresentação Retomável de Lista de Profissionais
 
-* **Status:** IMPLEMENTED IN PR #30 / AUTOMATED VALIDATION / CI (PRODUCTION REVALIDATION PENDING)
+* **Status:** IMPLEMENTED IN PR #30 / AUTOMATED VALIDATION (PRODUCTION REVALIDATION PENDING)
 * **Data:** 2026-10-02
 * **Decisores:** Produto e Arquitetura ContatoCerto
 
@@ -8,7 +8,7 @@
 
 > [!NOTE]
 > **Implementação em PR #30 (v1 — 24 Horas):**
-> Este documento formalizou o direcionamento de arquitetura para a funcionalidade de apresentação retomável de profissionais (*Soft Expiry*), implementada no PR #30 com janela configurável de **24 horas** (`SEARCH_PRESENTATION_RESUME_TTL_MINUTES = 1440`). O TTL de 30 minutos de `SEARCH_CONVERSATION_TTL_MINUTES` permanece inalterado para o contexto de conversação em tempo real. A seleção tardia direta (numérica, ordinal ou nominal) revalida atomicamente a elegibilidade do profissional e restabelece a conexão bilateral caso elegível dentro do prazo de 24h de `shown_at`. Validação automatizada e CI completas; homologação em produção real pendente.
+> Este documento formalizou o direcionamento de arquitetura para a funcionalidade de apresentação retomável de profissionais (*Soft Expiry*), implementada no PR #30 com janela configurável de **24 horas** (`SEARCH_PRESENTATION_RESUME_TTL_MINUTES = 1440`). O TTL de 30 minutos de `SEARCH_CONVERSATION_TTL_MINUTES` permanece inalterado para o contexto de conversação em tempo real. A seleção tardia direta (numérica, ordinal ou nominal) revalida atomicamente a elegibilidade do profissional e restabelece a conexão bilateral caso elegível dentro do prazo de 24h de `shown_at`. Implementado no PR #30 com validação automatizada; merge e homologação em produção condicionados ao GitHub CI verde.
 
 ---
 

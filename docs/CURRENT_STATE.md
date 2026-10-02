@@ -174,7 +174,7 @@ Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e
 * **Conclusão de Serviços pelo Painel Web:** Ação de marcar serviço como concluído na interface web (atualmente exclusiva via WhatsApp).
 
 ### B. Direções de Produto Documentadas
-* **Soft Expiry / Apresentação Retomável de Lista de Profissionais ([ADR-005](decisions/ADR-005-soft-expiry-resumable-presentation.md)) — IMPLEMENTADO EM PR #30 (VALIDAÇÃO AUTOMATIZADA / CI — HOMOLOGAÇÃO EM PRODUÇÃO PENDENTE):**
+* **Soft Expiry / Apresentação Retomável de Lista de Profissionais ([ADR-005](decisions/ADR-005-soft-expiry-resumable-presentation.md)) — IMPLEMENTADO EM PR #30 (VALIDAÇÃO AUTOMATIZADA — HOMOLOGAÇÃO EM PRODUÇÃO PENDENTE):**
   * O TTL de 30 minutos (`SEARCH_CONVERSATION_TTL_MINUTES = 30`) gerencia o contexto conversacional ativo em tempo real.
   * A validade negocial de apresentação e seleção foi estendida para **24 horas** (`SEARCH_PRESENTATION_RESUME_TTL_MINUTES = 1440`, configurável).
   * Seleções tardias diretas (numéricas, ordinais ou nominais) revalidam atômica e deterministicamente a elegibilidade do profissional no momento da transação (`selectResumableShownMatch`).

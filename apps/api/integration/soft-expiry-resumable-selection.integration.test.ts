@@ -315,7 +315,8 @@ test("SoftExpiry B: named selection 'Quero o Profissional Dois' after conversati
     await f.expireConversation(conversationId);
 
     const callsBefore = f.calls(),
-      geoBefore = f.geoCalls();
+      geoBefore = f.geoCalls(),
+      compBefore = f.compositions();
     const res = await f.receive("Quero o Profissional Dois");
     assert.equal(res.statusCode, 200, res.body);
     assert.equal(res.json().result.route, "selection");
@@ -334,6 +335,7 @@ test("SoftExpiry B: named selection 'Quero o Profissional Dois' after conversati
 
     assert.equal(f.calls() - callsBefore, 0);
     assert.equal(f.geoCalls() - geoBefore, 0);
+    assert.equal(f.compositions() - compBefore, 0);
   } finally {
     await f.cleanup();
   }
@@ -342,24 +344,45 @@ test("SoftExpiry B: named selection 'Quero o Profissional Dois' after conversati
 // ============================================================================
 // C. ORDINAL RESUME
 // ============================================================================
-test("SoftExpiry C: ordinal selection 'segundo' and 'opção 2' resolve identically", async () => {
-  const f = await fixture();
-  try {
-    const { conversationId } = await f.makePresentation();
-    await f.expireConversation(conversationId);
+for (const variant of ["segundo", "opção 2"] as const) {
+  test(`SoftExpiry C: ordinal selection '${variant}' resolves deterministically to rank 2 professional`, async () => {
+    const f = await fixture();
+    try {
+      const { conversationId, searchRequestId } = await f.makePresentation();
+      await f.expireConversation(conversationId);
 
-    const res = await f.receive("segundo");
-    assert.equal(res.statusCode, 200, res.body);
-    assert.equal(res.json().result.route, "selection");
+      const callsBefore = f.calls(),
+        geoBefore = f.geoCalls(),
+        compBefore = f.compositions();
+      const res = await f.receive(variant);
+      assert.equal(res.statusCode, 200, res.body);
+      assert.equal(res.json().result.route, "selection");
 
-    const contacts = (
-      await query<{ id: string }>("SELECT id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])
-    ).rows;
-    assert.equal(contacts.length, 1);
-  } finally {
-    await f.cleanup();
-  }
-});
+      const contacts = (
+        await query<{ id: string; status: string; professional_id: string }>(
+          "SELECT id, status, professional_id FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)",
+          [f.phone],
+        )
+      ).rows;
+      assert.equal(contacts.length, 1);
+      assert.equal(contacts[0].status, "shared");
+
+      const match2 = (
+        await query<{ professional_id: string }>(
+          "SELECT professional_id FROM matches WHERE search_request_id=$1 AND rank_position=2",
+          [searchRequestId],
+        )
+      ).rows[0];
+      assert.equal(contacts[0].professional_id, match2.professional_id);
+
+      assert.equal(f.calls() - callsBefore, 0);
+      assert.equal(f.geoCalls() - geoBefore, 0);
+      assert.equal(f.compositions() - compBefore, 0);
+    } finally {
+      await f.cleanup();
+    }
+  });
+}
 
 // ============================================================================
 // D. PROFESSIONAL BECOMES INELIGIBLE
@@ -381,7 +404,8 @@ test("SoftExpiry D: professional becoming ineligible returns deterministic unava
 
     try {
       const callsBefore = f.calls(),
-        geoBefore = f.geoCalls();
+        geoBefore = f.geoCalls(),
+        compBefore = f.compositions();
       const res = await f.receive("2");
       assert.equal(res.statusCode, 200, res.body);
       assert.equal(res.json().reply_text, CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE);
@@ -415,6 +439,7 @@ test("SoftExpiry D: professional becoming ineligible returns deterministic unava
       // Zero AI
       assert.equal(f.calls() - callsBefore, 0);
       assert.equal(f.geoCalls() - geoBefore, 0);
+      assert.equal(f.compositions() - compBefore, 0);
     } finally {
       await query("UPDATE professionals SET status='active' WHERE id=$1", [match2.professional_id]);
     }
