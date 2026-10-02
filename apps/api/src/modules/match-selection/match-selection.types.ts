@@ -96,6 +96,5 @@ export interface SelectionMatchRepository {
   listNextUnshown(searchRequestId: string, limit: number): Promise<SelectionMatchRecord[]>;
   findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string): Promise<SelectedMatchOutcome | null>;
   selectShownMatch(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome>;
-  isMatchWithinResumeWindow(searchRequestId: string, position: number, resumeTtlMinutes: number): Promise<boolean>;
   selectResumableShownMatch(input: SelectResumableShownMatchInput): Promise<SelectResumableShownMatchOutcome>;
 }

@@ -557,21 +557,6 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
     }
   }
 
-  async isMatchWithinResumeWindow(searchRequestId: string, position: number, resumeTtlMinutes: number): Promise<boolean> {
-    const result = await this.execute<{ match_id: string }>(
-      `SELECT id AS match_id
-         FROM matches
-        WHERE search_request_id = $1
-          AND rank_position = $2
-          AND shown_at IS NOT NULL
-          AND shown_at >= NOW() - ($3 * INTERVAL '1 minute')
-          AND selected_at IS NULL
-        LIMIT 1`,
-      [searchRequestId, position, resumeTtlMinutes],
-    );
-    return result.rows.length > 0;
-  }
-
   async selectResumableShownMatch(input: SelectResumableShownMatchInput): Promise<SelectResumableShownMatchOutcome> {
     try {
       return await this.transaction(async (client) => {

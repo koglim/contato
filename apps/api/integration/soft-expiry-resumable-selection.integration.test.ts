@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import { buildApp } from "../src/app.js";
-import { query, withTransaction, closeDatabaseConnection } from "../src/database/connection.js";
+import { query, withTransaction, withIndependentTransaction, closeDatabaseConnection } from "../src/database/connection.js";
 import { ContextualConversationService } from "../src/modules/contextual-conversation/contextual.service.js";
 import { type ContextualProvider, type ContextualProposal } from "../src/modules/contextual-conversation/contextual.contract.js";
 import { CONTEXTUAL_EXPIRED_SELECTION, CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE } from "../src/modules/contextual-conversation/contextual.reply.js";
+import { PostgresSelectionMatchRepository } from "../src/modules/match-selection/match-selection.repository.js";
 import type { LocationResolutionService } from "../src/modules/location-resolution/location-resolution.types.js";
 import type { ConversationAIFallbackEvent } from "../src/modules/contextual-conversation/contextual.provider.js";
 
@@ -101,82 +102,93 @@ async function fixture() {
     },
   );
 
-  const app = buildApp({ internalApiKey: "b2-integration", contextualConversation: contextual });
+  const set = (fn: typeof next) => {
+    next = fn;
+  };
 
-  const receive = (text: string, id = randomUUID()) =>
+  const app = buildApp({ contextualConversation: contextual, internalApiKey: "b2-integration" });
+
+  const receive = async (text: string, messageId = randomUUID()) =>
     app.inject({
       method: "POST",
       url: "/internal/channel/inbound/messages",
       headers,
-      payload: { provider: "b2-test", provider_message_id: id, phone_e164: phone, raw_text: text },
+      payload: {
+        provider: "b2-test",
+        provider_message_id: messageId,
+        phone_e164: phone,
+        raw_text: text,
+        country_code: "BR",
+        limit: 3,
+      },
     });
 
-  const sent = async (id: string) => {
-    const claim = await app.inject({ method: "POST", url: `/internal/channel/outbound/${id}/claim`, headers });
-    assert.equal(claim.statusCode, 200, claim.body);
-    const result = await app.inject({
+  const sent = async (outboundId: string) => {
+    const claim = await app.inject({
       method: "POST",
-      url: `/internal/channel/outbound/${id}/sent`,
+      url: `/internal/channel/outbound/${outboundId}/claim`,
       headers,
-      payload: { processing_token: claim.json().processing_token, provider_message_id: randomUUID() },
+      payload: { worker_id: "worker-test", lease_seconds: 30 },
     });
-    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(claim.statusCode, 200, claim.body);
+    const sentRes = await app.inject({
+      method: "POST",
+      url: `/internal/channel/outbound/${outboundId}/sent`,
+      headers,
+      payload: { processing_token: claim.json().processing_token, provider_message_id: `evo-${outboundId.slice(0, 8)}` },
+    });
+    assert.equal(sentRes.statusCode, 200, sentRes.body);
   };
 
-  const state = async () =>
-    (
-      await query<{ id: string; pending_slot: string; search_request_id: string; memory: unknown; revision: number }>(
-        `SELECT c.id, c.pending_slot, c.search_request_id, m.memory, m.revision
-         FROM contextual_memories m JOIN customers u ON u.id = m.customer_id
-         LEFT JOIN search_conversations c ON c.customer_id = u.id AND c.status = 'active' WHERE u.phone_e164 = $1`,
-        [phone],
-      )
-    ).rows[0];
+  const state = async () => {
+    const res = await query<{
+      id: string;
+      status: string;
+      pending_slot: string;
+      expires_at: Date;
+      search_request_id: string;
+      memory: unknown;
+    }>(
+      `SELECT c.id, c.status, c.pending_slot, c.expires_at, c.search_request_id, m.memory
+         FROM search_conversations c
+         LEFT JOIN contextual_memories m ON m.customer_id = c.customer_id
+        WHERE c.customer_id IN (SELECT id FROM customers WHERE phone_e164 = $1)
+        ORDER BY c.created_at DESC LIMIT 1`,
+      [phone],
+    );
+    return res.rows[0];
+  };
 
   const cleanup = async () => {
-    await app.close();
-    await withTransaction(async (client) => {
-      await client.query("DELETE FROM contextual_turns WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
-      await client.query("DELETE FROM contextual_budgets WHERE scope IN (SELECT id::text FROM customers WHERE phone_e164=$1)", [phone]);
-      await client.query("DELETE FROM contextual_memories WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
-      await client.query(
-        "DELETE FROM channel_outbound_messages WHERE recipient_phone_e164=$1 OR recipient_phone_e164=ANY($2::text[]) OR business_key IN (SELECT 'contact:'||id||':initial' FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1))",
-        [phone, professionalPhones],
-      );
-      await client.query("DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164=$1)", [phone]);
-      await client.query("DELETE FROM channel_inbound_messages WHERE phone_e164=$1", [phone]);
-      await client.query("DELETE FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
-      await client.query("DELETE FROM search_conversations WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
-      await client.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE service_id=ANY($1::uuid[]))", [serviceIds]);
-      await client.query("DELETE FROM search_requests WHERE service_id=ANY($1::uuid[])", [serviceIds]);
-      await client.query("DELETE FROM customers WHERE phone_e164=$1", [phone]);
-      await client.query("DELETE FROM professional_service_areas WHERE professional_id=ANY($1::uuid[])", [professionalIds]);
-      await client.query("DELETE FROM professional_services WHERE service_id=ANY($1::uuid[])", [serviceIds]);
-      await client.query("DELETE FROM professionals WHERE id=ANY($1::uuid[])", [professionalIds]);
-      await client.query("DELETE FROM services WHERE id=ANY($1::uuid[])", [serviceIds]);
-      await client.query("DELETE FROM service_categories WHERE id=$1", [categoryId]);
+    await withTransaction(async (db) => {
+      await db.query("DELETE FROM channel_outbound_messages WHERE recipient_phone_e164=$1 OR recipient_phone_e164=ANY($2::text[])", [
+        phone,
+        professionalPhones,
+      ]);
+      await db.query("DELETE FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
+      await db.query("DELETE FROM contextual_turns WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
+      await db.query("DELETE FROM contextual_memories WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
+      await db.query("DELETE FROM search_conversations WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
+      await db.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1))", [phone]);
+      await db.query("DELETE FROM search_requests WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [phone]);
+      await db.query("DELETE FROM channel_inbound_messages WHERE phone_e164=$1", [phone]);
+      await db.query("DELETE FROM customers WHERE phone_e164=$1", [phone]);
+      await db.query("DELETE FROM professional_service_areas WHERE professional_id=ANY($1::uuid[])", [professionalIds]);
+      await db.query("DELETE FROM professional_services WHERE professional_id=ANY($1::uuid[])", [professionalIds]);
+      await db.query("DELETE FROM professionals WHERE id=ANY($1::uuid[])", [professionalIds]);
+      await db.query("DELETE FROM services WHERE id=ANY($1::uuid[])", [serviceIds]);
+      await db.query("DELETE FROM service_categories WHERE id=$1", [categoryId]);
     });
   };
 
   const makePresentation = async () => {
-    next = async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } });
-    const searchResp = await receive(`preciso de ${name} em Sinop`);
-    assert.equal(searchResp.statusCode, 200, searchResp.body);
-    assert.equal(searchResp.json().result.status, "matched");
-    const searchState = (
-      await query<{ id: string; search_request_id: string; pending_slot: string }>(
-        `SELECT c.id, c.search_request_id, c.pending_slot FROM search_conversations c
-         JOIN customers u ON u.id = c.customer_id WHERE u.phone_e164 = $1 ORDER BY c.created_at DESC LIMIT 1`,
-        [phone],
-      )
-    ).rows[0];
-    assert.equal(searchState.pending_slot, "selection");
-    await sent(searchResp.json().outbound.id);
-    return {
-      conversationId: searchState.id,
-      searchRequestId: searchState.search_request_id,
-      outboundId: searchResp.json().outbound.id,
-    };
+    set(async () => basic({ speech_act: "request", location: { text: "Sinop", evidence: "Sinop" } }));
+    const resp = await receive(`preciso de ${name} em Sinop`);
+    assert.equal(resp.statusCode, 200, resp.body);
+    const outboundId = resp.json().outbound.id;
+    await sent(outboundId);
+    const conv = await state();
+    return { conversationId: conv.id, searchRequestId: conv.search_request_id, outboundId };
   };
 
   const expireConversation = async (conversationId: string) => {
@@ -370,7 +382,7 @@ test("SoftExpiry D: professional becoming ineligible returns deterministic unava
     try {
       const callsBefore = f.calls(),
         geoBefore = f.geoCalls();
-      const res = await f.receive("Quero o Profissional Dois");
+      const res = await f.receive("2");
       assert.equal(res.statusCode, 200, res.body);
       assert.equal(res.json().reply_text, CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE);
 
@@ -489,57 +501,93 @@ test("SoftExpiry F: shown_at older than 1440 minutes returns CONTEXTUAL_EXPIRED_
 });
 
 // ============================================================================
-// G. EXACT BOUNDARY
+// G. EXACT 1440-MINUTE BOUNDARY (TRANSACTIONAL & DETERMINISTIC)
 // ============================================================================
-test("SoftExpiry G: exact boundary — 1439 min is valid (resumable), 1441 min is expired", async () => {
-  // 1439 min: inside window -> succeeds
-  const f1 = await fixture();
+test("SoftExpiry G: exact boundary — exactly 1440 min is valid (selected), 1440 min + 1s is expired", async () => {
+  const f = await fixture();
   try {
-    const { conversationId: c1, searchRequestId: sr1 } = await f1.makePresentation();
-    await f1.expireConversation(c1);
-    await query("UPDATE matches SET shown_at = NOW() - INTERVAL '1439 minutes' WHERE search_request_id=$1 AND shown_at IS NOT NULL", [sr1]);
+    const { conversationId, searchRequestId } = await f.makePresentation();
+    await f.expireConversation(conversationId);
 
-    const res1 = await f1.receive("2");
-    assert.equal(res1.statusCode, 200, res1.body);
-    assert.notEqual(res1.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
-    assert.equal(res1.json().result.route, "selection");
+    const custRow = (await query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = $1", [f.phone])).rows[0];
 
-    const contacts1 = (
-      await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [
-        f1.phone,
-      ])
-    ).rows[0].cnt;
-    assert.equal(contacts1, 1);
+    // 1. EXACTLY 1440 MINUTES -> VALID (Outcome: selected)
+    const selKey1 = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, customer_id, conversation_id, search_request_id, processing_token, processing_started_at)
+       VALUES ($1::uuid, 'test', $1::text, $2, '1', 'BR', 3, 'processing', $3, $4, $5, gen_random_uuid(), NOW())`,
+      [selKey1, f.phone, custRow.id, conversationId, searchRequestId],
+    );
+    await withTransaction(async (client) => {
+      const localRepo = new PostgresSelectionMatchRepository(
+        (sql, params) => client.query(sql, params),
+        (fn) => fn(client),
+      );
+      await client.query("UPDATE matches SET shown_at = NOW() - INTERVAL '1440 minutes' WHERE search_request_id = $1 AND rank_position = 1", [searchRequestId]);
+      const outcome = await localRepo.selectResumableShownMatch({
+        historicalConversationId: conversationId,
+        customerId: custRow.id,
+        searchRequestId,
+        position: 1,
+        lastMessageText: "1",
+        selectionKey: selKey1,
+        resumeTtlMinutes: 1440,
+      });
+      assert.equal(outcome.kind, "selected", `Expected 'selected' at exact 1440m boundary but got ${outcome.kind}`);
+    });
+    await query("UPDATE channel_inbound_messages SET status = 'processed', result = '{}'::jsonb, processed_at = NOW(), processing_token = NULL, processing_started_at = NULL WHERE id = $1", [selKey1]);
+
+    // 2. JUST OUTSIDE BOUNDARY (1440 MINUTES + 1 SECOND) -> EXPIRED (Outcome: presentation_expired)
+    const { conversationId: c2, searchRequestId: sr2 } = await f.makePresentation();
+    await f.expireConversation(c2);
+    const selKey2 = randomUUID();
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value, status, customer_id, conversation_id, search_request_id, processing_token, processing_started_at)
+       VALUES ($1::uuid, 'test', $1::text, $2, '2', 'BR', 3, 'processing', $3, $4, $5, gen_random_uuid(), NOW())`,
+      [selKey2, f.phone, custRow.id, c2, sr2],
+    );
+    await withTransaction(async (client) => {
+      const localRepo = new PostgresSelectionMatchRepository(
+        (sql, params) => client.query(sql, params),
+        (fn) => fn(client),
+      );
+      await client.query("UPDATE matches SET shown_at = NOW() - INTERVAL '1440 minutes 1 second' WHERE search_request_id = $1 AND rank_position = 2", [sr2]);
+      const outcome = await localRepo.selectResumableShownMatch({
+        historicalConversationId: c2,
+        customerId: custRow.id,
+        searchRequestId: sr2,
+        position: 2,
+        lastMessageText: "2",
+        selectionKey: selKey2,
+        resumeTtlMinutes: 1440,
+      });
+      assert.equal(outcome.kind, "presentation_expired", `Expected 'presentation_expired' at 1440m+1s but got ${outcome.kind}`);
+    });
+    await query("UPDATE channel_inbound_messages SET status = 'processed', result = '{}'::jsonb, processed_at = NOW(), processing_token = NULL, processing_started_at = NULL WHERE id = $1", [selKey2]);
+
+    // 3. HTTP level coverage: 1439 min vs 1441 min
+    const { conversationId: c3, searchRequestId: sr3 } = await f.makePresentation();
+    await f.expireConversation(c3);
+    await query("UPDATE matches SET shown_at = NOW() - INTERVAL '1439 minutes' WHERE search_request_id=$1 AND shown_at IS NOT NULL", [sr3]);
+    const res1439 = await f.receive("2");
+    assert.equal(res1439.statusCode, 200, res1439.body);
+    assert.equal(res1439.json().result.route, "selection");
+
+    const { conversationId: c4, searchRequestId: sr4 } = await f.makePresentation();
+    await f.expireConversation(c4);
+    await query("UPDATE matches SET shown_at = NOW() - INTERVAL '1441 minutes' WHERE search_request_id=$1 AND shown_at IS NOT NULL", [sr4]);
+    const res1441 = await f.receive("2");
+    assert.equal(res1441.statusCode, 200, res1441.body);
+    assert.equal(res1441.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
   } finally {
-    await f1.cleanup();
-  }
-
-  // 1441 min: outside window -> expired
-  const f2 = await fixture();
-  try {
-    const { conversationId: c2, searchRequestId: sr2 } = await f2.makePresentation();
-    await f2.expireConversation(c2);
-    await query("UPDATE matches SET shown_at = NOW() - INTERVAL '1441 minutes' WHERE search_request_id=$1 AND shown_at IS NOT NULL", [sr2]);
-
-    const res2 = await f2.receive("2");
-    assert.equal(res2.statusCode, 200, res2.body);
-    assert.equal(res2.json().reply_text, CONTEXTUAL_EXPIRED_SELECTION);
-
-    const contacts2 = (
-      await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [
-        f2.phone,
-      ])
-    ).rows[0].cnt;
-    assert.equal(contacts2, 0);
-  } finally {
-    await f2.cleanup();
+    await f.cleanup();
   }
 });
 
 // ============================================================================
 // H. NEWER ACTIVE CONTEXT WINS
 // ============================================================================
-test("SoftExpiry H: newer active selection context takes precedence over expired presentation", async () => {
+test("SoftExpiry H1: newer active selection context takes precedence over expired presentation", async () => {
   const f = await fixture();
   try {
     // 1. First presentation -> expired
@@ -572,6 +620,67 @@ test("SoftExpiry H: newer active selection context takes precedence over expired
     ).rows;
     assert.equal(contacts.length, 1);
     assert.equal(contacts[0].search_request_id, activeState.search_request_id);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("SoftExpiry H2: newer active service intake slot context takes precedence over expired presentation", async () => {
+  const f = await fixture();
+  try {
+    const { conversationId: c1, searchRequestId: sr1 } = await f.makePresentation();
+    await f.expireConversation(c1);
+
+    const custRow = (await query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = $1", [f.phone])).rows[0];
+    const newConvId = randomUUID();
+    await query(
+      `INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, expires_at)
+       VALUES ($1, $2, 'active', 'service', 'preciso de ajuda', 'preciso de ajuda', 'BR', 3, NOW() + INTERVAL '30 minutes')`,
+      [newConvId, custRow.id],
+    );
+
+    // Customer now sends "1" (which was in the old expired search)
+    // Because pending_slot is 'service', it must NOT resume old expired search
+    f.set(async () => basic({ intent: "search", speech_act: "request", services: [], location: null }));
+    const nextMsg = await f.receive("1");
+    assert.equal(nextMsg.statusCode, 200, nextMsg.body);
+    assert.notEqual(nextMsg.json().result.route, "selection");
+
+    // Zero contacts created for the old search
+    const contacts = (
+      await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE search_request_id=$1", [sr1])
+    ).rows[0].cnt;
+    assert.equal(contacts, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("SoftExpiry H3: newer active location intake slot context takes precedence over expired presentation", async () => {
+  const f = await fixture();
+  try {
+    const { conversationId: c1, searchRequestId: sr1 } = await f.makePresentation();
+    await f.expireConversation(c1);
+
+    const custRow = (await query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = $1", [f.phone])).rows[0];
+    const newConvId = randomUUID();
+    await query(
+      `INSERT INTO search_conversations (id, customer_id, status, pending_slot, original_raw_text, service_text, country_code, limit_value, expires_at)
+       VALUES ($1, $2, 'active', 'location', 'preciso de hidraulico', 'hidraulico', 'BR', 3, NOW() + INTERVAL '30 minutes')`,
+      [newConvId, custRow.id],
+    );
+
+    // Customer sends "2" (thinking of old search)
+    // Because pending_slot is 'location', it must NOT resume the old expired search
+    f.set(async () => basic({ intent: "search", speech_act: "request", location: null }));
+    const nextMsg = await f.receive("2");
+    assert.equal(nextMsg.statusCode, 200, nextMsg.body);
+    assert.notEqual(nextMsg.json().result.route, "selection");
+
+    const contacts = (
+      await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE search_request_id=$1", [sr1])
+    ).rows[0].cnt;
+    assert.equal(contacts, 0);
   } finally {
     await f.cleanup();
   }
@@ -766,9 +875,9 @@ test("SoftExpiry L: concurrent double selection creates at most one contact and 
 });
 
 // ============================================================================
-// M. CONCURRENT ELIGIBILITY CHANGE
+// M. REAL CONCURRENT ELIGIBILITY CHANGE TEST (TOCTOU & SERIALIZATION)
 // ============================================================================
-test("SoftExpiry M: professional made suspended before selection fails cleanly", async () => {
+test("SoftExpiry M: real concurrent professional eligibility change blocks and revalidates fresh state", async () => {
   const f = await fixture();
   try {
     const { conversationId, searchRequestId } = await f.makePresentation();
@@ -780,22 +889,68 @@ test("SoftExpiry M: professional made suspended before selection fails cleanly",
         [searchRequestId],
       )
     ).rows[0];
-    await query("UPDATE professionals SET status='suspended' WHERE id=$1", [match2.professional_id]);
 
-    try {
-      const res = await f.receive("2");
-      assert.equal(res.statusCode, 200, res.body);
-      assert.equal(res.json().reply_text, CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE);
+    // Hold a transaction that locks and updates the professional to suspended
+    let releaseHold: () => void = () => {};
+    const holdPromise = new Promise<void>((resolve) => {
+      releaseHold = resolve;
+    });
 
-      const contacts = (
-        await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [
-          f.phone,
-        ])
-      ).rows[0].cnt;
-      assert.equal(contacts, 0);
-    } finally {
-      await query("UPDATE professionals SET status='active' WHERE id=$1", [match2.professional_id]);
+    let mutationAcquired = false;
+    const mutationPromise = withIndependentTransaction(async (client) => {
+      await client.query("SELECT id FROM professionals WHERE id = $1 FOR UPDATE", [match2.professional_id]);
+      await client.query("UPDATE professionals SET status = 'suspended' WHERE id = $1", [match2.professional_id]);
+      mutationAcquired = true;
+      await holdPromise;
+    });
+
+    // Wait until the mutation transaction has acquired the lock
+    while (!mutationAcquired) {
+      await new Promise((r) => setTimeout(r, 10));
     }
+
+    // Now start the late selection concurrently
+    let selectionFinished = false;
+    const selectionPromise = f.receive("2").then((res) => {
+      selectionFinished = true;
+      return res;
+    });
+
+    // Selection MUST be blocked waiting for professional row lock
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(selectionFinished, false, "Selection must not bypass pending professional lock");
+
+    // Release the mutation transaction
+    releaseHold();
+    await mutationPromise;
+
+    // Selection can now complete and perform fresh eligibility revalidation
+    const res = await selectionPromise;
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.json().reply_text, CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE);
+
+    const contacts = (
+      await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [
+        f.phone,
+      ])
+    ).rows[0].cnt;
+    assert.equal(contacts, 0, "Zero contacts created");
+
+    const selectedMatches = (
+      await query<{ cnt: number }>(
+        "SELECT count(*)::int AS cnt FROM matches WHERE search_request_id=$1 AND selected_at IS NOT NULL",
+        [searchRequestId],
+      )
+    ).rows[0].cnt;
+    assert.equal(selectedMatches, 0, "selected_at remains null");
+
+    const profNotifs = (
+      await query<{ cnt: number }>(
+        "SELECT count(*)::int AS cnt FROM channel_outbound_messages WHERE purpose='professional_contact_notification' AND recipient_phone_e164=ANY($1::text[])",
+        [f.professionalPhones],
+      )
+    ).rows[0].cnt;
+    assert.equal(profNotifs, 0, "Zero notifications sent");
   } finally {
     await f.cleanup();
   }
@@ -870,9 +1025,9 @@ test("SoftExpiry O: 'mostrar mais' and inquiries after expiry retain CONTEXTUAL_
 });
 
 // ============================================================================
-// P. CURRENT ACTIVE SELECTION REGRESSION
+// P. CURRENT ACTIVE SELECTION REGRESSIONS
 // ============================================================================
-test("SoftExpiry P: active unexpired numeric selection continues working normally", async () => {
+test("SoftExpiry P1: active unexpired numeric selection continues working normally", async () => {
   const f = await fixture();
   try {
     // Active search — NOT expired
@@ -888,6 +1043,64 @@ test("SoftExpiry P: active unexpired numeric selection continues working normall
       ])
     ).rows[0].cnt;
     assert.equal(contacts, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("SoftExpiry P2: active unexpired named selection continues working normally", async () => {
+  const f = await fixture();
+  try {
+    await f.makePresentation();
+
+    const res = await f.receive("Quero o Profissional Dois");
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.json().result.route, "selection");
+
+    const contacts = (
+      await query<{ professional_id: string; status: string }>(
+        "SELECT professional_id, status FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)",
+        [f.phone],
+      )
+    ).rows;
+    assert.equal(contacts.length, 1);
+    assert.equal(contacts[0].status, "shared");
+    assert.equal(contacts[0].professional_id, f.professionalIds[1]);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("SoftExpiry P3: active unexpired show_more continues working normally", async () => {
+  const f = await fixture();
+  try {
+    await f.makePresentation();
+
+    const res = await f.receive("mostrar mais");
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.json().result.route, "selection");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("SoftExpiry P4: active unexpired selection inquiry continues working normally", async () => {
+  const f = await fixture();
+  try {
+    await f.makePresentation();
+
+    const res = await f.receive("qual o mais barato?");
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.json().result.route, "contextual");
+    assert.equal(res.json().result.status, "information");
+
+    // Zero contacts created for inquiry
+    const contacts = (
+      await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [
+        f.phone,
+      ])
+    ).rows[0].cnt;
+    assert.equal(contacts, 0);
   } finally {
     await f.cleanup();
   }
