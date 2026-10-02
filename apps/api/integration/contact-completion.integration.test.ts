@@ -1459,11 +1459,12 @@ test("Scenario 17: Brazilian 8-digit degraded mobile sender recognizes professio
 
 test("Scenario 18: Historical degraded customer phone in snapshot matches canonical customer confirmation", async () => {
   // Real bug reproduction:
-  // Historical snapshot has customer_phone_e164 = "+559984119070" (degraded 8-digit)
-  // Professional has canonical +5566999029086
-  const degradedCustomerPhone = "+559984119070";
-  const canonicalCustomerPhone = "+5599984119070";
-  const canonicalProfPhone = "+5566999029086";
+  // Historical snapshot has customer_phone_e164 (degraded 8-digit)
+  // Professional has canonical phone
+  const sub = "9" + Math.floor(1000000 + Math.random() * 9000000).toString();
+  const degradedCustomerPhone = `+5599${sub}`;
+  const canonicalCustomerPhone = `+55999${sub}`;
+  const canonicalProfPhone = `+556699${Math.floor(1000000 + Math.random() * 9000000)}`;
 
   const f = await createFixture({
     customerPhone: degradedCustomerPhone,
@@ -1534,9 +1535,10 @@ test("Scenario 18: Historical degraded customer phone in snapshot matches canoni
 });
 
 test("Scenario 19: Historical degraded customer phone in snapshot matches canonical customer contestation", async () => {
-  const degradedCustomerPhone = "+559984119070";
-  const canonicalCustomerPhone = "+5599984119070";
-  const canonicalProfPhone = "+5566999029086";
+  const sub = "9" + Math.floor(1000000 + Math.random() * 9000000).toString();
+  const degradedCustomerPhone = `+5599${sub}`;
+  const canonicalCustomerPhone = `+55999${sub}`;
+  const canonicalProfPhone = `+556699${Math.floor(1000000 + Math.random() * 9000000)}`;
 
   const f = await createFixture({
     customerPhone: degradedCustomerPhone,
@@ -1582,9 +1584,10 @@ test("Scenario 19: Historical degraded customer phone in snapshot matches canoni
 });
 
 test("Scenario 20: Code-free completion declaration and confirmation with historical degraded snapshot phone", async () => {
-  const degradedCustomerPhone = "+559984119070";
-  const canonicalCustomerPhone = "+5599984119070";
-  const canonicalProfPhone = "+5566999029086";
+  const sub = "9" + Math.floor(1000000 + Math.random() * 9000000).toString();
+  const degradedCustomerPhone = `+5599${sub}`;
+  const canonicalCustomerPhone = `+55999${sub}`;
+  const canonicalProfPhone = `+556699${Math.floor(1000000 + Math.random() * 9000000)}`;
 
   const f = await createFixture({
     customerPhone: degradedCustomerPhone,

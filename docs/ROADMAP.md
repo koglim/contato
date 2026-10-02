@@ -84,14 +84,7 @@ Itens formalmente congelados e expressamente **proibidos de implementação** no
 Ideias, melhorias e direcionamentos de produto identificados para evolução futura sem bloqueio do lançamento atual:
 
 ### A. Direções de Produto e Arquitetura (Documentação Apenas — Não Implementar)
-* **Soft Expiry / Apresentação Retomável de Lista de Profissionais ([ADR-005](decisions/ADR-005-soft-expiry-resumable-presentation.md)):**
-  * O TTL de 30 minutos atual (`SEARCH_CONVERSATION_TTL_MINUTES = 30`) gerencia o contexto conversacional ativo e **não** representa a janela definitiva de validade do produto para a lista de profissionais apresentada.
-  * O design futuro deverá contemplar:
-    * Validade estendida da lista apresentada para clientes que retomam a conversa após horas.
-    * Revalidação determinística e atômica da elegibilidade do prestador no instante exato da seleção tardia (impedindo conexões com profissionais suspensos ou indisponíveis).
-    * Notificação explícita de atualização/refresh quando a lista estiver excessivamente defasada.
-    * Preservação das evidências históricas de apresentação no ledger.
-    * *Nota:* Nenhum valor de política (ex.: 12h ou 24h) foi fixado nesta etapa.
+* **Soft Expiry / Apresentação Retomável de Lista de Profissionais (PR #30 — [ADR-005](decisions/ADR-005-soft-expiry-resumable-presentation.md)):** Janela negocial configurável de 24 horas (`SEARCH_PRESENTATION_RESUME_TTL_MINUTES = 1440`) para seleção tardia direta (numérica, ordinal ou nominal) de profissionais apresentados (`shown_at`), mantendo o TTL conversacional de 30 minutos inalterado e revalidando atomicamente a elegibilidade com zero chamadas de IA. Implementado no PR #30 com validação automatizada; homologação em produção real pendente.
 * **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)):**
   * Direcionamento futuro para integração com a WhatsApp Cloud API oficial:
     * Preservação do código público `CC-XXXXXXXX` para auditoria, suporte e fallback.

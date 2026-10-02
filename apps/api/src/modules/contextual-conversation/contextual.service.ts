@@ -1,4 +1,4 @@
-import { channelInboundMessageResponseSchema, contextualMessageSchema, type ChannelInboundMessageResponse, type CustomerSearchMessageResponse } from "@contatocerto/shared";
+import { channelInboundMessageResponseSchema, contextualMessageSchema, selectionMessageContractSchema, type ChannelInboundMessageResponse, type CustomerSearchMessageResponse } from "@contatocerto/shared";
 import { type DatabaseClient } from "../../database/connection.js";
 import { InboxFenceError, InboxPermanentError } from "../channel-inbox/inbox-recovery.policy.js";
 import { readSearchConversationConfig } from "../../config/search-conversation.js";
@@ -26,7 +26,7 @@ import { parseBilateralConfirmation } from "../bilateral-contact/bilateral-conta
 import { resolveProfessionalSelection } from "../selection-command/professional-selection.resolver.js";
 import { CONTEXTUAL_POLICY, contextualProposalSchema, controlContextualProposal, emptyMemory, normalizeContextualText, validateContextualQuestion, type ContextualDecision, type ContextualProvider } from "./contextual.contract.js";
 import { ContextualBusyError, PostgresContextualRepository, type ContextualSnapshot } from "./contextual.repository.js";
-import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, CONTEXTUAL_HYPOTHESIS_REJECTED, CONTEXTUAL_EXPIRED_SELECTION, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
+import { CONTEXTUAL_COST_POLICY, CONTEXTUAL_FALLBACK, CONTEXTUAL_CLARIFY, CONTEXTUAL_GREETING, CONTEXTUAL_SMALL_TALK, CONTEXTUAL_SCOPE, CONTEXTUAL_HYPOTHESIS_REJECTED, CONTEXTUAL_EXPIRED_SELECTION, CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE, contextualQuestionContext, contextualClarificationText, contextualCatalogText, validatePersistedContextualQuestion } from "./contextual.reply.js";
 import { classifyConversationAIError, withConversationAITimeout, type ConversationAIFallbackEvent, type ConversationAIFallbackReason, type ConversationAIStage } from "./contextual.provider.js";
 import { deterministicSearchProposal, deterministicSelectionFastPath } from "./contextual.fast-path.js";
 import { presentSelectionInquiry, type CandidateInquiryFact } from "../selection-message/selection-inquiry.presenter.js";
@@ -34,7 +34,7 @@ import type { ContextualShownCandidate } from "./contextual.contract.js";
 import { confirmedUniqueHypothesis, rejectedUniqueHypothesis } from "./contextual.confirmation.js";
 
 export interface ContextualInboxHandler { handle(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> }
-export { CONTEXTUAL_COST_POLICY, CONTEXTUAL_EXPIRED_SELECTION } from "./contextual.reply.js";
+export { CONTEXTUAL_COST_POLICY, CONTEXTUAL_EXPIRED_SELECTION, CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE } from "./contextual.reply.js";
 const stripPrivate = (text: string) => text.replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/giu, "[email omitido]").replace(/\+?\d[\d\s().-]{7,}\d/gu, "[número omitido]").replace(/https?:\/\/\S+/gu, "[link omitido]");
 type ContextualConversationOptions = {
   timeoutMs?: number;
@@ -130,14 +130,31 @@ export class ContextualConversationService implements ContextualInboxHandler {
       const criticalDelegate = global || recoveredSelection || (snapshot.pendingSlot === "selection"
         && (command !== null || namedSelection || parseBilateralConfirmation(record.rawText) !== null));
       let expiredSelection = false;
+      let resumePosition: number | null = null;
+      let resumeConversationId: string | null = null;
+      let resumeSearchRequestId: string | null = null;
       if (!criticalDelegate && !snapshot.conversationId && !snapshot.pendingSlot) {
         const recentExpired = await new PostgresSearchConversationRepository().findRecentExpiredWithShownMatches(snapshot.customerId);
         if (recentExpired) {
           const shown = await new PostgresSearchConversationRepository().listHistoricallyShownForExpiredSearch(recentExpired.searchRequestId);
-          const named = resolveProfessionalSelection(record.rawText, shown).kind !== "unresolved";
+          const nameResolution = resolveProfessionalSelection(record.rawText, shown);
+          const named = nameResolution.kind !== "unresolved";
           const inquiry = deterministicSelectionFastPath(record.rawText).kind !== "none";
           if (command !== null || named || inquiry) {
             expiredSelection = true;
+            resumeConversationId = recentExpired.id;
+            resumeSearchRequestId = recentExpired.searchRequestId;
+            if (!inquiry) {
+              let pos: number | null = null;
+              if (command && command.kind === "select_match") {
+                pos = command.position;
+              } else if (nameResolution.kind === "selected") {
+                pos = nameResolution.position;
+              }
+              if (pos !== null) {
+                resumePosition = pos;
+              }
+            }
           }
         }
       }
@@ -376,7 +393,45 @@ export class ContextualConversationService implements ContextualInboxHandler {
           text = presentSelectionInquiry(decision.inquiryType ?? "details", shownMatches, decision.targetPositions ?? []);
           status = "information";
         } else if (!fallback && decision.kind === "expired_selection") {
-          text = CONTEXTUAL_EXPIRED_SELECTION; status = "information";
+          if (resumePosition !== null && resumeConversationId !== null && resumeSearchRequestId !== null) {
+            const config = readSearchConversationConfig();
+            const resumeRepo = new PostgresSelectionMatchRepository(execute, transaction);
+            const resumeOutcome = await resumeRepo.selectResumableShownMatch({
+              historicalConversationId: resumeConversationId,
+              customerId: captured.customerId,
+              searchRequestId: resumeSearchRequestId,
+              position: resumePosition,
+              lastMessageText: record.rawText,
+              selectionKey: record.id,
+              resumeTtlMinutes: config.resumeTtlMinutes,
+            });
+            if (resumeOutcome.kind === "selected") {
+              const contract = selectionMessageContractSchema.parse({
+                kind: "selected",
+                public_code: resumeOutcome.publicCode,
+                professional_name: resumeOutcome.professionalDisplayName,
+                professional_phone_e164: resumeOutcome.professionalPhoneE164,
+                service_name: resumeOutcome.serviceName,
+              });
+              result = {
+                customer_id: captured.customerId,
+                route: "selection" as const,
+                result: contract,
+              };
+              text = presentSelectionMessage(contract) ?? text;
+              searchRequestId = resumeSearchRequestId;
+              status = "matched";
+            } else if (resumeOutcome.kind === "match_ineligible") {
+              text = CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE;
+              status = "information";
+            } else {
+              text = CONTEXTUAL_EXPIRED_SELECTION;
+              status = "information";
+            }
+          } else {
+            text = CONTEXTUAL_EXPIRED_SELECTION;
+            status = "information";
+          }
         } else if (!fallback && decision.kind === "faq_cost") {
           text = CONTEXTUAL_COST_POLICY; status = "information";
         } else if (!fallback && decision.kind === "catalog_info") {

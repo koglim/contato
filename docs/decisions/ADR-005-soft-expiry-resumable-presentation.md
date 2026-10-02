@@ -1,14 +1,14 @@
 # ADR-005: Soft Expiry / Apresentação Retomável de Lista de Profissionais
 
-* **Status:** ACCEPTED / NOT YET IMPLEMENTED
+* **Status:** IMPLEMENTED IN PR #30 / AUTOMATED VALIDATION (PRODUCTION REVALIDATION PENDING)
 * **Data:** 2026-10-02
 * **Decisores:** Produto e Arquitetura ContatoCerto
 
 ---
 
 > [!NOTE]
-> **Direcionamento de Produto e Arquitetura:**
-> Este documento formaliza o direcionamento de arquitetura para a futura funcionalidade de apresentação retomável de profissionais (*Soft Expiry*). Nenhuma alteração de código ou migração de banco de dados está autorizada no escopo deste registro. O comportamento determinístico de expiração de contexto implementado no PR #27 (T18) permanece como o padrão operacional vigente até a implementação formal desta decisão.
+> **Implementação em PR #30 (v1 — 24 Horas):**
+> Este documento formalizou o direcionamento de arquitetura para a funcionalidade de apresentação retomável de profissionais (*Soft Expiry*), implementada no PR #30 com janela configurável de **24 horas** (`SEARCH_PRESENTATION_RESUME_TTL_MINUTES = 1440`). O TTL de 30 minutos de `SEARCH_CONVERSATION_TTL_MINUTES` permanece inalterado para o contexto de conversação em tempo real. A seleção tardia direta (numérica, ordinal ou nominal) revalida atomicamente a elegibilidade do profissional e restabelece a conexão bilateral caso elegível dentro do prazo de 24h de `shown_at`. Implementado no PR #30 com validação automatizada; merge e homologação em produção condicionados ao GitHub CI verde.
 
 ---
 
@@ -68,15 +68,18 @@ $$\mathbf{TTL\ de\ Contexto\ Conversacional\ (UI/Sess\tilde{a}o)} \quad \neq \qu
 6. **Critério de Obsolescência Extrema (*Hard Floor / Presentation Refresh*):**
    * Caso a apresentação original seja considerada excessivamente antiga de acordo com a política de produto a ser fixada, a plataforma não deve utilizá-la silenciosamente, emitindo um convite claro de atualização (*refresh*).
 
-7. **Não Fixação de Duração Arbitrária nesta Etapa:**
-   * **Nenhum valor arbitrário de política (ex.: 12 horas, 24 horas, 48 horas) é definido ou fixado neste ADR.**
-   * A janela temporal de validade negocial da apresentação será definida em especificação de produto posterior, embasada em dados de uso real, métricas de conversão e telemetria de produção.
+7. **Fixação da Janela em v1 (24 Horas / 1440 Minutos):**
+   * A janela temporal de validade negocial da apresentação para o MVP v1 foi fixada em **24 horas** (`SEARCH_PRESENTATION_RESUME_TTL_MINUTES = 1440`), configurável via variável de ambiente.
+   * O anchor temporal auditável é `matches.shown_at`, registrado estritamente quando a mensagem de apresentação atinge `outbound.status = 'sent'`.
+   * Essa janela é revalidada de forma atômica dentro da transação de seleção (`selectResumableShownMatch`). Telemetria futura em produção poderá calibrar esse valor.
 
 8. **Precedência de Contexto Ativo:**
    * Uma busca recente ou um contexto conversacional ativo subsequente sempre possui precedência determinística sobre qualquer apresentação histórica anterior.
 
-9. **Vigência do Tratamento T18 Atual:**
-   * Até que o mecanismo de *Soft Expiry* seja especificado e implementado em código, o comportamento determinístico estabelecido no PR #27 (T18) permanece como a resposta oficial do sistema para seleções em contextos expirados.
+9. **Escopo v1 e Respostas Determinísticas:**
+   * **Seleção Direta:** Aplica-se à seleção direta nominal, ordinal ou numérica (`1`, `2`, `3`, `primeiro`, `segundo`, `Quero o Profissional X`).
+   * **Opção Inelegível:** Se o profissional tornou-se inativo ou inelegível dentro da janela de 24h, retorna deterministamente `CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE` (*"Essa opção não está mais disponível. Envie uma nova mensagem com o serviço e a cidade para eu atualizar as opções."*), com zero contatos criados e zero chamadas de IA.
+   * **Lista com > 24h:** Mantém a resposta determinística canônica do T18 `CONTEXTUAL_EXPIRED_SELECTION` (*"Essa lista de profissionais expirou. Envie uma nova mensagem com o serviço e a cidade para eu buscar opções atualizadas."*).
 
 ---
 
@@ -87,9 +90,8 @@ $$\mathbf{TTL\ de\ Contexto\ Conversacional\ (UI/Sess\tilde{a}o)} \quad \neq \qu
 * **Alinhamento com a Realidade do Usuário:** Suporta pausas naturais na conversa características do uso cotidiano de mensageria móvel.
 * **Desacoplamento Arquitetural:** Separa o ciclo de vida da sessão conversacional em memória/banco do ciclo de vida da oferta comercial.
 * **Segurança e Integridade Preservadas:** A revalidação atômica em tempo de transação impede a seleção tardia de profissional que falhe na revalidação quando as invariantes transacionais são satisfeitas.
+* **Zero IA na Seleção Resumida:** Nenhum custo nem latência de LLM ou geocodificador são incorridos na retomada determinística.
 
 ### Negativas / Compromissos / Trade-offs
-* **Identidade Persistida de Apresentação:** Exigirá modelagem de dados para registrar e rastrear o conjunto de profissionais formalmente apresentados (*shown candidates*) com chave determinística de apresentação.
-* **Sobrecarga de Revalidação Concorrente:** A transação de seleção tardia precisará efetuar locks e checagens de elegibilidade adicionais que não eram necessárias quando a conversa estava restrita à memória de curto prazo.
-* **Desambiguação de Múltiplas Buscas:** Clientes que realizaram múltiplas buscas para serviços diferentes em momentos distintos exigirão regras determinísticas de desambiguação contextual.
-* **Definição de Política Pendente:** A duração final da janela de *Soft Expiry* permanece como um ponto em aberto a ser decidido antes da codificação.
+* **Sobrecarga de Revalidação Concorrente:** A transação de seleção tardia efetua locks na autoridade do profissional e na linha do match (`selectResumableShownMatch`).
+* **Escopo Restrito em v1:** Comandos de paginação/navegação (`mostrar mais`) e inquiries pós-expiração permanecem sob o comportamento T18 (expirado), sem expansão para navegação conversacional profunda em listas antigas.

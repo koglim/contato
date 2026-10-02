@@ -1,10 +1,12 @@
 import { z } from "zod";
 
 export const DEFAULT_SEARCH_CONVERSATION_TTL_MINUTES = 30;
+export const DEFAULT_SEARCH_PRESENTATION_RESUME_TTL_MINUTES = 1440;
 export const DEFAULT_SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS = 60;
 
 export type SearchConversationConfig = {
   ttlMinutes: number;
+  resumeTtlMinutes: number;
   processingLeaseSeconds: number;
 };
 
@@ -12,6 +14,7 @@ const positiveIntegerEnvironmentValue = z.string().regex(/^\d+$/u).transform(Num
 
 const environmentSchema = z.object({
   SEARCH_CONVERSATION_TTL_MINUTES: positiveIntegerEnvironmentValue,
+  SEARCH_PRESENTATION_RESUME_TTL_MINUTES: positiveIntegerEnvironmentValue,
   SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS: positiveIntegerEnvironmentValue,
 });
 
@@ -19,6 +22,8 @@ export function readSearchConversationConfig(environment: NodeJS.ProcessEnv = pr
   const parsed = environmentSchema.safeParse({
     SEARCH_CONVERSATION_TTL_MINUTES:
       environment.SEARCH_CONVERSATION_TTL_MINUTES ?? String(DEFAULT_SEARCH_CONVERSATION_TTL_MINUTES),
+    SEARCH_PRESENTATION_RESUME_TTL_MINUTES:
+      environment.SEARCH_PRESENTATION_RESUME_TTL_MINUTES ?? String(DEFAULT_SEARCH_PRESENTATION_RESUME_TTL_MINUTES),
     SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS:
       environment.SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS
       ?? String(DEFAULT_SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS),
@@ -31,6 +36,7 @@ export function readSearchConversationConfig(environment: NodeJS.ProcessEnv = pr
 
   return {
     ttlMinutes: parsed.data.SEARCH_CONVERSATION_TTL_MINUTES,
+    resumeTtlMinutes: parsed.data.SEARCH_PRESENTATION_RESUME_TTL_MINUTES,
     processingLeaseSeconds: parsed.data.SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS,
   };
 }

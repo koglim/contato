@@ -206,6 +206,7 @@ test("Recovery after context expiration preserves confirmed slots but cannot sel
     const before=await f.state(),inbox=new PostgresChannelInboundMessageRepository();
     const registered=await inbox.createOrFind({provider:"b2-test",provider_message_id:randomUUID(),phone_e164:f.phone,raw_text:"quero o segundo",country_code:"BR",limit:3},{contextual:true});
     await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1",[before.id]);
+    await query("UPDATE matches SET shown_at=NOW()-INTERVAL '1441 minutes' WHERE search_request_id=$1",[before.search_request_id]);
     f.set(async()=>basic({intent:"selection",speech_act:"request"}));
     const callsBefore = f.calls(), compBefore = f.compositions(), geoBefore = f.geoCalls();
     const response=await f.app.inject({method:"POST",url:"/internal/channel/inbound/next/process",headers});
@@ -1039,6 +1040,31 @@ test("B2 migration 018 rollback is protected and transaction failure preserves s
   const f = await fixture();
   try {
     f.set(async () => basic({ intent: "faq_cost" })); await f.receive("quanto custa usar?");
+    await query("ALTER TABLE contact_completion_events DISABLE TRIGGER contact_completion_events_immutable");
+    await query("DELETE FROM contact_completion_events");
+    await query("ALTER TABLE contact_completion_events ENABLE TRIGGER contact_completion_events_immutable");
+    await query("DELETE FROM contact_completions");
+    await query("DELETE FROM channel_outbound_messages WHERE professional_unavailability_event_id IS NOT NULL");
+    await query("ALTER TABLE professional_unavailability_events DISABLE TRIGGER professional_unavailability_events_immutable");
+    await query("DELETE FROM professional_unavailability_events");
+    await query("DELETE FROM contacts");
+    await query("ALTER TABLE professional_subscription_events DISABLE TRIGGER professional_subscription_events_immutable");
+    await query("DELETE FROM professional_subscription_events");
+    await query("ALTER TABLE professional_subscription_events ENABLE TRIGGER professional_subscription_events_immutable");
+    await query("DELETE FROM professional_subscriptions");
+    await query("ALTER TABLE professional_membership_events DISABLE TRIGGER professional_membership_event_immutable");
+    await query("DELETE FROM professional_membership_events");
+    await query("ALTER TABLE professional_membership_events ENABLE TRIGGER professional_membership_event_immutable");
+    await query("ALTER TABLE professional_memberships DISABLE TRIGGER professional_membership_no_delete");
+    await query("DELETE FROM professional_memberships");
+    await query("ALTER TABLE professional_memberships ENABLE TRIGGER professional_membership_no_delete");
+    await query("DELETE FROM account_identifiers");
+    await query("DELETE FROM accounts");
+    await query("DELETE FROM channel_media_events");
+    await query("ALTER TABLE channel_inbound_recovery_events DISABLE TRIGGER inbound_recovery_event_immutable");
+    await query("DELETE FROM channel_inbound_recovery_events");
+    await query("ALTER TABLE channel_inbound_recovery_events ENABLE TRIGGER inbound_recovery_event_immutable");
+    await query("UPDATE professionals SET management_mode = 'legacy_unmanaged'");
     await assert.rejects(rollbackThrough("018_add_contextual_conversation"), error => /P0018/.test(String((error as { stderr?: string }).stderr)));
     assert.equal((await query("SELECT name FROM pgmigrations WHERE name='018_add_contextual_conversation'")).rows.length, 1);
     const inbox = new PostgresChannelInboundMessageRepository();
@@ -1078,6 +1104,7 @@ test("T18: Expired selection recognizes historically presented candidate even if
 
     // Expire the selection conversation
     await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+    await query("UPDATE matches SET shown_at=NOW()-INTERVAL '1441 minutes' WHERE search_request_id=$1", [before.search_request_id]);
 
     // Make the professional inactive AFTER presentation (simulating loss of current eligibility)
     await query("UPDATE professionals SET status='suspended' WHERE id=$1", [shownMatch.professional_id]);
@@ -1126,6 +1153,7 @@ for (const commandText of ["2", "segundo", "opção 2"]) {
       await f.sent(first.json().outbound.id);
       const before = await f.state();
       await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+      await query("UPDATE matches SET shown_at=NOW()-INTERVAL '1441 minutes' WHERE search_request_id=$1", [before.search_request_id]);
 
       const contactsBefore = (await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].cnt;
       const searchReqsBefore = (await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM search_requests WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].cnt;
@@ -1177,6 +1205,7 @@ for (const [scenario, messageText] of [
       await f.sent(first.json().outbound.id);
       const before = await f.state();
       await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+      await query("UPDATE matches SET shown_at=NOW()-INTERVAL '1441 minutes' WHERE search_request_id=$1", [before.search_request_id]);
 
       const contactsBefore = (await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM contacts WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].cnt;
       const searchReqsBefore = (await query<{ cnt: number }>("SELECT count(*)::int AS cnt FROM search_requests WHERE customer_id IN (SELECT id FROM customers WHERE phone_e164=$1)", [f.phone])).rows[0].cnt;
@@ -1357,6 +1386,7 @@ test("T18: Idempotent replay of expired selection returns exact same outcome wit
     await f.sent(first.json().outbound.id);
     const before = await f.state();
     await query("UPDATE search_conversations SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [before.id]);
+    await query("UPDATE matches SET shown_at=NOW()-INTERVAL '1441 minutes' WHERE search_request_id=$1", [before.search_request_id]);
 
     const callsBefore = f.calls();
     const compBefore = f.compositions();

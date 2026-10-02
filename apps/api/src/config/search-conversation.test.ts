@@ -3,12 +3,14 @@ import test from "node:test";
 import {
   DEFAULT_SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS,
   DEFAULT_SEARCH_CONVERSATION_TTL_MINUTES,
+  DEFAULT_SEARCH_PRESENTATION_RESUME_TTL_MINUTES,
   readSearchConversationConfig,
 } from "./search-conversation.js";
 
-test("search conversation configuration uses 30 minute TTL and 60 second processing lease defaults", () => {
+test("search conversation configuration uses 30 minute TTL, 1440 minute resume TTL and 60 second processing lease defaults", () => {
   assert.deepEqual(readSearchConversationConfig({}), {
     ttlMinutes: DEFAULT_SEARCH_CONVERSATION_TTL_MINUTES,
+    resumeTtlMinutes: DEFAULT_SEARCH_PRESENTATION_RESUME_TTL_MINUTES,
     processingLeaseSeconds: DEFAULT_SEARCH_CONVERSATION_PROCESSING_LEASE_SECONDS,
   });
 });
@@ -18,6 +20,19 @@ test("search conversation configuration accepts only positive integer TTL values
   for (const value of ["0", "-1", "1.5", "invalid"]) {
     assert.throws(
       () => readSearchConversationConfig({ SEARCH_CONVERSATION_TTL_MINUTES: value }),
+      /Invalid search conversation configuration/u,
+    );
+  }
+});
+
+test("search conversation configuration accepts only positive integer resume TTL values", () => {
+  assert.equal(
+    readSearchConversationConfig({ SEARCH_PRESENTATION_RESUME_TTL_MINUTES: "720" }).resumeTtlMinutes,
+    720,
+  );
+  for (const value of ["0", "-1", "1.5", "invalid"]) {
+    assert.throws(
+      () => readSearchConversationConfig({ SEARCH_PRESENTATION_RESUME_TTL_MINUTES: value }),
       /Invalid search conversation configuration/u,
     );
   }

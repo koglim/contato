@@ -795,6 +795,7 @@ test("Regression A: direct customer-search updates historical degraded phone to 
     await app.close();
   } finally {
     await withTransaction(async (db) => {
+      await db.query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE customer_id = $1)", [customerId]);
       await db.query("DELETE FROM search_conversations WHERE customer_id = $1", [customerId]);
       await db.query("DELETE FROM search_requests WHERE customer_id = $1", [customerId]);
       await db.query("DELETE FROM customers WHERE id = $1", [customerId]);
