@@ -13,6 +13,8 @@ import type {
   SelectShownMatchOutcome,
   SelectedMatchOutcome,
   ConsentOutcome,
+  SelectResumableShownMatchInput,
+  SelectResumableShownMatchOutcome,
 } from "./match-selection.types.js";
 
 type SelectionMatchRow = {
@@ -127,7 +129,7 @@ function toSelectionMatchRecord(row: SelectionMatchRow): SelectionMatchRecord {
   };
 }
 
-function existingSelectionOutcome(row: ExistingSelectionRow, input: SelectShownMatchInput): SelectShownMatchOutcome {
+function existingSelectionOutcome(row: ExistingSelectionRow, input: SelectShownMatchInput): SelectedMatchOutcome | { kind: "idempotency_conflict" } {
   if (
     row.customer_id !== input.customerId
     || (row.selection_conversation_id != null && row.selection_conversation_id !== input.conversationId)
@@ -551,6 +553,237 @@ export class PostgresSelectionMatchRepository implements SelectionMatchRepositor
         );
         if (!context.rows[0]) return { kind: "idempotency_conflict" };
         return existingSelectionOutcome(existing, input);
+      });
+    }
+  }
+
+  async isMatchWithinResumeWindow(searchRequestId: string, position: number, resumeTtlMinutes: number): Promise<boolean> {
+    const result = await this.execute<{ match_id: string }>(
+      `SELECT id AS match_id
+         FROM matches
+        WHERE search_request_id = $1
+          AND rank_position = $2
+          AND shown_at IS NOT NULL
+          AND shown_at >= NOW() - ($3 * INTERVAL '1 minute')
+          AND selected_at IS NULL
+        LIMIT 1`,
+      [searchRequestId, position, resumeTtlMinutes],
+    );
+    return result.rows.length > 0;
+  }
+
+  async selectResumableShownMatch(input: SelectResumableShownMatchInput): Promise<SelectResumableShownMatchOutcome> {
+    try {
+      return await this.transaction(async (client) => {
+        const existing = await findSelectionByKey(client, input.selectionKey);
+        if (existing) {
+          const context = await client.query<{ id: string }>(
+            `SELECT id FROM search_conversations
+              WHERE id = $1 AND customer_id = $2 AND search_request_id = $3
+              FOR UPDATE`,
+            [input.historicalConversationId, input.customerId, input.searchRequestId],
+          );
+          if (!context.rows[0]) return { kind: "idempotency_conflict" };
+          return existingSelectionOutcome(existing, {
+            conversationId: input.historicalConversationId,
+            customerId: input.customerId,
+            searchRequestId: input.searchRequestId,
+            position: input.position,
+            lastMessageText: input.lastMessageText,
+            selectionKey: input.selectionKey,
+          });
+        }
+
+        // 1. Lock the historical search_conversation row
+        const conversation = await client.query<SelectionConversationRow>(
+          `SELECT customer_id, status, pending_slot, search_request_id, bilateral_pending, expires_at > NOW() AS is_current
+             FROM search_conversations
+            WHERE id = $1
+            FOR NO KEY UPDATE`,
+          [input.historicalConversationId],
+        );
+        const conversationRow = conversation.rows[0];
+        if (!conversationRow) return { kind: "search_request_not_selectable" };
+        if (conversationRow.customer_id !== input.customerId) return { kind: "search_request_not_selectable" };
+        if (conversationRow.search_request_id !== input.searchRequestId) return { kind: "search_request_not_selectable" };
+
+        const replayAfterLock = await findSelectionByKey(client, input.selectionKey);
+        if (replayAfterLock) {
+          return existingSelectionOutcome(replayAfterLock, {
+            conversationId: input.historicalConversationId,
+            customerId: input.customerId,
+            searchRequestId: input.searchRequestId,
+            position: input.position,
+            lastMessageText: input.lastMessageText,
+            selectionKey: input.selectionKey,
+          });
+        }
+
+        // 2. Lock search_request
+        const searchRequest = await client.query<SelectionSearchRequestRow>(
+          `SELECT customer_id, status
+             FROM search_requests
+            WHERE id = $1
+            FOR NO KEY UPDATE`,
+          [input.searchRequestId],
+        );
+        const searchRequestRow = searchRequest.rows[0];
+        if (
+          !searchRequestRow
+          || searchRequestRow.customer_id !== input.customerId
+          || searchRequestRow.status !== "matched"
+        ) return { kind: "search_request_not_selectable" };
+
+        // 3. Structurally locate historically shown candidate
+        const candidateMatch = await client.query<{
+          match_id: string;
+          professional_id: string;
+          shown_at: Date;
+          is_within_window: boolean;
+        }>(
+          `SELECT id AS match_id, professional_id, shown_at,
+                  (shown_at >= NOW() - ($3 * INTERVAL '1 minute')) AS is_within_window
+             FROM matches
+            WHERE search_request_id = $1
+              AND rank_position = $2
+              AND shown_at IS NOT NULL
+              AND selected_at IS NULL`,
+          [input.searchRequestId, input.position, input.resumeTtlMinutes],
+        );
+        const candidate = candidateMatch.rows[0];
+        if (!candidate) return { kind: "match_not_available" };
+
+        // 4. Recheck 24-hour business window from shown_at inside transaction
+        if (!candidate.is_within_window) {
+          return { kind: "presentation_expired" };
+        }
+
+        // 5. Lock the professional authority row
+        const professionalLock = await client.query<{ id: string }>(
+          `SELECT id
+             FROM professionals
+            WHERE id = $1
+            FOR UPDATE`,
+          [candidate.professional_id],
+        );
+        if (!professionalLock.rows[0]) return { kind: "match_ineligible" };
+
+        // 6. Execute fresh current eligibility query using resumedMatchEligibilitySql
+        const match = await client.query<SelectableMatchRow>(
+          `SELECT matches.id AS match_id,
+                  matches.professional_id,
+                  professionals.display_name,
+                  professionals.phone_e164,
+                  services.name AS service_name
+             FROM matches
+             JOIN professionals ON professionals.id = matches.professional_id
+             JOIN search_requests ON search_requests.id = matches.search_request_id
+             JOIN services ON services.id = search_requests.service_id
+            WHERE matches.id = $1
+              AND matches.search_request_id = $2
+              AND matches.selected_at IS NULL
+              AND ${resumedMatchEligibilitySql}
+            FOR UPDATE OF matches`,
+          [candidate.match_id, input.searchRequestId],
+        );
+        const matchRow = match.rows[0];
+        if (!matchRow) return { kind: "match_ineligible" };
+
+        if (this.onBeforeBilateralContact) {
+          await this.onBeforeBilateralContact(client, matchRow.professional_id);
+        }
+
+        // 7. Prepare bilateral selection (verify original presentation outbound status was 'sent')
+        const selectShownInput: SelectShownMatchInput = {
+          conversationId: input.historicalConversationId,
+          customerId: input.customerId,
+          searchRequestId: input.searchRequestId,
+          position: input.position,
+          lastMessageText: input.lastMessageText,
+          selectionKey: input.selectionKey,
+        };
+
+        const bilateral = await prepareBilateralSelection(client, selectShownInput, matchRow, conversationRow.bilateral_pending);
+        if (bilateral.kind !== "ready") {
+          return { kind: "presentation_not_sent" };
+        }
+
+        // 8. Update matches.selected_at
+        const selected = await client.query<SelectedMatchRow>(
+          `UPDATE matches
+              SET selected_at = NOW()
+            WHERE id = $1
+              AND selected_at IS NULL
+            RETURNING selected_at`,
+          [matchRow.match_id],
+        );
+        if (!selected.rows[0]) return { kind: "match_not_available" };
+
+        // 9. Update search_requests status
+        await client.query(
+          `UPDATE search_requests SET status = 'selected' WHERE id = $1 AND status = 'matched'`,
+          [input.searchRequestId],
+        );
+
+        // 10. Create contact and initial outbound notification
+        const contact = await createBilateralContact(
+          client,
+          selectShownInput,
+          matchRow,
+          bilateral.context,
+          selected.rows[0].selected_at,
+          this.generateCode,
+        );
+
+        // 11. Transition historical conversation to completed for audit
+        await client.query(
+          `UPDATE search_conversations
+              SET status = 'completed',
+                  pending_slot = NULL,
+                  last_message_text = $2,
+                  completed_at = COALESCE(completed_at, NOW()),
+                  processing_token = NULL,
+                  processing_started_at = NULL,
+                  bilateral_pending = NULL
+            WHERE id = $1`,
+          [input.historicalConversationId, input.lastMessageText],
+        );
+
+        return {
+          kind: "selected",
+          contactId: contact.contactId,
+          matchId: matchRow.match_id,
+          professionalId: matchRow.professional_id,
+          professionalDisplayName: contact.snapshot.professional_name,
+          professionalPhoneE164: contact.snapshot.professional_phone_e164,
+          serviceName: contact.snapshot.service_name,
+          selectedAt: selected.rows[0].selected_at,
+          replayed: false,
+          publicCode: contact.snapshot.public_code,
+          conversationId: input.historicalConversationId,
+          searchRequestId: input.searchRequestId,
+        };
+      });
+    } catch (error) {
+      if (!isSelectionKeyUniqueViolation(error)) throw error;
+      return this.transaction(async (client) => {
+        const existing = await findSelectionByKey(client, input.selectionKey);
+        if (!existing) throw error;
+        const context = await client.query<{ id: string }>(
+          `SELECT id FROM search_conversations
+            WHERE id = $1 AND customer_id = $2 AND search_request_id = $3
+            FOR UPDATE`,
+          [input.historicalConversationId, input.customerId, input.searchRequestId],
+        );
+        if (!context.rows[0]) return { kind: "idempotency_conflict" };
+        return existingSelectionOutcome(existing, {
+          conversationId: input.historicalConversationId,
+          customerId: input.customerId,
+          searchRequestId: input.searchRequestId,
+          position: input.position,
+          lastMessageText: input.lastMessageText,
+          selectionKey: input.selectionKey,
+        });
       });
     }
   }

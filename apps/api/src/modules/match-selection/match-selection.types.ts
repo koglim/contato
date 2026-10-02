@@ -67,6 +67,25 @@ export type SelectedMatchOutcome = Extract<SelectShownMatchOutcome, { kind: "sel
 export type ConsentOutcome = Extract<SelectShownMatchOutcome, { kind: "consent_required" | "consent_declined" }>;
 export type PendingBilateralConfirmation = { position: number; professionalDisplayName: string };
 
+export type SelectResumableShownMatchInput = {
+  historicalConversationId: string;
+  customerId: string;
+  searchRequestId: string;
+  position: number;
+  lastMessageText: string;
+  selectionKey: string;
+  resumeTtlMinutes: number;
+};
+
+export type SelectResumableShownMatchOutcome =
+  | Extract<SelectShownMatchOutcome, { kind: "selected" }>
+  | { kind: "presentation_expired" }
+  | { kind: "match_not_available" }
+  | { kind: "match_ineligible" }
+  | { kind: "search_request_not_selectable" }
+  | { kind: "idempotency_conflict" }
+  | { kind: "presentation_not_sent" };
+
 export interface SelectionMatchRepository {
   getPendingConfirmation(customerId: string, conversationId: string): Promise<PendingBilateralConfirmation | null>;
   declinePendingConfirmation(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome>;
@@ -77,4 +96,6 @@ export interface SelectionMatchRepository {
   listNextUnshown(searchRequestId: string, limit: number): Promise<SelectionMatchRecord[]>;
   findSelectedByCustomerAndSelectionKey(customerId: string, selectionKey: string): Promise<SelectedMatchOutcome | null>;
   selectShownMatch(input: SelectShownMatchInput): Promise<SelectShownMatchOutcome>;
+  isMatchWithinResumeWindow(searchRequestId: string, position: number, resumeTtlMinutes: number): Promise<boolean>;
+  selectResumableShownMatch(input: SelectResumableShownMatchInput): Promise<SelectResumableShownMatchOutcome>;
 }

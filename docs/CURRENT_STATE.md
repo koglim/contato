@@ -173,16 +173,16 @@ Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e
 * **Inputs Avançados de Localização (Location v2):** Compartilhamento de localização nativa do WhatsApp (Live Location), links de mapas ou detecção automática por geolocalização.
 * **Conclusão de Serviços pelo Painel Web:** Ação de marcar serviço como concluído na interface web (atualmente exclusiva via WhatsApp).
 
-### B. Direções de Produto Documentadas (Documentação Apenas — Não Implementar)
-* **Soft Expiry / Apresentação Retomável de Lista de Profissionais ([ADR-005](decisions/ADR-005-soft-expiry-resumable-presentation.md)):**
-  * O TTL atual de 30 minutos (`SEARCH_CONVERSATION_TTL_MINUTES = 30`) é estritamente o TTL do contexto conversacional ativo e **não** deve ser automaticamente assumido como a janela final de validade de produto para a apresentação de profissionais ao cliente.
-  * O design futuro de produto e arquitetura deve avaliar:
-    * Manter a referência à lista apresentada válida por um período mais extenso para clientes que retornam horas depois.
-    * Revalidar atômica e deterministicamente a elegibilidade do profissional no momento exato da seleção tardia, garantindo que profissionais que se tornaram inativos/suspensos ou fora de área jamais sejam conectados silenciosamente.
-    * Emitir refresh explícito e transparente caso a lista tenha se tornado excessivamente obsoleta.
-    * Preservar integralmente as evidências históricas de apresentação para auditoria.
-  * *Compromisso:* Nenhum valor arbitrário de política (ex.: 12h ou 24h) foi fixado nesta etapa, e nenhuma alteração de código está autorizada sem especificação canônica prévia.
-* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)):**
+### B. Direções de Produto Documentadas
+* **Soft Expiry / Apresentação Retomável de Lista de Profissionais ([ADR-005](decisions/ADR-005-soft-expiry-resumable-presentation.md)) — IMPLEMENTADO (PR #30):**
+  * O TTL de 30 minutos (`SEARCH_CONVERSATION_TTL_MINUTES = 30`) gerencia o contexto conversacional ativo em tempo real.
+  * A validade negocial de apresentação e seleção foi estendida para **24 horas** (`SEARCH_PRESENTATION_RESUME_TTL_MINUTES = 1440`, configurável).
+  * Seleções tardias diretas (numéricas, ordinais ou nominais) revalidam atômica e deterministicamente a elegibilidade do profissional no momento da transação (`selectResumableShownMatch`).
+  * Se o profissional permaneceu elegível: conexão imediata no status `shared` com notificação ao prestador.
+  * Se o profissional tornou-se inelegível: resposta determinística `CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE` sem criação de contato.
+  * Se a lista ultrapassou 24 horas: resposta determinística canônica do T18 `CONTEXTUAL_EXPIRED_SELECTION`.
+  * Zero chamadas de interpretação/composição de IA ou geocodificação na retomada.
+* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — ACCEPTED / NOT YET IMPLEMENTED:**
   * Na evolução futura com a WhatsApp Cloud API oficial:
     * O código público `CC-XXXXXXXX` será mantido como identificador auditável e mecanismo de fallback textual.
     * A experiência primária do usuário **não** deve exigir digitação manual de códigos: ações determinísticas (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*) devem ser apresentadas como botões interativos nativos (Interactive Messages / Quick Replies) nos clientes compatíveis.
