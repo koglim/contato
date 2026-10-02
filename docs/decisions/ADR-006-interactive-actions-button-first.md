@@ -22,7 +22,7 @@ Na arquitetura atual do ContatoCerto, as ações operacionais e transacionais no
 Embora o parser conversacional e a camada de inteligência contextual tenham evoluído para suportar variações naturais sem código explícito quando existe um único contato ativo inequívoco, o fluxo textual apresenta limitações inerentes de usabilidade e segurança operacional:
 1. **Fricção Cognitiva e Erros de Digitação:** Exigir que o usuário copie, cole ou digite códigos de 8 caracteres alfanuméricos aumenta a taxa de abandono e induz a erros de formatação.
 2. **Ambiguidade em Atendimentos Simultâneos:** Quando um prestador atende múltiplos clientes no mesmo dia, qualquer inferência baseada em "último contato" ou texto solto (*"já terminei"*) introduz risco de vincular uma declaração ao contato incorreto.
-3. **Padrão Moderno de Mensageria:** As interfaces oficiais de mensageria móvel (especialmente WhatsApp) suportam mensagens interativas com botões de resposta rápida (*Quick Reply Buttons*) e listas de seleção (*Interactive Lists*), que oferecem uma experiência amplamente superior e à prova de ambiguidades.
+3. **Padrão Moderno de Mensageria:** As interfaces oficiais de mensageria móvel (especialmente WhatsApp) suportam mensagens interativas com botões de resposta rápida (*Quick Reply Buttons*) e listas de seleção (*Interactive Lists*), que oferecem uma experiência mais fluida e reduzem a ambiguidade de interação.
 
 ---
 
@@ -87,7 +87,7 @@ Embora o parser conversacional e a camada de inteligência contextual tenham evo
    * O adaptador de transporte específico (*Transport Adapter*) será o único responsável por traduzir essas estruturas para os formatos do provedor em uso.
 
 10. **Capacidades Oficiais da WhatsApp Cloud API:**
-    * Fica registrado como capacidade externa verificada que a WhatsApp Cloud API oficial da Meta suporta nativamente mensagens interativas (*interactive reply buttons* e *list messages*), atribuindo IDs únicos a cada botão e retornando esses identificadores estruturados nos webhooks de entrega e resposta.
+    * Fica registrado como capacidade externa verificada que a WhatsApp Cloud API oficial da Meta suporta mensagens interativas com *reply buttons* e *list messages*. Os botões podem carregar identificadores definidos pelo integrador, e a interação selecionada é retornada de forma estruturada no webhook/callback de resposta do usuário (os eventos de entrega e status de transporte constituem uma preocupação separada).
 
 11. **Estratégia de Integração e Provedores:**
     * A Evolution API é o componente de transporte vigente do ContatoCerto.
@@ -115,12 +115,8 @@ Embora o parser conversacional e a camada de inteligência contextual tenham evo
 
 ## Diretrizes de Segurança dos Tokens de Ação
 
-* **Proibição de Padrões Adivinháveis:** É expressamente proibido construir identificadores no formato `contact:<uuid>:confirm` ou qualquer esquema sequencial/previsível.
-* **Tokens de Alta Entropia:** Os tokens devem ser gerados com aleatoriedade criptograficamente segura (ex.: strings base64url de 128+ bits ou hashes HMAC assinados).
-* **Definições para a Fase de Implementação:** A especificação técnica de engenharia que implementar esta decisão definirá:
-  * Mecanismo de persistência versus assinatura estática (HMAC com secret/pepper);
-  * TTL e políticas de revogação/expiração de tokens;
-  * Auditoria de ciclo de vida de tokens e deduplicação de webhooks de entrada.
+* **Proibição de Padrões Adivinháveis:** Os identificadores de ação devem ser opacos e não previsíveis. É expressamente proibido construir identificadores no formato `contact:<uuid>:confirm` ou qualquer esquema sequencial/previsível.
+* **Escopo da Especificação de Implementação:** A especificação técnica de implementação definirá o mecanismo criptográfico, nível de entropia, persistência versus assinatura, expiração, revogação e política de replay/idempotência.
 
 ---
 
@@ -129,7 +125,7 @@ Embora o parser conversacional e a camada de inteligência contextual tenham evo
 ### Positivas
 * **Experiência do Usuário Fluida e Moderna:** Elimina a necessidade de memorização ou digitação de códigos em conversas no WhatsApp.
 * **Eliminação de Erros de Entrada:** Botões evitam erros de digitação, ambiguidades ortográficas e falhas de formatação de código.
-* **Segurança Robusta em Cenários Concorrentes:** Vinculação estrita via token elimina totalmente o risco de ações acidentais em contatos errados de profissionais com múltiplos atendimentos simultâneos.
+* **Segurança Robusta em Cenários Concorrentes:** A vinculação estrita por token evita a ambiguidade de alvo entre contatos, desde que autorização, estado e idempotência sejam validados no servidor.
 * **Resiliência e Continuidade Operacional:** Manutenção do suporte a comandos textuais como fallback garante que nenhum usuário fique bloqueado por incompatibilidade de cliente.
 
 ### Negativas / Compromissos / Trade-offs

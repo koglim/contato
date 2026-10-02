@@ -46,7 +46,7 @@ $$\mathbf{TTL\ de\ Contexto\ Conversacional\ (UI/Sess\tilde{a}o)} \quad \neq \qu
    * Em uma etapa futura de engenharia, a plataforma implementará um mecanismo que permitirá ao cliente fazer referência a profissionais apresentados em buscas anteriores, mesmo após a expiração do contexto conversacional ativo de 30 minutos.
 
 3. **Revalidação Atômica Obrigatória no Instante da Seleção Tardia:**
-   * A aceitação de uma seleção tardia baseada em histórico de apresentação **exige revalidação atômica de elegibilidade** do profissional no exato milissegundo em que a seleção é processada no banco de dados.
+   * A seleção tardia exige revalidação da elegibilidade do profissional na **mesma transação atômica** que efetiva a seleção/conexão, utilizando os locks e invariantes de domínio necessários para prevenir qualquer brecha de concorrência ou defasagem temporal (TOCTOU — *Time-of-Check to Time-of-Use*).
    * A revalidação deve executar rigorosamente todas as regras canônicas de autoridade de domínio, incluindo:
      * Status ativo do profissional (`status = 'active'`);
      * Elegibilidade da categoria/serviço ofertado;
@@ -86,7 +86,7 @@ $$\mathbf{TTL\ de\ Contexto\ Conversacional\ (UI/Sess\tilde{a}o)} \quad \neq \qu
 * **Redução de Fricção no WhatsApp:** O cliente não é penalizado nem obrigado a responder em menos de 30 minutos para contratar um profissional já apresentado.
 * **Alinhamento com a Realidade do Usuário:** Suporta pausas naturais na conversa características do uso cotidiano de mensageria móvel.
 * **Desacoplamento Arquitetural:** Separa o ciclo de vida da sessão conversacional em memória/banco do ciclo de vida da oferta comercial.
-* **Segurança e Integridade Preservadas:** A revalidação atômica em tempo de transação impede categoricamente que profissionais inaptos recebam contatos tardios.
+* **Segurança e Integridade Preservadas:** A revalidação atômica em tempo de transação impede a seleção tardia de profissional que falhe na revalidação quando as invariantes transacionais são satisfeitas.
 
 ### Negativas / Compromissos / Trade-offs
 * **Identidade Persistida de Apresentação:** Exigirá modelagem de dados para registrar e rastrear o conjunto de profissionais formalmente apresentados (*shown candidates*) com chave determinística de apresentação.
