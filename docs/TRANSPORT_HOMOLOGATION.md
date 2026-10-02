@@ -351,19 +351,20 @@ Em 2026-10-01, após a homologação do happy path no Golden E2E #2, foram execu
 
 ---
 
-## Homologação em Produção — Contexto Obsoleto / Seleção Expirada (T18) (2026-10-01 / 2026-10-02)
+## Homologação em Produção — Contexto Obsoleto / Seleção Expirada (T18)
 
-Em 2026-10-01 / 2026-10-02 UTC, foi executada a revalidação em produção real do tratamento determinístico de seleção contra lista expirada (T18) no runtime `contatocerto-api` @ `69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`:
+A revalidação em produção real do tratamento determinístico de seleção contra lista expirada (T18) foi executada no runtime `contatocerto-api` @ `69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0` (busca originada em 2026-10-01 UTC, ensaio executado em 2026-10-02 UTC com inbound às `2026-10-02T02:38:20.742Z` e outbound às `2026-10-02T02:38:21.744Z`):
 
 ### 1. Evidências do Ciclo T18 em Produção
 
 | Etapa | Inbound / Gatilho | Outbound ID / Finalidade | Evolution Provider Msg ID | Status Transporte |
 | :--- | :--- | :---: | :---: | :---: |
-| **Seleção em Lista Expirada ("2")** | Inbound texto "2" (`ca42f314-2ed0-49ca-8960-8c03285bc9c7`, `Contato Certo:3ADBCBBB4F159D366BEB`) | `02979644-88d5-4976-a3e6-509b5807e035` (`customer_reply`) | `3EB0341F401FF10E9E72E8` | `sent` (201 Created) |
+| **Seleção em Lista Expirada ("2")** | Inbound texto "2" (`ca42f314-2ed0-49ca-8960-8c03285bc9c7`, `Contato Certo:3ADBCBBB4F159D366BEB`) | `02979644-88d5-4976-a3e6-509b5807e035` (`customer_reply`) | `3EB0341F401FF10E9E72E8` | `sent` |
 
 ### 2. Invariantes Comprovados
-* **Zero Chamadas a IA / Geocodificador:** Execução via fast-path determinístico (`CONTEXTUAL_EXPIRED_SELECTION`).
-* **Zero Mutações de Negócio:** 0 contatos criados, 0 novas buscas, 0 matches selecionados, 0 notificações a profissionais.
-* **Transporte Concluído:** Mensagem com `status=sent`, `provider_message_id` persistido e `delivery_hold_reason=null`.
+* **Garantia de 0 Chamadas a IA / Geocodificador (Testes Automatizados):** A suíte de testes de integração comprova execução via fast-path determinístico (`CONTEXTUAL_EXPIRED_SELECTION`) com 0 chamadas de interpretação, 0 chamadas de composição e 0 geocodificações.
+* **Zero Mutações de Negócio em Produção:** 0 contatos criados, 0 novas buscas, 0 matches selecionados, 0 notificações a profissionais.
+* **Transporte Concluído em Produção:** Mensagem com `status=sent`, `provider_message_id` persistido, `delivery_hold_reason=null` e mensagem recebida pelo cliente.
 * **Resultado:** `T18_REAL_PRODUCTION_FINAL=PASS`.
+
 

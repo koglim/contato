@@ -131,8 +131,9 @@ Em 2026-10-01, foram executados os ensaios autorizados para os cenários de exce
   * Cliente contestou via comando de contestação gerando evento `6a9571b8-816b-4244-af46-1eb51f9cbe7b`, promovendo o estado para `contested`, mantendo contato em `shared`, `confirmed_at=null` e preenchendo `contested_at`.
   * Todos os 4 outbounds (prompt ao cliente `02a05352-27bb-4fd1-9bf0-b6ffb6b5642f` / Evolution `3EB0684D55715F234C2460`, resposta de declaração ao profissional `74f7f047-008d-4342-8a5e-dd30ed240a66` / Evolution `3EB04DB9CAE74E1FB85A02`, notificação de contestação ao profissional `77188dbf-40de-4ab6-9aa4-660b78f1425d` / Evolution `3EB0DB236CAC0299155F86` e resposta de contestação ao cliente `e71bb54b-aac3-498d-9332-332feb5b1f32` / Evolution `3EB0DE3F82BED016915D03`) observados com status=sent no transporte e zero holds.
 
-### G. Homologação em Produção — Contexto Obsoleto / Seleção Expirada (T18) (2026-10-01 / 2026-10-02 UTC)
-Em 2026-10-01 / 2026-10-02 UTC, após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`), foi executado ensaio de revalidação em ambiente de produção real para o cenário de seleção contra lista expirada (T18):
+### G. Homologação em Produção — Contexto Obsoleto / Seleção Expirada (T18)
+Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`), foi executado ensaio de revalidação em ambiente de produção real para o cenário de seleção contra lista expirada (T18):
+* **Data e Horários:** Contexto de busca expirada originado em 2026-10-01 UTC; ensaio real de revalidação executado em 2026-10-02 UTC (inbound recebido em `2026-10-02T02:38:20.742Z`, outbound enviado em `2026-10-02T02:38:21.744Z`).
 * **Contexto de Busca:** Search request `81ace3cf-b8c8-434f-a0d4-a9837e663431`, conversa `d65c8a4a-06d3-484f-b94a-0d3806ce99bf` (TTL de 30 minutos expirado; sem conversa de busca ativa aberta).
 * **Lista Apresentada Historicamente:** 1. Julia, 2. Farol, 3. Richard.
 * **Inbound do Cliente:** Mensagem "2" recebida via inbound `ca42f314-2ed0-49ca-8960-8c03285bc9c7` (`Contato Certo:3ADBCBBB4F159D366BEB`).
@@ -140,13 +141,15 @@ Em 2026-10-01 / 2026-10-02 UTC, após o deploy da correção determinística (`c
   > *"Essa lista de profissionais expirou. Envie uma nova mensagem com o serviço e a cidade para eu buscar opções atualizadas."*
 * **Transporte Outbound:** Mensagem `02979644-88d5-4976-a3e6-509b5807e035` (`purpose=customer_reply`), Evolution ID `3EB0341F401FF10E9E72E8`, com `status=sent` e `delivery_hold_reason=null`.
 * **Invariantes e Verificação de Domínio:** `contacts_created=0`, `searches_created=0`, `expired_matches_selected=0`, `professional_notifications_created=0`, `transport_hold=null`, `T18_REAL_PRODUCTION_FINAL=PASS`.
-* **Diferenciação de Escopo:** A suíte de testes de integração automatizados cobre a totalidade das variações (numéricas, ordinais, por nome, dúvidas de preço/distância/detalhes, comandos de ver mais, precedência de contexto ativo, profissional histórico inativo/suspenso, replay idempotente e recovery sem side-effects); a revalidação em produção real comprovou o caminho concreto de seleção numérica ("2") após expiração da lista.
+* **Atribuição de Evidências e Escopo:**
+  * **Testes Automatizados / Integração:** Comprovam a garantia estrita de **0 chamadas de interpretação por IA**, **0 chamadas de composição por IA** e **0 chamadas ao geocodificador** via fast-path em código, além de cobrirem a matriz ampla de variações de T18 (seleção numérica, ordinais, por nome, dúvidas de preço/distância/detalhes, comandos de ver mais, precedência de contexto ativo, profissional histórico inativo/suspenso, replay idempotente e recovery sem side-effects).
+  * **Ensaio Real de Produção:** Comprovou a entrega e o comportamento esperado no canal WhatsApp para o caminho concreto de seleção numérica ("2") após expiração da lista, com zero mutações de domínio/negócio, outbound com `status=sent`, `provider_message_id` persistido e zero holds.
 
 ---
 
 ## 4. Testes Operacionais e Homologação Pendente
 
-* **Transporte WhatsApp Real (Happy Path, Edge Flows e T18 Validados):** O fluxo feliz ponta a ponta (Golden E2E #2), o subfluxo de indisponibilidade com reescolha na mesma busca (T29 parcial em produção), os dois caminhos de conclusão bilateral — confirmação e contestação (T34) — e o tratamento de seleção expirada (T18) foram homologados em produção real em 2026-10-01 / 2026-10-02, com mensagens observadas em `status=sent` e zero holds. **Permanecem pendentes:** o ramo de preservação/retomada de T29 com outra busca ativa, testes de carga/estresse com alta concorrência de números simultâneos, injeção de falhas controladas no provider, homologação do pipeline de transcrição de áudio em produção, homologação do OTP de login profissional ao vivo (`PROFESSIONAL_AUTH_ENABLED=false`) e certificação comercial irrestrita.
+* **Transporte WhatsApp Real (Happy Path, Edge Flows e T18 Validados):** O fluxo feliz ponta a ponta (Golden E2E #2), o subfluxo de indisponibilidade com reescolha na mesma busca (T29 parcial em produção), os dois caminhos de conclusão bilateral — confirmação e contestação (T34) — e o tratamento de seleção expirada (T18) foram homologados em produção real, com mensagens observadas em `status=sent` e zero holds. **Permanecem pendentes:** o ramo de preservação/retomada de T29 com outra busca ativa, testes de carga/estresse com alta concorrência de números simultâneos, injeção de falhas controladas no provider, homologação do pipeline de transcrição de áudio em produção, homologação do OTP de login profissional ao vivo (`PROFESSIONAL_AUTH_ENABLED=false`) e certificação comercial irrestrita.
 * **Avaliação de Modelos de Linguagem Reais:** Avaliação contínua de latência, precisão e custos com tráfego volumétrico real.
 * **Testes E2E de Navegador:** Cobertura automatizada do portal web via Playwright.
 
@@ -196,7 +199,7 @@ Em 2026-10-01 / 2026-10-02 UTC, após o deploy da correção determinística (`c
   * O arquivo exportado da instância n8n instalada pelo operador ainda não contém suporte a esse propósito de mensagem.
   * **Ação Necessária:** O operador precisará atualizar o workflow instalado no n8n antes de habilitar `PROFESSIONAL_AUTH_ENABLED=true` em produção. (Registrado no [ROADMAP.md](ROADMAP.md) sob `# NOW`).
 * **Tratamento de Contexto Obsoleto / Seleção Expirada (T18 — Homologado em Produção Real):**
-  * O tratamento determinístico de seleção contra listas expiradas via fast-path no serviço contextual (`CONTEXTUAL_EXPIRED_SELECTION`: *"Essa lista de profissionais expirou. Envie uma nova mensagem com o serviço e a cidade para eu buscar opções atualizadas."*) foi implementado no repositório, coberto por 16 testes de integração e homologado em produção real (`contatocerto-api` @ `69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`) com 0 chamadas de IA/geocodificador, 0 mutações de domínio/negócio e outbound com `status=sent` e zero holds.
+  * O tratamento determinístico de seleção contra listas expiradas via fast-path no serviço contextual (`CONTEXTUAL_EXPIRED_SELECTION`: *"Essa lista de profissionais expirou. Envie uma nova mensagem com o serviço e a cidade para eu buscar opções atualizadas."*) foi implementado no repositório, coberto por 16 testes de integração (comprovando 0 chamadas de IA/geocodificador) e homologado em produção real (`contatocerto-api` @ `69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`) com zero mutações de domínio/negócio e outbound com `status=sent` e zero holds.
 
 ---
 
