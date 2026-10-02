@@ -180,7 +180,7 @@ O escopo da v1 de Ações Interativas limita-se estritamente ao ciclo de vida p�
     CHECK (
       (action_type = 'confirm_completion' AND completion_id IS NOT NULL AND intended_actor_role = 'customer')
       OR (action_type = 'contest_completion' AND completion_id IS NOT NULL AND intended_actor_role = 'customer')
-      OR (action_type = 'declare_completion' AND intended_actor_role = 'professional')
+      OR (action_type = 'declare_completion' AND completion_id IS NULL AND intended_actor_role = 'professional')
       OR (action_type = 'declare_unavailability' AND completion_id IS NULL AND intended_actor_role = 'professional')
     )
   );
@@ -193,37 +193,55 @@ O escopo da v1 de Ações Interativas limita-se estritamente ao ciclo de vida p�
     WHERE status = 'active';
   ```
 
-### 6. Invariante de Ação Condicionada a Outbound Enviado
-* Um token **não é executável** simplesmente por existir no banco.
+### 6. Consistência entre Contato e Conclusão Alvo
+* Para qualquer token onde `completion_id IS NOT NULL`, o consumo do token deve obrigatoriamente travar e verificar na mesma transação:
+  * `contact_completions.id = token.completion_id`
+  * `contact_completions.contact_id = token.contact_id`
+* É expressamente proibido permitir que um token com `contact_id = Contato A` aponte ou atue sobre um `completion_id` pertencente a um `Contato B`.
+
+### 7. Invariante de Ação Condicionada a Outbound Enviado
+* Um token só é acionável quando seu outbound de origem estiver com `status = 'sent'`.
 * Durante a validação transacional do token, o sistema verifica obrigatoriamente:
   1. `channel_outbound_messages.id = token.outbound_message_id`
   2. `channel_outbound_messages.status = 'sent'`
   3. O destinatário registrado no outbound corresponde à identidade do ator autorizado.
-* Tokens vinculados a outbounds pendentes, falhos ou nunca entregues são terminantemente recusados.
+* Tokens vinculados a mensagens outbound pendentes, em processamento, com falha ou em qualquer estado diferente de `status = 'sent'` são rejeitados.
 
-### 7. Autorização por Identidade Telefônica Canônica
+### 8. Autorização por Identidade Telefônica Canônica
 * A autorização do remetente utiliza a autoridade existente no repositório (`normalizeBrazilianMobilePhone`, `getPhoneIdentityAliases`, `arePhoneIdentitiesEquivalent`).
 * O telefone validado do remetente deve conferir simultaneamente com:
   * `token.intended_phone_e164`
   * O snapshot bilateral canônico gravado no contato (`contacts.bilateral_snapshot`).
 
-### 8. Atomicidade de Criação e Consumo
-* **Criação Atômica:** A inserção da mensagem em `channel_outbound_messages` e dos respectivos registros em `interactive_action_tokens` ocorre na **mesma transação de banco de dados**. Se qualquer token falhar, a mensagem outbound é abortada.
+### 9. Atomicidade de Criação e Consumo
+* **Criação Atômica & Consistência de Conjunto:**
+  * A aplicação gera os identificadores opacos de ação em memória;
+  * O campo `interactive_payload.actions[]` contém exatamente esses identificadores;
+  * As linhas correspondentes em `interactive_action_tokens` são inseridas na **mesma transação de banco de dados**, referenciando o mesmo `outbound_message_id`;
+  * Nenhum outbound interativo comitado pode conter um `action_id` sem a respectiva linha autoritativa em `interactive_action_tokens`;
+  * Nenhum token criado para aquele outbound pode referenciar um alvo divergente da especificação de ação produzida;
+  * Se qualquer token falhar, a mensagem outbound é abortada.
 * **Consumo Atômico:** A transição `status = 'consumed'` do token e a mutação do agregado de domínio (`contacts` / `contact_completions`) ocorrem na mesma transação atômica serializada.
 
-### 9. Compartilhamento da Autoridade de Domínio
+### 10. Compartilhamento da Autoridade de Domínio
 Os fluxos textuais existentes e os novos fluxos por botão interativo convergem para os **mesmos métodos transacionais de domínio**:
 * `executeCompletionDeclaration(db, contact, actorRole, inboundId)`
 * `executeCompletionConfirmation(db, contact, actorRole, inboundId)`
 * `executeCompletionContestation(db, contact, actorRole, inboundId)`
 * `executeUnavailabilityDeclaration(db, contact, professionalId, inboundId)`
 
-Os parsers de texto e o validador de tokens atuam unicamente como camadas de extração/autorização; a mutação do domínio e a emissão de eventos permanecem 100% unificadas.
+Os parsers de texto e o validador de tokens atuam unicamente como camadas de extração/autorização; a mutação do domínio e a emissão de eventos permanecem compartilhadas através da mesma autoridade transacional de domínio.
 
-### 10. Proteção de Rollback na Migration 028 (`P0028`)
+### 11. Proteção de Rollback na Migration 028 (`P0028`)
 * O método `down()` da Migration 028 segue o padrão canônico de proteção contra perda de dados.
-* Antes de reverter, a migration verifica a existência de dados interativos com lock exclusivo:
+* Antes de reverter, a migration adquire locks em modo exclusivo e verifica a existência de dados interativos:
   ```sql
+  LOCK TABLE
+    interactive_action_tokens,
+    channel_outbound_messages,
+    channel_inbound_messages
+  IN ACCESS EXCLUSIVE MODE;
+
   DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM interactive_action_tokens)
       OR EXISTS (SELECT 1 FROM channel_outbound_messages WHERE message_type = 'interactive' OR interactive_payload IS NOT NULL)
@@ -235,16 +253,16 @@ Os parsers de texto e o validador de tokens atuam unicamente como camadas de ext
   END $$;
   ```
 
-### 11. Fronteira de Adaptadores n8n
+### 12. Fronteira de Adaptadores n8n
 * **Arquivos Canônicos:**
-  * Gateway: [`workflows/n8n/gateway.json`](file:///c:/Users/ricar/Downloads/sites/contatocerto-atual/workflows/n8n/gateway.json) e [`workflows/n8n/gateway-contract.mjs`](file:///c:/Users/ricar/Downloads/sites/contatocerto-atual/workflows/n8n/gateway-contract.mjs)
-  * Delivery: [`workflows/n8n/shared-delivery.json`](file:///c:/Users/ricar/Downloads/sites/contatocerto-atual/workflows/n8n/shared-delivery.json) e [`workflows/n8n/delivery-contract.mjs`](file:///c:/Users/ricar/Downloads/sites/contatocerto-atual/workflows/n8n/delivery-contract.mjs)
+  * Gateway: `workflows/n8n/gateway.json` e `workflows/n8n/gateway-contract.mjs`
+  * Delivery: `workflows/n8n/shared-delivery.json` e `workflows/n8n/delivery-contract.mjs`
 * O acoplamento com a Evolution API é restrito a esses adaptadores de transporte (`DOMAIN_EVOLUTION_COUPLING = PARTIAL`). A API e o domínio desconhecem payloads específicos de provedor.
 
-### 12. Sequência Canônica de Entrega (Work Packages)
+### 13. Sequência Canônica de Entrega (Work Packages)
 1. **WP6.1 (Este PR):** Formalização do Contrato Canônico de Implementação (Documentação).
 2. **WP6.2:** Migration 028 e Schemas Compartilhados no `@contatocerto/shared` (sem corte de runtime).
-3. **WP6.3:** Extração dos métodos transacionais de domínio preservando 100% dos testes textuais verdes.
+3. **WP6.3:** Extração dos métodos transacionais de domínio preservando os testes textuais verdes.
 4. **WP6.4:** `ActionTokenService` e Inbox Dual-Path na API (testes de integração da API).
 5. **WP6.5:** Adaptadores n8n (Gateway Inbound e Shared Delivery Outbound) com testes de contrato.
 6. **WP6.6:** Validação funcional de capacidades do provedor e homologação controlada em produção.
@@ -258,7 +276,7 @@ Os parsers de texto e o validador de tokens atuam unicamente como camadas de ext
 * **Eliminação de Erros de Entrada:** Botões evitam erros de digitação, ambiguidades ortográficas e falhas de formatação de código.
 * **Segurança Robusta em Cenários Concorrentes:** A vinculação estrita por token evita a ambiguidade de alvo entre múltiplos contatos simultâneos.
 * **Resiliência e Continuidade Operacional:** Manutenção do suporte a comandos textuais como fallback garante que nenhum usuário fique bloqueado por incompatibilidade de cliente.
-* **Arquitetura Provedor-Neutra:** O core transacional é 100% isolado de peculiaridades de provedores de mensageria.
+* **Arquitetura Provedor-Neutra:** O núcleo transacional é projetado para permanecer independente de schemas específicos de provedores (Evolution/Meta); a tradução de provedor fica restrita à fronteira do adaptador de transporte.
 
 ### Negativas / Compromissos / Trade-offs
 * **Necessidade de Camada de Abstração:** Exige desenvolvimento e manutenção de adaptadores de transporte desacoplados para mensagens interativas no n8n.
