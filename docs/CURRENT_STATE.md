@@ -174,7 +174,7 @@ Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e
 * **Conclusão de Serviços pelo Painel Web:** Ação de marcar serviço como concluído na interface web (atualmente exclusiva via WhatsApp).
 
 ### B. Direções de Produto Documentadas (Documentação Apenas — Não Implementar)
-* **Soft Expiry / Apresentação Retomável de Lista de Profissionais:**
+* **Soft Expiry / Apresentação Retomável de Lista de Profissionais ([ADR-005](decisions/ADR-005-soft-expiry-resumable-presentation.md)):**
   * O TTL atual de 30 minutos (`SEARCH_CONVERSATION_TTL_MINUTES = 30`) é estritamente o TTL do contexto conversacional ativo e **não** deve ser automaticamente assumido como a janela final de validade de produto para a apresentação de profissionais ao cliente.
   * O design futuro de produto e arquitetura deve avaliar:
     * Manter a referência à lista apresentada válida por um período mais extenso para clientes que retornam horas depois.
@@ -182,7 +182,7 @@ Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e
     * Emitir refresh explícito e transparente caso a lista tenha se tornado excessivamente obsoleta.
     * Preservar integralmente as evidências históricas de apresentação para auditoria.
   * *Compromisso:* Nenhum valor arbitrário de política (ex.: 12h ou 24h) foi fixado nesta etapa, e nenhuma alteração de código está autorizada sem especificação canônica prévia.
-* **Ações Interativas e Experiência Button-First no WhatsApp:**
+* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)):**
   * Na evolução futura com a WhatsApp Cloud API oficial:
     * O código público `CC-XXXXXXXX` será mantido como identificador auditável e mecanismo de fallback textual.
     * A experiência primária do usuário **não** deve exigir digitação manual de códigos: ações determinísticas (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*) devem ser apresentadas como botões interativos nativos (Interactive Messages / Quick Replies) nos clientes compatíveis.
