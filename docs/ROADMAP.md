@@ -30,7 +30,7 @@ Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 0. **Launch Readiness / Homologação (FASE ATIVA):**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
    * **Homologação em Produção Real (2026-10-01):** Happy path Golden E2E #2 (busca, apresentação, conexão imediata v2 e confirmação bilateral de conclusão), subfluxo de indisponibilidade profissional com reescolha na mesma busca (T29 parcial em produção) e contestação bilateral de conclusão (T34) validados em produção real com mensagens observadas em status=sent e zero holds. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
-   * **Tratamento de Contexto Obsoleto / Seleção Expirada (T18):** Tratamento conversacional determinístico implementado no repositório com 0 chamadas de IA/geocoder, substituindo pedido genérico de esclarecimento por aviso claro de expiração da lista (`CONTEXTUAL_EXPIRED_SELECTION`). Revalidação em produção real pendente.
+3. **Homologação de Contexto Obsoleto / Seleção Expirada (T18 — Concluída em Produção):** Tratamento conversacional determinístico implementado no repositório (`69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`) e validado com sucesso em produção real (busca de 2026-10-01 UTC, ensaio executado em 2026-10-02 UTC na conversa expirada `d65c8a4a-06d3-484f-b94a-0d3806ce99bf`, seleção "2", resposta determinística explícita, zero mutações de negócio, Outbound `02979644-88d5-4976-a3e6-509b5807e035` com `status=sent` e zero holds; garantia de 0 chamadas de IA/geocodificador comprovada pela suíte de testes de integração).
    * Próximos passos operacionais: reimportar `shared-delivery.json` no n8n antes de habilitar OTP (`PROFESSIONAL_AUTH_ENABLED=true`), homologação do pipeline de áudio em produção e testes de carga/estresse.
 1. **Localização v2 (Fundação de Entrada):**
    * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
@@ -81,8 +81,26 @@ Itens formalmente congelados e expressamente **proibidos de implementação** no
 
 # PARKING LOT
 
-Ideias e melhorias identificadas para reavaliação futura sem bloqueio do lançamento atual:
+Ideias, melhorias e direcionamentos de produto identificados para evolução futura sem bloqueio do lançamento atual:
 
+### A. Direções de Produto e Arquitetura (Documentação Apenas — Não Implementar)
+* **Soft Expiry / Apresentação Retomável de Lista de Profissionais:**
+  * O TTL de 30 minutos atual (`SEARCH_CONVERSATION_TTL_MINUTES = 30`) gerencia o contexto conversacional ativo e **não** representa a janela definitiva de validade do produto para a lista de profissionais apresentada.
+  * O design futuro deverá contemplar:
+    * Validade estendida da lista apresentada para clientes que retomam a conversa após horas.
+    * Revalidação determinística e atômica da elegibilidade do prestador no instante exato da seleção tardia (impedindo conexões com profissionais suspensos ou indisponíveis).
+    * Notificação explícita de atualização/refresh quando a lista estiver excessivamente defasada.
+    * Preservação das evidências históricas de apresentação no ledger.
+    * *Nota:* Nenhum valor de política (ex.: 12h ou 24h) foi fixado nesta etapa.
+* **Ações Interativas e Experiência Button-First no WhatsApp:**
+  * Direcionamento futuro para integração com a WhatsApp Cloud API oficial:
+    * Preservação do código público `CC-XXXXXXXX` para auditoria, suporte e fallback.
+    * Substituição da digitação manual por botões interativos nativos (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*).
+    * Vinculação determinística entre cada ação interativa e seu respectivo contato/evento, assegurando idempotência e suporte a múltiplos contatos concorrentes por profissional.
+    * Adoção de modelo baseado em *tokens opacos de ação vinculados à autorização contato/ação/ator*.
+    * *Nota:* A Evolution API segue como integrador de mensageria atual; a migração para Cloud API é pacote de trabalho independente.
+
+### B. Oportunidades de Produto e Engajamento
 * **Follow-up Automático de Inatividade:** Mensagem delicada para clientes que pararam no meio da busca sem escolher.
 * **Saudação Personalizada para Usuários Recorrentes:** Reconhecimento do histórico prévio do cliente na primeira mensagem.
 * **Lembretes Inteligentes:** Alertas prévios para agendamentos combinados com o profissional.
