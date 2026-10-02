@@ -8,7 +8,7 @@
 
 > [!NOTE]
 > **Direcionamento de Arquitetura e Experiência de Mensageria:**
-> Este documento formaliza o direcionamento de arquitetura para a transição do modelo conversacional baseado exclusivamente em texto para uma experiência interativa prioritariamente baseada em botões e componentes visuais (*Button-First / Interactive Actions*) no WhatsApp. A Evolution API permanece como a camada de integração de mensageria vigente. Nenhuma migração de transporte ou alteração de código está autorizada no escopo deste documento.
+> Este documento formaliza o direcionamento de arquitetura para a transição do modelo conversacional baseado exclusivamente em texto para uma experiência interativa prioritariamente baseada em botões e componentes visuais (*Button-First / Interactive Actions*) no WhatsApp. A Evolution API permanece como a camada de integração de mensageria vigente. Nenhuma migração de transporte ou alteração de código de execução é realizada no escopo deste documento.
 
 ---
 
@@ -40,7 +40,7 @@ Embora o parser conversacional e a camada de inteligência contextual tenham evo
    * A interface primária no WhatsApp passa a ser baseada em botões de ação nativos:
      * **Para o Profissional:** `[Concluído]`, `[Não consigo atender]`.
      * **Para o Cliente:** `[Confirmar]`, `[Contestar]`.
-     * **Ações Futuras:** `[Avaliar]`, `[Ver detalhes]`, `[Escolher profissional]`.
+     * **Ações Futuras (pós-v1):** `[Avaliar]`, `[Ver detalhes]`, `[Escolher profissional]`.
 
 3. **Vinculação Estrita de Ações ao Agregado de Domínio:**
    * Cada ação interativa gerada pelo sistema **deve estar amarrada deterministicamente ao agregado de negócio específico** (contato, evento de conclusão ou solicitação de busca).
@@ -52,13 +52,14 @@ Embora o parser conversacional e a camada de inteligência contextual tenham evo
 
 4. **Conceito Arquitetural: Tokens de Ação Opacos (*Opaque Action Tokens*):**
    * Cada botão de resposta interativa carregará como identificador de payload um token opaco de alta entropia.
+   * O token público **não deve conter semântica legível** (proibido prefixar com tipo de ação ou papel, ex: `act_c_conf_...`), utilizando apenas um namespace genérico opaco (ex.: `ia_<opaque>`).
    * A resolução do token no servidor mapeia de forma atômica e segura:
      * Tipo de ação pretendida (ex.: `confirm_completion`, `declare_unavailability`);
-     * Identificador do agregado de domínio alvo (`contact_id`, `completion_id`, etc.);
+     * Identificador do agregado de domínio alvo (`contact_id`, `completion_id`);
      * Papel esperado do ator (`customer` ou `professional`);
      * Identidade e telefone autorizados do destinatário;
      * Estado de validade temporal e ciclo de vida do token.
-   * **Privacidade e Segurança:** UUIDs brutos de banco de dados e dados pessoais sensíveis não devem ser expostos diretamente no payload do botão.
+   * **Privacidade e Segurança:** UUIDs brutos de banco de dados e dados pessoais sensíveis não são expostos no payload do botão.
 
 5. **Isolamento e Segurança em Múltiplos Contatos Simultâneos:**
    * Um profissional que possua múltiplos atendimentos em andamento receberá mensagens distintas para cada cliente, cada qual com seus próprios botões e tokens de ação independentes:
@@ -68,55 +69,185 @@ Embora o parser conversacional e a camada de inteligência contextual tenham evo
 
 6. **Autorização Rígida no Servidor (*Server-Side Verification*):**
    * Ao receber o evento de clique/resposta interativa:
-     1. Identificar o remetente via telefone E.164 verificado;
-     2. Resolver o token opaco de ação no banco de dados;
-     3. Validar se o remetente é o ator autorizado para aquele token e papel;
-     4. Validar se o agregado de domínio alvo ainda aceita aquela transição de estado;
-     5. Executar a transição atômica no banco de dados com locks relacionais adequados.
+     1. Identificar o remetente via equivalência canônica de telefone brasileiro E.164;
+     2. Resolver o token opaco de ação no banco de dados com lock transacional;
+     3. Validar se a mensagem outbound de origem possui status `'sent'`;
+     4. Validar se o remetente é o ator autorizado para aquele token e papel;
+     5. Validar se o agregado de domínio alvo ainda aceita aquela transição de estado;
+     6. Executar a transição atômica no banco de dados com locks relacionais adequados.
 
 7. **Garantia Estrita de Idempotência:**
    * Redirecionamentos, retries de webhook ou cliques repetidos pelo usuário **não podem** duplicar eventos de conclusão, contestação, indisponibilidade ou notificações.
-   * O sistema deve tratar execuções repetidas do mesmo token de forma idempotente, retornando a confirmação de recebimento sem reprocessar mutações de negócio.
+   * Distinção clara entre:
+     * **Token Consumido:** Registro transacional de resgate do token físico;
+     * **Ação de Domínio Já Aplicada:** Reconhecimento pelo agregado de domínio de que o estado terminal pretendido já foi alcançado, retornando mensagem informativa sem criar novos eventos no ledger.
 
 8. **Preservação Integral do Fallback Textual:**
    * Caso o transporte interativo falhe, o cliente de mensageria do usuário não suporte botões ou o usuário prefira digitar, os comandos textuais existentes (`confirmar CC-...`, `contestar CC-...`, `concluído CC-...`, `não consigo CC-...`) continuam em plena operação como camada de tolerância a falhas.
 
 9. **Abstração de Transporte e Contratos Neutros:**
-   * O domínio da aplicação e a camada de serviços **não devem depender** da estrutura JSON específica de payloads da Evolution API ou da Meta.
-   * A arquitetura adotará contratos neutros de domínio (ex.: `InteractiveAction`, `InteractiveActionMessage`, `InteractiveActionResponse`).
-   * O adaptador de transporte específico (*Transport Adapter*) será o único responsável por traduzir essas estruturas para os formatos do provedor em uso.
+   * O domínio da aplicação e a camada de serviços **não dependem** da estrutura JSON específica de payloads da Evolution API ou da Meta.
+   * A arquitetura adota contratos neutros de domínio (`InteractiveOutboundPayload`, `InteractiveAction`).
+   * O adaptador de transporte específico (*Transport Adapter* no n8n) é o único responsável por traduzir essas estruturas para os formatos do provedor em uso.
 
 10. **Capacidades Oficiais da WhatsApp Cloud API:**
-    * Fica registrado como capacidade externa verificada que a WhatsApp Cloud API oficial da Meta suporta mensagens interativas com *reply buttons* e *list messages*. Os botões podem carregar identificadores definidos pelo integrador, e a interação selecionada é retornada de forma estruturada no webhook/callback de resposta do usuário (os eventos de entrega e status de transporte constituem uma preocupação separada).
+    * Fica registrado como capacidade externa verificada que a WhatsApp Cloud API oficial da Meta suporta mensagens interativas com *reply buttons* e *list messages*. Os botões carregam identificadores definidos pelo integrador, e a interação selecionada é retornada de forma estruturada no webhook de resposta do usuário.
 
 11. **Estratégia de Integração e Provedores:**
-    * A Evolution API é o componente de transporte vigente do ContatoCerto.
-    * A escolha entre:
-      * **Opção A:** Evolution API operando com o driver oficial WhatsApp Cloud API; ou
-      * **Opção B:** Integração direta com a WhatsApp Cloud API da Meta sem intermediários,
-      será objeto de uma análise técnica e operacional dedicada em momento oportuno, avaliando estabilidade de rede, latência, custos operacionais e facilidade de manutenção.
+    * A Evolution API é o componente de transporte vigente do ContatoCerto (`DOMAIN_EVOLUTION_COUPLING = PARTIAL`).
+    * A escolha entre Evolution API gerenciando Cloud API ou integração direta com a Meta Graph API será homologada em momento oportuno.
 
 ---
 
-## Realidade Operacional da Evolution API (Alerta Arquitetural)
+## Contrato de Implementação v1 (*Implementation Contract v1*)
 
-> [!WARNING]
-> **Compatibilidade de Recursos entre Drivers na Evolution API:**
-> Embora a Evolution API suporte instâncias baseadas tanto em Baileys quanto na API oficial da Meta (Cloud API), o mapeamento de campos específicos de mensagens interativas (cabeçalhos, rodapés, seções de botões) pode apresentar variações entre versões e drivers instalados.
-> 
-> Antes de habilitar o modo *Button-First* em produção:
-> 1. Deve-se realizar homologação funcional na versão exata da Evolution API implantada no EasyPanel;
-> 2. Não assumir paridade idêntica de campos sem validação em ambiente de staging;
-> 3. Manter os contratos de domínio 100% agnósticos ao provedor de mensageria.
-> 
-> Essa observação representa uma salvaguarda preventiva de engenharia e **não constitui um bug ou defeito** da implementação atual do ContatoCerto.
+Esta seção estabelece as especificações canônicas para a engenharia do WP6 e da Migration 028:
 
----
+### 1. Escopo Estrito da v1 (Ações Pós-Conexão)
+O escopo da v1 de Ações Interativas limita-se estritamente ao ciclo de vida pós-conexão bilateral:
+* **Profissional:**
+  * `declare_completion` $\rightarrow$ Botão `[Concluído]`
+  * `declare_unavailability` $\rightarrow$ Botão `[Não consigo atender]`
+* **Cliente:**
+  * `confirm_completion` $\rightarrow$ Botão `[Confirmar]`
+  * `contest_completion` $\rightarrow$ Botão `[Contestar]`
 
-## Diretrizes de Segurança dos Tokens de Ação
+*Nota sobre Pré-Conexão:* A seleção interativa de profissionais na busca (`[Escolher profissional]`) **não faz parte** do escopo da Migration 028 e permanece como capacidade futura planejada, pois tokens v1 exigem `contact_id` relacional obrigatório.
 
-* **Proibição de Padrões Adivinháveis:** Os identificadores de ação devem ser opacos e não previsíveis. É expressamente proibido construir identificadores no formato `contact:<uuid>:confirm` ou qualquer esquema sequencial/previsível.
-* **Escopo da Especificação de Implementação:** A especificação técnica de implementação definirá o mecanismo criptográfico, nível de entropia, persistência versus assinatura, expiração, revogação e política de replay/idempotência.
+### 2. Validade Temporal e Domínio (Desacoplamento de ADR-005)
+* A validade de um token de ação é governada conjuntamente por:
+  1. **Política Temporal de Expiração:** Campo `expires_at` do token;
+  2. **Autoridade de Estado do Domínio:** Validação em tempo real do estado do contato/conclusão na mesma transação.
+* **Independência de ADR-005:** Os tokens interativos **não herdam** a janela de 24 horas (1440 minutos) do ADR-005. O TTL de cada tipo de ação permanece como decisão aberta de produto/implementação (ex.: "Concluído" pode ser válido por dias após a conexão; "Confirmar" é válido enquanto a conclusão estiver pendente).
+
+### 3. Modelo Outbound de Domínio (Opção A)
+* **Tabela `channel_outbound_messages`:**
+  * `message_type VARCHAR(32) NOT NULL DEFAULT 'text'`
+  * `text_content TEXT NOT NULL CHECK (length(text_content) BETWEEN 1 AND 2000)` (texto canônico de fallback e auditoria)
+  * `interactive_payload JSONB NULL`
+  * **Constraint SQL:**
+    ```sql
+    CHECK (
+      (message_type = 'text' AND interactive_payload IS NULL)
+      OR (message_type = 'interactive' AND interactive_payload IS NOT NULL)
+    )
+    ```
+* **Schema de Payload Provider-Neutral (`schema_version: 1`):**
+  ```json
+  {
+    "schema_version": 1,
+    "type": "button_group",
+    "body": "Texto da notificação para o usuário.",
+    "actions": [
+      {
+        "action_id": "ia_7f9a1b2c3d4e5f6a7b8c9d0e",
+        "label": "Confirmar"
+      }
+    ]
+  }
+  ```
+  *Rótulos representam apresentação visual; `action_id` representa identidade transacional. Payloads específicos de transporte (Evolution/Meta) são proibidos no domínio.*
+
+### 4. Modelo Inbound de Domínio (Opção B)
+* **Tabela `channel_inbound_messages`:**
+  * `raw_text TEXT NOT NULL` (mantido preenchido pelo gateway para auditoria e compatibilidade)
+  * `interactive_action_id VARCHAR(120) NULL`
+  * **Índice:** `CREATE INDEX channel_inbound_messages_action_id_idx ON channel_inbound_messages(interactive_action_id) WHERE interactive_action_id IS NOT NULL;`
+* **Autoridade Decisória:** Quando `interactive_action_id` estiver presente, a autoridade de negócio deriva exclusivamente da resolução atômica do token no banco. O texto do rótulo (`raw_text`) **nunca toma decisões de domínio**.
+
+### 5. Tabela de Tokens de Ação (`interactive_action_tokens`)
+* **Estrutura SQL Proposta na Migration 028:**
+  ```sql
+  CREATE TABLE interactive_action_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    public_token VARCHAR(120) NOT NULL UNIQUE,
+    action_type TEXT NOT NULL,
+    contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE RESTRICT,
+    completion_id UUID REFERENCES contact_completions(id) ON DELETE RESTRICT,
+    intended_actor_role TEXT NOT NULL CHECK (intended_actor_role IN ('customer', 'professional')),
+    intended_phone_e164 VARCHAR(32) NOT NULL CHECK (intended_phone_e164 ~ '^\+[1-9][0-9]{7,14}$'),
+    outbound_message_id UUID NOT NULL REFERENCES channel_outbound_messages(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'consumed', 'revoked', 'expired')),
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    consumed_inbound_id UUID UNIQUE REFERENCES channel_inbound_messages(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (
+      (status = 'consumed' AND consumed_at IS NOT NULL AND consumed_inbound_id IS NOT NULL)
+      OR (status <> 'consumed' AND consumed_at IS NULL AND consumed_inbound_id IS NULL)
+    ),
+    CHECK (
+      (action_type = 'confirm_completion' AND completion_id IS NOT NULL AND intended_actor_role = 'customer')
+      OR (action_type = 'contest_completion' AND completion_id IS NOT NULL AND intended_actor_role = 'customer')
+      OR (action_type = 'declare_completion' AND intended_actor_role = 'professional')
+      OR (action_type = 'declare_unavailability' AND completion_id IS NULL AND intended_actor_role = 'professional')
+    )
+  );
+
+  CREATE INDEX interactive_action_tokens_contact_idx
+    ON interactive_action_tokens(contact_id, action_type, status);
+
+  CREATE INDEX interactive_action_tokens_expiry_idx
+    ON interactive_action_tokens(status, expires_at)
+    WHERE status = 'active';
+  ```
+
+### 6. Invariante de Ação Condicionada a Outbound Enviado
+* Um token **não é executável** simplesmente por existir no banco.
+* Durante a validação transacional do token, o sistema verifica obrigatoriamente:
+  1. `channel_outbound_messages.id = token.outbound_message_id`
+  2. `channel_outbound_messages.status = 'sent'`
+  3. O destinatário registrado no outbound corresponde à identidade do ator autorizado.
+* Tokens vinculados a outbounds pendentes, falhos ou nunca entregues são terminantemente recusados.
+
+### 7. Autorização por Identidade Telefônica Canônica
+* A autorização do remetente utiliza a autoridade existente no repositório (`normalizeBrazilianMobilePhone`, `getPhoneIdentityAliases`, `arePhoneIdentitiesEquivalent`).
+* O telefone validado do remetente deve conferir simultaneamente com:
+  * `token.intended_phone_e164`
+  * O snapshot bilateral canônico gravado no contato (`contacts.bilateral_snapshot`).
+
+### 8. Atomicidade de Criação e Consumo
+* **Criação Atômica:** A inserção da mensagem em `channel_outbound_messages` e dos respectivos registros em `interactive_action_tokens` ocorre na **mesma transação de banco de dados**. Se qualquer token falhar, a mensagem outbound é abortada.
+* **Consumo Atômico:** A transição `status = 'consumed'` do token e a mutação do agregado de domínio (`contacts` / `contact_completions`) ocorrem na mesma transação atômica serializada.
+
+### 9. Compartilhamento da Autoridade de Domínio
+Os fluxos textuais existentes e os novos fluxos por botão interativo convergem para os **mesmos métodos transacionais de domínio**:
+* `executeCompletionDeclaration(db, contact, actorRole, inboundId)`
+* `executeCompletionConfirmation(db, contact, actorRole, inboundId)`
+* `executeCompletionContestation(db, contact, actorRole, inboundId)`
+* `executeUnavailabilityDeclaration(db, contact, professionalId, inboundId)`
+
+Os parsers de texto e o validador de tokens atuam unicamente como camadas de extração/autorização; a mutação do domínio e a emissão de eventos permanecem 100% unificadas.
+
+### 10. Proteção de Rollback na Migration 028 (`P0028`)
+* O método `down()` da Migration 028 segue o padrão canônico de proteção contra perda de dados.
+* Antes de reverter, a migration verifica a existência de dados interativos com lock exclusivo:
+  ```sql
+  DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM interactive_action_tokens)
+      OR EXISTS (SELECT 1 FROM channel_outbound_messages WHERE message_type = 'interactive' OR interactive_payload IS NOT NULL)
+      OR EXISTS (SELECT 1 FROM channel_inbound_messages WHERE interactive_action_id IS NOT NULL)
+    THEN
+      RAISE EXCEPTION 'INTERACTIVE_ACTIONS_ROLLBACK_BLOCKED: interactive action records exist; manual data reconciliation required'
+        USING ERRCODE = 'P0028';
+    END IF;
+  END $$;
+  ```
+
+### 11. Fronteira de Adaptadores n8n
+* **Arquivos Canônicos:**
+  * Gateway: [`workflows/n8n/gateway.json`](file:///c:/Users/ricar/Downloads/sites/contatocerto-atual/workflows/n8n/gateway.json) e [`workflows/n8n/gateway-contract.mjs`](file:///c:/Users/ricar/Downloads/sites/contatocerto-atual/workflows/n8n/gateway-contract.mjs)
+  * Delivery: [`workflows/n8n/shared-delivery.json`](file:///c:/Users/ricar/Downloads/sites/contatocerto-atual/workflows/n8n/shared-delivery.json) e [`workflows/n8n/delivery-contract.mjs`](file:///c:/Users/ricar/Downloads/sites/contatocerto-atual/workflows/n8n/delivery-contract.mjs)
+* O acoplamento com a Evolution API é restrito a esses adaptadores de transporte (`DOMAIN_EVOLUTION_COUPLING = PARTIAL`). A API e o domínio desconhecem payloads específicos de provedor.
+
+### 12. Sequência Canônica de Entrega (Work Packages)
+1. **WP6.1 (Este PR):** Formalização do Contrato Canônico de Implementação (Documentação).
+2. **WP6.2:** Migration 028 e Schemas Compartilhados no `@contatocerto/shared` (sem corte de runtime).
+3. **WP6.3:** Extração dos métodos transacionais de domínio preservando 100% dos testes textuais verdes.
+4. **WP6.4:** `ActionTokenService` e Inbox Dual-Path na API (testes de integração da API).
+5. **WP6.5:** Adaptadores n8n (Gateway Inbound e Shared Delivery Outbound) com testes de contrato.
+6. **WP6.6:** Validação funcional de capacidades do provedor e homologação controlada em produção.
 
 ---
 
@@ -125,10 +256,11 @@ Embora o parser conversacional e a camada de inteligência contextual tenham evo
 ### Positivas
 * **Experiência do Usuário Fluida e Moderna:** Elimina a necessidade de memorização ou digitação de códigos em conversas no WhatsApp.
 * **Eliminação de Erros de Entrada:** Botões evitam erros de digitação, ambiguidades ortográficas e falhas de formatação de código.
-* **Segurança Robusta em Cenários Concorrentes:** A vinculação estrita por token evita a ambiguidade de alvo entre contatos, desde que autorização, estado e idempotência sejam validados no servidor.
+* **Segurança Robusta em Cenários Concorrentes:** A vinculação estrita por token evita a ambiguidade de alvo entre múltiplos contatos simultâneos.
 * **Resiliência e Continuidade Operacional:** Manutenção do suporte a comandos textuais como fallback garante que nenhum usuário fique bloqueado por incompatibilidade de cliente.
+* **Arquitetura Provedor-Neutra:** O core transacional é 100% isolado de peculiaridades de provedores de mensageria.
 
 ### Negativas / Compromissos / Trade-offs
-* **Necessidade de Camada de Abstração:** Exige desenvolvimento e manutenção de adaptadores de transporte desacoplados para mensagens interativas.
-* **Gerenciamento de Estado de Tokens:** Requer armazenamento ou validação criptográfica de tokens no backend com tratamento de concorrência e idempotência.
+* **Necessidade de Camada de Abstração:** Exige desenvolvimento e manutenção de adaptadores de transporte desacoplados para mensagens interativas no n8n.
+* **Gerenciamento de Estado de Tokens:** Requer armazenamento relacional e validação atômica de tokens no backend com tratamento de concorrência e idempotência.
 * **Dependência de Recursos do Provedor de Mensageria:** Exige homologação cuidadosa da versão do provedor de mensageria para assegurar a entrega consistente dos componentes de botões.
