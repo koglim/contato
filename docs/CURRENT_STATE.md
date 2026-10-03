@@ -54,9 +54,10 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 * **Entitlements para Oportunidades:** Verificação atômica de assinatura ativa durante a seleção do cliente. A transação adquire lock compartilhado de autoridade (`FOR UPDATE OF professionals`) e revalida se o profissional possui assinatura vigente antes de entregar o lead.
 * **Política de Transição Legada:** Profissionais gerenciados por conta (`management_mode = 'account_managed'`) exigem assinatura ativa para receber leads. Perfis legados não reivindicados (`management_mode = 'legacy_unmanaged'`) permanecem temporariamente isentos de assinatura sob a política de compatibilidade legada.
 
-### Conclusão e Confirmação de Atendimentos (PR #15 / PR #17 / PR #18)
+### Conclusão e Confirmação de Atendimentos (PR #15 / PR #17 / PR #18 / PR #33)
 * **Ciclo de Conclusão Bilateral (Migration 026 / Migration 027):** Qualquer uma das partes (profissional ou cliente) pode declarar a conclusão do serviço. A elegibilidade para conclusão é direta a partir do status `shared`.
 * **Comandos com Código-Livre ou Código Público (PR #18):** Declarações de conclusão ("já terminei", "concluído"), confirmações ("confirmo") e contestações ("não foi concluído") resolvem automaticamente quando existe 1 único contato ativo/elegível ou 1 confirmação pendente. Quando existem múltiplos contatos em andamento, o sistema faz pergunta de esclarecimento sem expor telefones.
+* **Autoridade Compartilhada de Domínio (PR #33 — WP6.3):** As mutações pós-conexão (declaração, confirmação, contestação de conclusão e declaração de indisponibilidade) convergem para métodos transacionais de domínio neutros de provedor (`executeCompletionDeclaration`, `executeCompletionConfirmation`, `executeCompletionContestation`, `executeUnavailabilityDeclaration`), desacoplando o parsing textual da autoridade de mutação.
 * **Confirmação e Contestação Bilateral:** A contraparte pode confirmar ou contestar a declaração. O modelo de estados é `pending_confirmation`, `confirmed` e `contested`. Contestações mantêm o contato no status `shared`.
 * **Isolamento de Contexto:** Comandos determinísticos de conclusão operam a nível de contato persistido e snapshot bilateral.
 
@@ -182,7 +183,7 @@ Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e
   * Se o profissional tornou-se inelegível: resposta determinística `CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE` sem criação de contato.
   * Se a lista ultrapassou 24 horas: resposta determinística canônica do T18 `CONTEXTUAL_EXPIRED_SELECTION`.
   * Zero chamadas de interpretação/composição de IA ou geocodificação na retomada.
-* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — ACCEPTED / NOT YET IMPLEMENTED:**
+* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — ACCEPTED / EM ANDAMENTO (WP6.1 A WP6.3 IMPLEMENTADOS; RUNTIME INTERATIVO WP6.4 A WP6.6 PENDENTE):**
   * Na evolução futura com a WhatsApp Cloud API oficial:
     * O código público `CC-XXXXXXXX` será mantido como identificador auditável e mecanismo de fallback textual.
     * A experiência primária do usuário **não** deve exigir digitação manual de códigos: ações determinísticas (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*) devem ser apresentadas como botões interativos nativos (Interactive Messages / Quick Replies) nos clientes compatíveis.
