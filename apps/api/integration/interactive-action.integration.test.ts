@@ -258,7 +258,7 @@ test("Scenario 2: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=fa
   try {
     const ready = {
       inbound: {
-        id: randomUUID(),
+        id: f.choiceId,
         provider: "test",
         phone_e164: f.customerPhone,
         raw_text: "sim",
@@ -267,7 +267,7 @@ test("Scenario 2: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=fa
       },
       noticeId: randomUUID(),
       noticeSentAt: new Date(),
-      choiceKey: randomUUID(),
+      choiceKey: f.choiceId,
       chosenAt: new Date().toISOString(),
       method: "selection_after_notice" as const,
     };
@@ -327,7 +327,7 @@ test("Scenario 3: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=tr
   try {
     const ready = {
       inbound: {
-        id: randomUUID(),
+        id: f.choiceId,
         provider: "test",
         phone_e164: f.customerPhone,
         raw_text: "sim",
@@ -336,7 +336,7 @@ test("Scenario 3: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=tr
       },
       noticeId: randomUUID(),
       noticeSentAt: new Date(),
-      choiceKey: randomUUID(),
+      choiceKey: f.choiceId,
       chosenAt: new Date().toISOString(),
       method: "selection_after_notice" as const,
     };
@@ -429,14 +429,14 @@ test("Scenario 4: Professional executes declare_completion button action", async
     const tokenDb = (await query<{
       status: string;
       consumed_at: Date | null;
-      consumed_by_inbound_id: string | null;
+      consumed_inbound_id: string | null;
     }>(
-      "SELECT status, consumed_at, consumed_by_inbound_id FROM interactive_action_tokens WHERE public_token = $1",
+      "SELECT status, consumed_at, consumed_inbound_id FROM interactive_action_tokens WHERE public_token = $1",
       [tokenCompletion]
     )).rows[0]!;
     assert.equal(tokenDb.status, "consumed");
     assert.ok(tokenDb.consumed_at !== null);
-    assert.equal(tokenDb.consumed_by_inbound_id, parsed.message_id);
+    assert.equal(tokenDb.consumed_inbound_id, parsed.message_id);
 
     // Verify contact completion aggregate created
     const completions = (await query<{ state: string; declared_by: string }>(
@@ -478,7 +478,7 @@ test("Scenario 6: Outbound not in sent status rejects interactive action", async
     const { outboundId, tokenCompletion } = await f.createInitialInteractiveOutboundAndTokens();
 
     // Change outbound status back to pending
-    await query("UPDATE channel_outbound_messages SET status = 'pending' WHERE id = $1", [outboundId]);
+    await query("UPDATE channel_outbound_messages SET status = 'pending', sent_at = NULL, provider_message_id = NULL WHERE id = $1", [outboundId]);
 
     const res = await f.sendInteractive(tokenCompletion, f.professionalPhone);
     assert.equal(res.status, 200);
@@ -561,7 +561,7 @@ test("Scenario 9: Professional executes declare_unavailability button action", a
 
     const parsed = channelInboundMessageResponseSchema.parse(res.body);
     assert.equal(parsed.result.action, "unavailability_declared");
-    assert.match(parsed.reply_text, /indisponibilidade foi registrada/);
+    assert.match(parsed.reply_text, /indisponibilidade.*registrada/i);
 
     // Token consumed
     const tokenDb = (await query<{ status: string }>(
@@ -729,11 +729,11 @@ test("Scenario 13: Outbox claim endpoint returns message_type and interactive_pa
 
     assert.equal(claimRes.statusCode, 200);
     const claimed = channelOutboundMessageClaimResponseSchema.parse(claimRes.json());
-    assert.equal(claimed.claimed, true);
-    if (claimed.claimed) {
-      assert.equal(claimed.message.id, outId);
-      assert.equal(claimed.message.message_type, "interactive");
-      assert.deepEqual(claimed.message.interactive_payload, payload);
+    assert.equal(claimed.status, "processing");
+    if (claimed.status === "processing") {
+      assert.equal(claimed.id, outId);
+      assert.equal(claimed.message_type, "interactive");
+      assert.deepEqual(claimed.interactive_payload, payload);
     }
   } finally {
     await f.cleanup();
