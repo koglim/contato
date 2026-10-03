@@ -80,9 +80,13 @@ As mutações transacionais de negócio do ciclo pós-conexão convergem para m�
 * **Sequenciamento de Ações Interativas (ADR-006):**
   * **WP6.2 (Implementado):** Fundação relacional (Migration 028) e schemas neutros em `@contatocerto/shared`.
   * **WP6.3 (Implementado):** Autoridade transacional compartilhada de domínio extraída e preservação do comportamento textual.
-  * **WP6.4 (Implementado no código sob feature flag):** Runtime de tokens de ação (`InteractiveActionService`), emissão/consumo transacional, outbox interativa e roteamento dual-path no Channel Inbox (desabilitado por padrão via `INTERACTIVE_ACTIONS_ENABLED=false`).
-  * **WP6.5 (Pendente):** Adaptadores de transporte n8n para payloads interativos e testes de contrato.
+  * **WP6.4 (Implementado no repositório sob feature flag):** Runtime de tokens de ação (`InteractiveActionService`), emissão/consumo transacional, outbox interativa e roteamento dual-path no Channel Inbox (`INTERACTIVE_ACTIONS_ENABLED=false`).
+  * **WP6.5 (Implementado no repositório):** Adaptadores de transporte n8n para payloads interativos (`sendButtons` com payload body em `title` para Evolution 2.3.7), extração autoritária de IDs interativos no Gateway, suporte a respostas de transporte Meta Cloud e 62 testes de contrato automatizados (`pnpm test:workflows`).
   * **WP6.6 (Pendente):** Homologação de capacidades do provedor e validação controlada em produção.
+* **Fronteira de Transporte, Ingress e Invariantes Interativos:**
+  * **Eventos Interativos Estruturados sem ID:** Se um evento de resposta for estruturalmente interativo mas não contiver um ID de ação autoritativo, o Gateway rejeita de forma segura com `unsupported_interactive_reply` (HTTP 200).
+  * **Eventos Achatados em Texto Simples (`message.conversation`):** Se a camada de transporte (como a Evolution 2.3.7) achatar o clique em um texto comum com o rótulo do botão (ex.: "Confirmar"), o Gateway não tem garantia criptográfica de origem e processa o evento como texto comum, sem atribuir `interactive_action_id`. O fallback textual permanece estritamente preservado e o sistema **jamais** aplica heurísticas de adivinhação sobre texto livre.
+  * **Gate de Ativação do WP6.6:** O modo Button-First (`INTERACTIVE_ACTIONS_ENABLED=true`) só pode ser ativado quando o ingress em produção comprovar preservação ponta a ponta do ID (`Meta button_reply.id -> ia_<opaque> -> ContatoCerto interactive_action_id`), seja por atualização da Evolution, patch controlado ou ingress oficial via Meta Cloud API. Até lá, a feature flag permanece `false`.
 
 ---
 

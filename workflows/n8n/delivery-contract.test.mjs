@@ -6,6 +6,7 @@ import { URL } from "node:url";
 import { runInNewContext } from "node:vm";
 import {
   claimDecision,
+  buildEvolutionSendRequest,
   transportDecision,
   confirmationDecision,
   normalizeEvolutionText,
@@ -28,7 +29,162 @@ const message = (recipient_phone_e164 = "+5566991234567") => ({
   text_content: "Contato confirmado.\nMensagem com aspas: \"olá\" 😊",
   processing_token: randomUUID(),
 });
+
+const interactiveMessage = (recipient_phone_e164 = "+5566991234567", actions = [
+  { action_id: "ia_111111111111111111111111111111111111111111111111", label: "Concluído" },
+  { action_id: "ia_222222222222222222222222222222222222222222222222", label: "Não consigo atender" },
+]) => ({
+  id: randomUUID(),
+  status: "processing",
+  attempt_count: 1,
+  purpose: "professional_contact_notification",
+  provider: "evolution",
+  recipient_phone_e164,
+  message_type: "interactive",
+  text_content: "Detalhes da solicitação...",
+  interactive_payload: {
+    schema_version: 1,
+    type: "button_group",
+    body: "Detalhes da solicitação...",
+    actions,
+  },
+  processing_token: randomUUID(),
+});
+
 const response = (body, statusCode = 200) => ({ statusCode, body });
+
+test("interactive claim accepted and preserves payload, 1..3 actions, and text fallback", () => {
+  const item = interactiveMessage();
+  const decision = claimDecision(response(item), "evolution");
+  assert.equal(decision.action, "send");
+  assert.equal(decision.message.message_type, "interactive");
+  assert.equal(decision.message.text_content, item.text_content);
+  assert.equal(decision.message.interactive_payload.body, item.interactive_payload.body);
+  assert.equal(decision.message.interactive_payload.actions.length, 2);
+  assert.equal(decision.message.interactive_payload.actions[0].action_id, "ia_111111111111111111111111111111111111111111111111");
+  assert.equal(decision.message.interactive_payload.actions[0].label, "Concluído");
+  assert.equal(decision.message.interactive_payload.actions[1].action_id, "ia_222222222222222222222222222222222222222222222222");
+  assert.equal(decision.message.interactive_payload.actions[1].label, "Não consigo atender");
+});
+
+test("interactive claim validation rejects malformed payloads and out-of-spec actions", () => {
+  const base = interactiveMessage();
+
+  // Missing or wrong schema_version
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, schema_version: 2 } }), "evolution"), /claim_invalid/u);
+
+  // Missing or wrong type
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, type: "list" } }), "evolution"), /claim_invalid/u);
+
+  // Empty or non-string body
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, body: "" } }), "evolution"), /claim_invalid/u);
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, body: 123 } }), "evolution"), /claim_invalid/u);
+
+  // Empty actions array
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, actions: [] } }), "evolution"), /claim_invalid/u);
+
+  // > 3 actions (4 actions)
+  assert.throws(() => claimDecision(response({
+    ...base,
+    interactive_payload: {
+      ...base.interactive_payload,
+      actions: [
+        { action_id: "ia_1", label: "A" },
+        { action_id: "ia_2", label: "B" },
+        { action_id: "ia_3", label: "C" },
+        { action_id: "ia_4", label: "D" },
+      ],
+    },
+  }), "evolution"), /claim_invalid/u);
+
+  // Duplicate action IDs
+  assert.throws(() => claimDecision(response({
+    ...base,
+    interactive_payload: {
+      ...base.interactive_payload,
+      actions: [
+        { action_id: "ia_dup", label: "Opção 1" },
+        { action_id: "ia_dup", label: "Opção 2" },
+      ],
+    },
+  }), "evolution"), /claim_invalid/u);
+
+  // Action ID with whitespace
+  assert.throws(() => claimDecision(response({
+    ...base,
+    interactive_payload: {
+      ...base.interactive_payload,
+      actions: [{ action_id: "ia_ invalid", label: "Opção" }],
+    },
+  }), "evolution"), /claim_invalid/u);
+
+  // Action ID too long (>120)
+  assert.throws(() => claimDecision(response({
+    ...base,
+    interactive_payload: {
+      ...base.interactive_payload,
+      actions: [{ action_id: "a".repeat(121), label: "Opção" }],
+    },
+  }), "evolution"), /claim_invalid/u);
+
+  // Label > 20 characters (WhatsApp reply button limit)
+  assert.throws(() => claimDecision(response({
+    ...base,
+    interactive_payload: {
+      ...base.interactive_payload,
+      actions: [{ action_id: "ia_1", label: "123456789012345678901" }],
+    },
+  }), "evolution"), /claim_invalid/u);
+
+  // Empty label
+  assert.throws(() => claimDecision(response({
+    ...base,
+    interactive_payload: {
+      ...base.interactive_payload,
+      actions: [{ action_id: "ia_1", label: "   " }],
+    },
+  }), "evolution"), /claim_invalid/u);
+
+  // Text message with interactive_payload present throws error
+  assert.throws(() => claimDecision(response({
+    ...message(),
+    interactive_payload: base.interactive_payload,
+  }), "evolution"), /claim_invalid/u);
+});
+
+test("buildEvolutionSendRequest creates accurate endpoints and bodies for text and interactive", () => {
+  // 1. Text message
+  const textMsg = message("+5566991234567");
+  const textReq = buildEvolutionSendRequest(textMsg, "pilot-instance");
+  assert.equal(textReq.endpoint, "/message/sendText/pilot-instance");
+  assert.deepEqual(textReq.body, {
+    number: "5566991234567",
+    text: textMsg.text_content,
+  });
+
+  // 2. Interactive message
+  const interMsg = interactiveMessage("+5566991234567");
+  const interReq = buildEvolutionSendRequest(interMsg, "pilot-instance");
+  assert.equal(interReq.endpoint, "/message/sendButtons/pilot-instance");
+  assert.equal(interReq.body.number, "5566991234567");
+  // Placed in Evolution 2.3.7-compatible title field
+  assert.equal(interReq.body.title, interMsg.interactive_payload.body);
+  assert.deepEqual(interReq.body.buttons, [
+    {
+      type: "reply",
+      displayText: "Concluído",
+      id: "ia_111111111111111111111111111111111111111111111111",
+    },
+    {
+      type: "reply",
+      displayText: "Não consigo atender",
+      id: "ia_222222222222222222222222222222222222222222222222",
+    },
+  ]);
+
+  // Invalid instance
+  assert.throws(() => buildEvolutionSendRequest(textMsg, ""), /channel_instance_not_allowed/u);
+});
 
 test("empty, already sent and busy claims never authorize transport", () => {
   assert.equal(claimDecision(response(null, 204), "evolution").action, "stop");
@@ -540,6 +696,74 @@ test("text normalization handles quotes, newlines, emoji and quoted replies with
   assert.deepEqual(normalizeEvolutionText(body, "pilot", "evolution"), { ignored: true });
 });
 
+test("transportDecision normalizes official Meta Cloud API response formats and enforces recipient checks", () => {
+  const claimed = message("+5566999029086");
+
+  // Valid Cloud response with matching contacts wa_id
+  const cloud1 = transportDecision(
+    response({
+      messaging_product: "whatsapp",
+      contacts: [{ input: "5566999029086", wa_id: "5566999029086" }],
+      messages: [{ id: "wamid.HBgNNTU2Njk5OTAyOTA4NlUCMRIA" }],
+    }, 200),
+    claimed,
+  );
+  assert.deepEqual(cloud1, {
+    action: "sent",
+    payload: {
+      processing_token: claimed.processing_token,
+      provider_message_id: "wamid.HBgNNTU2Njk5OTAyOTA4NlUCMRIA",
+    },
+  });
+
+  // Valid Cloud response with degraded 8-digit in contacts
+  const cloudDegraded = transportDecision(
+    response({
+      messaging_product: "whatsapp",
+      contacts: [{ input: "556699029086", wa_id: "556699029086" }],
+      messages: [{ id: "wamid.HBgNNTU2Njk5MDI5MDg2UCMRIA" }],
+    }, 200),
+    claimed,
+  );
+  assert.deepEqual(cloudDegraded, {
+    action: "sent",
+    payload: {
+      processing_token: claimed.processing_token,
+      provider_message_id: "wamid.HBgNNTU2Njk5MDI5MDg2UCMRIA",
+    },
+  });
+
+  // Cloud response with recipient mismatch -> hold
+  const cloudMismatch = transportDecision(
+    response({
+      messaging_product: "whatsapp",
+      contacts: [{ input: "5566999029087", wa_id: "5566999029087" }],
+      messages: [{ id: "wamid.HBgNNTU2Njk5OTAyOTA4N1UCMRIA" }],
+    }, 200),
+    claimed,
+  );
+  assert.equal(cloudMismatch.action, "hold");
+
+  // Cloud response without contacts (messages array only) -> sent if message id valid
+  const cloudNoContacts = transportDecision(
+    response({
+      messages: [{ id: "wamid.HBgNNTU2Njk5OTAyOTA4NlUCMRIA" }],
+    }, 200),
+    claimed,
+  );
+  assert.deepEqual(cloudNoContacts, {
+    action: "sent",
+    payload: {
+      processing_token: claimed.processing_token,
+      provider_message_id: "wamid.HBgNNTU2Njk5OTAyOTA4NlUCMRIA",
+    },
+  });
+
+  // Empty messages array or empty id -> hold
+  assert.equal(transportDecision(response({ messages: [] }, 200), claimed).action, "hold");
+  assert.equal(transportDecision(response({ messages: [{ id: "" }] }, 200), claimed).action, "hold");
+});
+
 test("workflow exports are inactive, connected, credential-free and never retry transport", () => {
   for (const file of ["shared-delivery.json", "outbox-dispatcher.json", "inbox-recovery.json"]) {
     const raw = readFileSync(new URL(file, import.meta.url), "utf8");
@@ -561,8 +785,8 @@ test("workflow exports are inactive, connected, credential-free and never retry 
     if (send) {
       assert.equal(send.retryOnFail, false);
       assert.equal(send.parameters.options.timeout, 15000);
-      assert.match(send.parameters.jsonBody, /message.recipient_phone_e164/u);
-      assert.match(send.parameters.jsonBody, /message.text_content/u);
+      assert.match(send.parameters.jsonBody, /request\.body/u);
+      assert.match(send.parameters.url, /request\.endpoint/u);
     }
   }
 });
@@ -659,7 +883,7 @@ test("Inbox recovery export only processes bounded work; empty queue is normal a
 test("exported Code gate evaluates the same contract and dispatcher budgets are bounded", () => {
   const shared = JSON.parse(readFileSync(new URL("shared-delivery.json", import.meta.url), "utf8"));
   const gate = shared.nodes.find((node) => node.name === "Validate claim").parameters.jsCode;
-  const runGate = (claim) => runInNewContext(`(() => { ${gate} })()`, { $json: claim, $env: { EVOLUTION_PROVIDER: "evolution" } });
+  const runGate = (claim) => runInNewContext(`(() => { ${gate} })()`, { $json: claim, $env: { EVOLUTION_PROVIDER: "evolution", EVOLUTION_INSTANCE: "pilot" } });
   assert.equal(runGate(response(null, 204)).json.action, "stop");
   assert.equal(runGate(response(message())).json.action, "send");
   const dispatcher = JSON.parse(readFileSync(new URL("outbox-dispatcher.json", import.meta.url), "utf8"));

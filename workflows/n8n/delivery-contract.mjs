@@ -55,13 +55,105 @@ export function claimDecision(response, expectedProvider) {
   if (message.status !== "processing" || !uuid.test(message.processing_token ?? "")
     || !/^[a-z][a-z0-9_-]{0,62}$/u.test(expectedProvider ?? "") || message.provider !== expectedProvider
     || !/^\+[1-9][0-9]{7,14}$/u.test(message.recipient_phone_e164 ?? "")
-    || message.message_type !== "text" || typeof message.text_content !== "string"
+    || typeof message.text_content !== "string"
     || !message.text_content.trim() || message.text_content.length > 2000) throw new Error("outbox_claim_invalid");
-  return { action: "send", message: {
-    id: message.id, purpose: message.purpose, provider: message.provider,
-    recipient_phone_e164: message.recipient_phone_e164, text_content: message.text_content,
-    processing_token: message.processing_token,
-  } };
+
+  if (message.message_type === "text") {
+    if (message.interactive_payload !== undefined && message.interactive_payload !== null) {
+      throw new Error("outbox_claim_invalid");
+    }
+    return { action: "send", message: {
+      id: message.id, purpose: message.purpose, provider: message.provider,
+      recipient_phone_e164: message.recipient_phone_e164, message_type: "text",
+      text_content: message.text_content, interactive_payload: null,
+      processing_token: message.processing_token,
+    } };
+  }
+
+  if (message.message_type === "interactive") {
+    const payload = message.interactive_payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)
+      || payload.schema_version !== 1 || payload.type !== "button_group"
+      || typeof payload.body !== "string" || !payload.body.trim() || payload.body.length > 2000) {
+      throw new Error("outbox_claim_invalid");
+    }
+    if (!Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
+      throw new Error("outbox_claim_invalid");
+    }
+    const actionIds = new Set();
+    for (const a of payload.actions) {
+      if (!a || typeof a !== "object" || Array.isArray(a)
+        || typeof a.action_id !== "string" || !a.action_id || a.action_id.length > 120 || /\s/u.test(a.action_id)) {
+        throw new Error("outbox_claim_invalid");
+      }
+      if (typeof a.label !== "string" || !a.label.trim() || a.label.trim().length > 20) {
+        throw new Error("outbox_claim_invalid");
+      }
+      if (actionIds.has(a.action_id)) {
+        throw new Error("outbox_claim_invalid");
+      }
+      actionIds.add(a.action_id);
+    }
+    return { action: "send", message: {
+      id: message.id, purpose: message.purpose, provider: message.provider,
+      recipient_phone_e164: message.recipient_phone_e164, message_type: "interactive",
+      text_content: message.text_content, interactive_payload: {
+        schema_version: 1,
+        type: "button_group",
+        body: payload.body,
+        actions: payload.actions.map(act => ({ action_id: act.action_id, label: act.label.trim() })),
+      },
+      processing_token: message.processing_token,
+    } };
+  }
+
+  throw new Error("outbox_claim_invalid");
+}
+
+export function buildEvolutionSendRequest(message, instance) {
+  if (!instance || typeof instance !== "string") throw new Error("channel_instance_not_allowed");
+  if (!message || typeof message !== "object" || typeof message.recipient_phone_e164 !== "string"
+    || !message.recipient_phone_e164.startsWith("+")) {
+    throw new Error("delivery_message_invalid");
+  }
+  const encodedInstance = encodeURIComponent(instance);
+  const number = message.recipient_phone_e164.slice(1);
+
+  if (message.message_type === "text") {
+    if (typeof message.text_content !== "string" || !message.text_content.trim()) {
+      throw new Error("delivery_message_invalid");
+    }
+    return {
+      endpoint: `/message/sendText/${encodedInstance}`,
+      body: {
+        number,
+        text: message.text_content,
+      },
+    };
+  }
+
+  if (message.message_type === "interactive") {
+    const payload = message.interactive_payload;
+    if (!payload || payload.schema_version !== 1 || payload.type !== "button_group"
+      || typeof payload.body !== "string" || !payload.body.trim()
+      || !Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
+      throw new Error("interactive_payload_invalid");
+    }
+    return {
+      endpoint: `/message/sendButtons/${encodedInstance}`,
+      body: {
+        number,
+        title: payload.body,
+        buttons: payload.actions.map((act) => ({
+          type: "reply",
+          displayText: act.label,
+          id: act.action_id,
+        })),
+      },
+    };
+  }
+
+  throw new Error("message_type_unsupported");
 }
 
 export function transportDecision(response, message) {
@@ -102,6 +194,7 @@ export function transportDecision(response, message) {
   const code = response?.statusCode;
   const key = response?.body?.key;
   if (Number.isInteger(code) && code >= 200 && code < 300) {
+    // 1. Evolution / Baileys standard response format
     if (key?.fromMe === true && typeof key?.id === "string" && key.id.trim() && key.id.length <= 255) {
       if (key.addressingMode === undefined || (typeof key.addressingMode === "string" && ["lid", "pn"].includes(key.addressingMode))) {
         const primaryPhone = extractPhone(key.remoteJid);
@@ -136,6 +229,29 @@ export function transportDecision(response, message) {
               return { action: "sent", payload: { processing_token: message.processing_token, provider_message_id: key.id } };
             }
           }
+        }
+      }
+    }
+
+    // 2. Meta Cloud API / WhatsApp-Business response format
+    if (Array.isArray(response?.body?.messages) && response.body.messages.length > 0) {
+      const firstMsg = response.body.messages[0];
+      if (typeof firstMsg?.id === "string" && firstMsg.id.trim() && firstMsg.id.length <= 255) {
+        let recipientValid = true;
+        if (Array.isArray(response?.body?.contacts) && response.body.contacts.length > 0) {
+          const contact = response.body.contacts[0];
+          const contactPhone = typeof contact?.wa_id === "string"
+            ? normalizeBr(`+${contact.wa_id}`)
+            : typeof contact?.input === "string"
+              ? normalizeBr(contact.input.startsWith("+") ? contact.input : `+${contact.input}`)
+              : null;
+          const claimedCanonical = normalizeBr(message?.recipient_phone_e164);
+          if (contactPhone && claimedCanonical && contactPhone !== claimedCanonical) {
+            recipientValid = false;
+          }
+        }
+        if (recipientValid) {
+          return { action: "sent", payload: { processing_token: message.processing_token, provider_message_id: firstMsg.id.trim() } };
         }
       }
     }
