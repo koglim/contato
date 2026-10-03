@@ -238,6 +238,7 @@ async function createFixture(options: {
     professionalPhone,
     searchId,
     conversationId,
+    choiceId,
     app,
     addContactId: (id: string) => contactIds.add(id),
     createInitialInteractiveOutboundAndTokens,
@@ -283,28 +284,23 @@ test("Scenario 2: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=fa
 
     let newContactId: string | null = null;
     await withTransaction(async (db) => {
-      try {
-        const result = await createBilateralContact(
-          db,
-          {
-            customerId: f.customerId,
-            searchRequestId: f.searchId,
-            conversationId: f.conversationId,
-            position: 1,
-            selectionKey: ready.inbound.id,
-            lastMessageText: "sim",
-            confirmBilateral: false,
-          },
-          match,
-          ready,
-          new Date(),
-          () => createOpportunityCode()
-        );
-        newContactId = result.contactId;
-      } catch (err) {
-        console.error("DEBUG SCENARIO 2 ERROR:", err);
-        throw err;
-      }
+      const result = await createBilateralContact(
+        db,
+        {
+          customerId: f.customerId,
+          searchRequestId: f.searchId,
+          conversationId: f.conversationId,
+          position: 1,
+          selectionKey: ready.inbound.id,
+          lastMessageText: "sim",
+          confirmBilateral: false,
+        },
+        match,
+        ready,
+        new Date(),
+        () => createOpportunityCode()
+      );
+      newContactId = result.contactId;
     });
 
     assert.ok(newContactId);
@@ -358,28 +354,23 @@ test("Scenario 3: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=tr
 
     let newContactId: string | null = null;
     await withTransaction(async (db) => {
-      try {
-        const result = await createBilateralContact(
-          db,
-          {
-            customerId: f.customerId,
-            searchRequestId: f.searchId,
-            conversationId: f.conversationId,
-            position: 1,
-            selectionKey: ready.inbound.id,
-            lastMessageText: "sim",
-            confirmBilateral: false,
-          },
-          match,
-          ready,
-          new Date(),
-          () => createOpportunityCode()
-        );
-        newContactId = result.contactId;
-      } catch (err) {
-        console.error("DEBUG SCENARIO 3 ERROR:", err);
-        throw err;
-      }
+      const result = await createBilateralContact(
+        db,
+        {
+          customerId: f.customerId,
+          searchRequestId: f.searchId,
+          conversationId: f.conversationId,
+          position: 1,
+          selectionKey: ready.inbound.id,
+          lastMessageText: "sim",
+          confirmBilateral: false,
+        },
+        match,
+        ready,
+        new Date(),
+        () => createOpportunityCode()
+      );
+      newContactId = result.contactId;
     });
 
     assert.ok(newContactId);
