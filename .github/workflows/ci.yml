@@ -296,8 +296,74 @@ jobs:
           END $$;
           SQL
 
+      - name: Verify migration 028 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='028_add_interactive_actions_foundation')
+              OR to_regclass('interactive_action_tokens') IS NULL
+              OR to_regclass('interactive_action_tokens_contact_idx') IS NULL
+              OR to_regclass('interactive_action_tokens_expiry_idx') IS NULL
+              OR to_regclass('channel_inbound_messages_action_id_idx') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_outbound_messages' AND column_name='interactive_payload')
+              OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_inbound_messages' AND column_name='interactive_action_id')
+              OR NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                 WHERE conrelid='contact_completions'::regclass
+                   AND contype='u' AND conname='contact_completions_contact_id_id_key'
+              )
+              OR NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                 WHERE conrelid='interactive_action_tokens'::regclass
+                   AND contype='f' AND conname='interactive_action_tokens_contact_completion_fk'
+              )
+            THEN RAISE EXCEPTION 'migration 028 incomplete'; END IF;
+          END $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
+
+      - name: Verify migration 028 protected rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_028_protected'
+          protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_028_protected'
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+          psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
+          INSERT INTO customers (id, phone_e164) VALUES ('00000000-0000-0000-0028-000000000001', '+5566900000028');
+          INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ('00000000-0000-0000-0028-000000000002', '00000000-0000-0000-0028-000000000001', 'eletricista', 'selected');
+          INSERT INTO professionals (id, display_name, slug, phone_e164) VALUES ('00000000-0000-0000-0028-000000000003', 'Fixture 028', 'fixture-028', '+5566900000029');
+          INSERT INTO contacts (id, search_request_id, professional_id, status)
+          VALUES ('00000000-0000-0000-0028-000000000004', '00000000-0000-0000-0028-000000000002', '00000000-0000-0000-0028-000000000003', 'shared');
+          INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
+          VALUES ('00000000-0000-0000-0028-000000000005', 'test', 'msg-028', '+5566900000029', 'msg');
+          INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status)
+          VALUES ('00000000-0000-0000-0028-000000000006', '00000000-0000-0000-0028-000000000005', 'test', '+5566900000029', 'text', 'txt', 'pending');
+          INSERT INTO interactive_action_tokens (public_token, action_type, contact_id, completion_id, intended_actor_role, intended_phone_e164, outbound_message_id, status, expires_at)
+          VALUES ('ia_token_ci_028', 'declare_completion', '00000000-0000-0000-0028-000000000004', NULL, 'professional', '+5566900000029', '00000000-0000-0000-0028-000000000006', 'active', NOW() + INTERVAL '1 day');
+          SQL
+          set +e
+          rollback_output=$(DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_status=$?
+          set -e
+          echo "$rollback_output"
+          test "$rollback_status" -ne 0
+          echo "$rollback_output" | grep -q 'INTERACTIVE_ACTIONS_ROLLBACK_BLOCKED'
+          echo "$rollback_output" | grep -q 'P0028'
+          psql -v ON_ERROR_STOP=1 'postgresql://contatocerto:contatocerto-test@localhost:5432/postgres' -c 'DROP DATABASE contatocerto_028_protected'
+
+      - name: Roll back migration 028 with compatible data
+        run: |
+          node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF to_regclass('interactive_action_tokens') IS NOT NULL
+              OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_outbound_messages' AND column_name='interactive_payload')
+              OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_inbound_messages' AND column_name='interactive_action_id')
+              OR EXISTS (SELECT 1 FROM pgmigrations WHERE name='028_add_interactive_actions_foundation')
+            THEN RAISE EXCEPTION 'migration 028 remained after compatible rollback'; END IF;
+          END $$;
+          SQL
 
       - name: Verify migration 027 protected rollback
         run: |
