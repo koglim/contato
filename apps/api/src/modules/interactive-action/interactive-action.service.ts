@@ -62,38 +62,58 @@ export class InteractiveActionService {
       );
 
       if (!token) {
-        return this.finishReply(db, record, {
-          action: "unavailable",
-          replyText: "Esta opção não foi encontrada ou não está mais disponível.",
-        });
+        return this.finishReply(
+          db,
+          record,
+          {
+            action: "unavailable",
+            replyText: "Esta opção não foi encontrada ou não está mais disponível.",
+          },
+          null
+        );
       }
 
       // 3. Status checks: consumed, expired, revoked
       if (token.status === "consumed") {
-        return this.finishReply(db, record, {
-          action: "idempotent_replay",
-          action_type: token.actionType,
-          replyText: "Essa solicitação já foi respondida anteriormente.",
-        });
+        return this.finishReply(
+          db,
+          record,
+          {
+            action: "idempotent_replay",
+            action_type: token.actionType,
+            replyText: "Essa solicitação já foi respondida anteriormente.",
+          },
+          token
+        );
       }
 
       if (token.status === "expired" || token.expiresAt.getTime() <= Date.now()) {
         if (token.status === "active") {
           await this.repository.markExpired(db, token.id);
         }
-        return this.finishReply(db, record, {
-          action: "unavailable",
-          action_type: token.actionType,
-          replyText: "Esta opção interativa expirou. Por favor, envie uma mensagem com o código da solicitação para continuar.",
-        });
+        return this.finishReply(
+          db,
+          record,
+          {
+            action: "unavailable",
+            action_type: token.actionType,
+            replyText: "Esta opção interativa expirou. Por favor, envie uma mensagem com o código da solicitação para continuar.",
+          },
+          token
+        );
       }
 
       if (token.status === "revoked") {
-        return this.finishReply(db, record, {
-          action: "unavailable",
-          action_type: token.actionType,
-          replyText: "Esta opção não está mais ativa.",
-        });
+        return this.finishReply(
+          db,
+          record,
+          {
+            action: "unavailable",
+            action_type: token.actionType,
+            replyText: "Esta opção não está mais ativa.",
+          },
+          token
+        );
       }
 
       // 4. Outbound Sent Verification
@@ -107,11 +127,16 @@ export class InteractiveActionService {
       ).rows[0];
 
       if (!outboundRow || outboundRow.status !== "sent") {
-        return this.finishReply(db, record, {
-          action: "unavailable",
-          action_type: token.actionType,
-          replyText: "Esta opção ainda não está pronta para ser executada.",
-        });
+        return this.finishReply(
+          db,
+          record,
+          {
+            action: "unavailable",
+            action_type: token.actionType,
+            replyText: "Esta opção ainda não está pronta para ser executada.",
+          },
+          token
+        );
       }
 
       // 5. Phone Triple Authorization: sender phone, token intended phone, and outbound recipient
@@ -119,102 +144,164 @@ export class InteractiveActionService {
         !arePhoneIdentitiesEquivalent(record.phoneE164, token.intendedPhoneE164) ||
         !arePhoneIdentitiesEquivalent(record.phoneE164, outboundRow.recipient_phone_e164)
       ) {
-        return this.finishReply(db, record, {
-          action: "unavailable",
-          action_type: token.actionType,
-          replyText: "Você não tem autorização para realizar esta ação.",
-        });
-      }
-
-      // 6. Target Contact Locking and Snapshot Actor Phone Authorization
-      const contact = (
-        await db.query<ContactRow>(
-          `SELECT id, customer_id, professional_id, search_request_id,
-                  selection_conversation_id, public_code, status, bilateral_snapshot
-             FROM contacts
-            WHERE id = $1
-            FOR UPDATE`,
-          [token.contactId]
-        )
-      ).rows[0];
-
-      if (!contact) {
-        return this.finishReply(db, record, {
-          action: "unavailable",
-          action_type: token.actionType,
-          replyText: "Solicitação não encontrada.",
-        });
-      }
-
-      const snapshot = bilateralSnapshotSchema.parse(contact.bilateral_snapshot);
-      const actorSnapshotPhone =
-        token.intendedActorRole === "customer"
-          ? snapshot.customer_phone_e164
-          : snapshot.professional_phone_e164;
-
-      if (!arePhoneIdentitiesEquivalent(record.phoneE164, actorSnapshotPhone)) {
-        return this.finishReply(db, record, {
-          action: "unavailable",
-          action_type: token.actionType,
-          replyText: "Você não tem autorização para realizar esta ação.",
-        });
-      }
-
-      // 7. Completion ID consistency check (if token references a completion_id)
-      if (token.completionId) {
-        const completionRow = (
-          await db.query<{ id: string }>(
-            `SELECT id FROM contact_completions
-              WHERE id = $1 AND contact_id = $2
-              FOR UPDATE`,
-            [token.completionId, contact.id]
-          )
-        ).rows[0];
-
-        if (!completionRow) {
-          return this.finishReply(db, record, {
+        return this.finishReply(
+          db,
+          record,
+          {
             action: "unavailable",
             action_type: token.actionType,
-            public_code: contact.public_code,
-            replyText: "Essa solicitação não está mais disponível para esta ação.",
-          });
-        }
+            replyText: "Você não tem autorização para realizar esta ação.",
+          },
+          token
+        );
       }
 
-      // 8. Establish canonical locks and dispatch to WP6.3 shared domain authority
+      let contact: ContactRow | undefined;
       let outcomeResult: {
         action: "declared" | "confirmed" | "contested" | "unavailability_declared" | "idempotent_replay" | "unavailable" | "clarification";
         replyText: string;
         publicCode?: string;
       };
 
-      if (token.actionType === "declare_completion") {
-        const outcome = await executeCompletionDeclaration(
-          db,
-          contact,
-          "professional",
-          record.id,
-          { provider: record.provider }
+      // 6. Action-specific Serialization and Locking Chain
+      if (token.actionType === "declare_unavailability") {
+        // Minimal non-locking metadata lookup from contacts
+        const meta = (
+          await db.query<{
+            id: string;
+            customer_id: string;
+            selection_conversation_id: string;
+            search_request_id: string;
+          }>(
+            `SELECT id, customer_id, selection_conversation_id, search_request_id
+               FROM contacts
+              WHERE id = $1`,
+            [token.contactId]
+          )
+        ).rows[0];
+
+        if (!meta) {
+          return this.finishReply(
+            db,
+            record,
+            {
+              action: "unavailable",
+              action_type: token.actionType,
+              replyText: "Solicitação não encontrada.",
+            },
+            token
+          );
+        }
+
+        // Canonical Lock Order matching ProfessionalOpportunityService.decide:
+        // 1. Customer
+        await db.query(
+          "SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE",
+          [meta.customer_id]
         );
-        outcomeResult = {
-          action: outcome.action,
-          replyText: outcome.replyText,
-          publicCode: contact.public_code,
-        };
-      } else if (token.actionType === "declare_unavailability") {
-        // Lock canonical search_requests & search_conversations chain before delegation
-        if (contact.search_request_id) {
-          await db.query(
-            "SELECT id FROM search_requests WHERE id = $1 FOR UPDATE",
-            [contact.search_request_id]
+
+        // 2. Expire stale conversations
+        await db.query(
+          `UPDATE search_conversations
+              SET status = 'expired',
+                  pending_slot = NULL,
+                  processing_token = NULL,
+                  processing_started_at = NULL
+            WHERE customer_id = $1 AND status = 'active' AND expires_at <= NOW()`,
+          [meta.customer_id]
+        );
+
+        // 3. Selection conversation
+        const conversation = (
+          await db.query<{ id: string }>(
+            `SELECT *, expires_at > NOW() AS valid
+               FROM search_conversations
+              WHERE id = $1
+                FOR NO KEY UPDATE`,
+            [meta.selection_conversation_id]
+          )
+        ).rows[0];
+
+        if (!conversation) {
+          return this.finishReply(
+            db,
+            record,
+            {
+              action: "unavailable",
+              action_type: token.actionType,
+              replyText: "Essa oportunidade não está disponível para resposta.",
+            },
+            token
           );
         }
-        if (contact.selection_conversation_id) {
-          await db.query(
-            "SELECT id FROM search_conversations WHERE id = $1 FOR UPDATE",
-            [contact.selection_conversation_id]
+
+        // 4. Search request
+        await db.query(
+          "SELECT id FROM search_requests WHERE id = $1 FOR NO KEY UPDATE",
+          [meta.search_request_id]
+        );
+
+        // 5. Contact locked last
+        contact = (
+          await db.query<ContactRow>(
+            `SELECT id, customer_id, professional_id, search_request_id,
+                    selection_conversation_id, public_code, status, bilateral_snapshot
+               FROM contacts
+              WHERE id = $1
+                FOR NO KEY UPDATE`,
+            [meta.id]
+          )
+        ).rows[0];
+
+        if (!contact) {
+          return this.finishReply(
+            db,
+            record,
+            {
+              action: "unavailable",
+              action_type: token.actionType,
+              replyText: "Não consegui identificar essa oportunidade para você.",
+            },
+            token
           );
         }
+
+        // 6. Validate snapshot actor identity on the locked row
+        const snapshotParse = bilateralSnapshotSchema.safeParse(contact.bilateral_snapshot);
+        if (!snapshotParse.success) {
+          return this.finishReply(
+            db,
+            record,
+            {
+              action: "unavailable",
+              action_type: token.actionType,
+              replyText: "Você não tem autorização para realizar esta ação.",
+            },
+            token,
+            contact
+          );
+        }
+        const snapshot = snapshotParse.data;
+        const actorSnapshotPhone =
+          token.intendedActorRole === "customer"
+            ? snapshot.customer_phone_e164
+            : snapshot.professional_phone_e164;
+
+        if (!arePhoneIdentitiesEquivalent(record.phoneE164, actorSnapshotPhone)) {
+          return this.finishReply(
+            db,
+            record,
+            {
+              action: "unavailable",
+              action_type: token.actionType,
+              replyText: "Você não tem autorização para realizar esta ação.",
+            },
+            token,
+            contact
+          );
+        }
+
+        // 7. Execute shared domain operation
         const outcome = await executeUnavailabilityDeclaration(
           db,
           contact,
@@ -227,40 +314,141 @@ export class InteractiveActionService {
           replyText: outcome.replyText,
           publicCode: contact.public_code,
         };
-      } else if (token.actionType === "confirm_completion") {
-        const outcome = await executeCompletionConfirmation(
-          db,
-          contact,
-          "customer",
-          record.id,
-          { provider: record.provider }
-        );
-        outcomeResult = {
-          action: outcome.action,
-          replyText: outcome.replyText,
-          publicCode: contact.public_code,
-        };
-      } else if (token.actionType === "contest_completion") {
-        const outcome = await executeCompletionContestation(
-          db,
-          contact,
-          "customer",
-          record.id,
-          { provider: record.provider }
-        );
-        outcomeResult = {
-          action: outcome.action,
-          replyText: outcome.replyText,
-          publicCode: contact.public_code,
-        };
       } else {
-        outcomeResult = {
-          action: "unavailable",
-          replyText: "Ação não suportada.",
-        };
+        // Completion Actions: declare_completion, confirm_completion, contest_completion
+        contact = (
+          await db.query<ContactRow>(
+            `SELECT id, customer_id, professional_id, search_request_id,
+                    selection_conversation_id, public_code, status, bilateral_snapshot
+               FROM contacts
+              WHERE id = $1
+                FOR NO KEY UPDATE`,
+            [token.contactId]
+          )
+        ).rows[0];
+
+        if (!contact) {
+          return this.finishReply(
+            db,
+            record,
+            {
+              action: "unavailable",
+              action_type: token.actionType,
+              replyText: "Solicitação não encontrada.",
+            },
+            token
+          );
+        }
+
+        const snapshotParse = bilateralSnapshotSchema.safeParse(contact.bilateral_snapshot);
+        if (!snapshotParse.success) {
+          return this.finishReply(
+            db,
+            record,
+            {
+              action: "unavailable",
+              action_type: token.actionType,
+              replyText: "Você não tem autorização para realizar esta ação.",
+            },
+            token,
+            contact
+          );
+        }
+        const snapshot = snapshotParse.data;
+        const actorSnapshotPhone =
+          token.intendedActorRole === "customer"
+            ? snapshot.customer_phone_e164
+            : snapshot.professional_phone_e164;
+
+        if (!arePhoneIdentitiesEquivalent(record.phoneE164, actorSnapshotPhone)) {
+          return this.finishReply(
+            db,
+            record,
+            {
+              action: "unavailable",
+              action_type: token.actionType,
+              replyText: "Você não tem autorização para realizar esta ação.",
+            },
+            token,
+            contact
+          );
+        }
+
+        // Check completion ID if token references one
+        if (token.completionId) {
+          const completionRow = (
+            await db.query<{ id: string }>(
+              `SELECT id FROM contact_completions
+                WHERE id = $1 AND contact_id = $2
+                  FOR NO KEY UPDATE`,
+              [token.completionId, contact.id]
+            )
+          ).rows[0];
+
+          if (!completionRow) {
+            return this.finishReply(
+              db,
+              record,
+              {
+                action: "unavailable",
+                action_type: token.actionType,
+                public_code: contact.public_code,
+                replyText: "Essa solicitação não está mais disponível para esta ação.",
+              },
+              token,
+              contact
+            );
+          }
+        }
+
+        if (token.actionType === "declare_completion") {
+          const outcome = await executeCompletionDeclaration(
+            db,
+            contact,
+            "professional",
+            record.id,
+            { provider: record.provider }
+          );
+          outcomeResult = {
+            action: outcome.action,
+            replyText: outcome.replyText,
+            publicCode: contact.public_code,
+          };
+        } else if (token.actionType === "confirm_completion") {
+          const outcome = await executeCompletionConfirmation(
+            db,
+            contact,
+            "customer",
+            record.id,
+            { provider: record.provider }
+          );
+          outcomeResult = {
+            action: outcome.action,
+            replyText: outcome.replyText,
+            publicCode: contact.public_code,
+          };
+        } else if (token.actionType === "contest_completion") {
+          const outcome = await executeCompletionContestation(
+            db,
+            contact,
+            "customer",
+            record.id,
+            { provider: record.provider }
+          );
+          outcomeResult = {
+            action: outcome.action,
+            replyText: outcome.replyText,
+            publicCode: contact.public_code,
+          };
+        } else {
+          outcomeResult = {
+            action: "unavailable",
+            replyText: "Ação não suportada.",
+          };
+        }
       }
 
-      // 9. Atomic Token Consumption in same transaction
+      // 7. Atomic Token Consumption in same transaction
       await this.repository.markConsumed(db, token.id, record.id);
 
       return this.finishReply(
@@ -269,9 +457,10 @@ export class InteractiveActionService {
         {
           action: outcomeResult.action,
           action_type: token.actionType,
-          public_code: outcomeResult.publicCode ?? contact.public_code,
+          public_code: outcomeResult.publicCode ?? contact?.public_code,
           replyText: outcomeResult.replyText,
         },
+        token,
         contact
       );
     });
@@ -286,6 +475,7 @@ export class InteractiveActionService {
       public_code?: string;
       replyText: string;
     },
+    token?: { intendedActorRole: "customer" | "professional" } | null,
     contact?: ContactRow
   ): Promise<ChannelInboundMessageResponse> {
     const result: InteractiveActionResult = {
@@ -296,7 +486,7 @@ export class InteractiveActionService {
     };
 
     const purpose =
-      outcome.action === "unavailability_declared" || outcome.action === "declared"
+      token?.intendedActorRole === "professional"
         ? "professional_reply"
         : "customer_reply";
 

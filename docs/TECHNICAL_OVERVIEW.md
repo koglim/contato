@@ -78,8 +78,9 @@ As mutações transacionais de negócio do ciclo pós-conexão convergem para m�
 * **Neutralidade de Provedor e Invariantes:** As operações de domínio realizam transições atômicas de estado, persistência de eventos imutáveis no ledger e geração de notificações de contraparte na outbox sem conhecer detalhes ou acoplamentos de provedor de mensageria.
 * **Comportamento Textual Inalterado:** Os serviços textuais vigentes (`ContactCompletionService`, `ProfessionalOpportunityService`) delegam integralmente a essas operações de domínio, mantendo 100% de compatibilidade e comportamento idêntico.
 * **Sequenciamento de Ações Interativas (ADR-006):**
-  * **CURRENT (WP6.2 / WP6.3):** Fundação relacional (Migration 028), schemas neutros em `@contatocerto/shared` e autoridade transacional compartilhada extraída. O runtime de tokens de ações interativas **NÃO** está ativo.
-  * **WP6.4 (Pendente):** `ActionTokenService`, emissão/consumo de tokens e roteamento dual-path no Channel Inbox.
+  * **WP6.2 (Implementado):** Fundação relacional (Migration 028) e schemas neutros em `@contatocerto/shared`.
+  * **WP6.3 (Implementado):** Autoridade transacional compartilhada de domínio extraída e preservação do comportamento textual.
+  * **WP6.4 (Implementado no código sob feature flag):** Runtime de tokens de ação (`InteractiveActionService`), emissão/consumo transacional, outbox interativa e roteamento dual-path no Channel Inbox (desabilitado por padrão via `INTERACTIVE_ACTIONS_ENABLED=false`).
   * **WP6.5 (Pendente):** Adaptadores de transporte n8n para payloads interativos e testes de contrato.
   * **WP6.6 (Pendente):** Homologação de capacidades do provedor e validação controlada em produção.
 
