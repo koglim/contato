@@ -509,8 +509,13 @@ export class ContextualConversationService implements ContextualInboxHandler {
       });
       this.reportExecutionPath({ path, interpretationCalled, compositionCalled, serviceResolution,
         locationResolution: location?.status ?? "not_attempted",
-        finalStatus: outcome.kind === "response" ? outcome.response.result.route === "contextual"
-          ? outcome.response.result.status : outcome.response.result.route : outcome.kind,
+        finalStatus: outcome.kind === "response"
+          ? ("route" in outcome.response.result && outcome.response.result.route === "contextual"
+            ? outcome.response.result.status
+            : ("route" in outcome.response.result
+              ? outcome.response.result.route
+              : ("action" in outcome.response.result ? outcome.response.result.action : "unknown")))
+          : outcome.kind,
         totalDurationMs: Math.max(0, Date.now() - turnStartedAt) });
       return outcome;
     } catch (error) {

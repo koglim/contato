@@ -24,6 +24,7 @@ type ChannelInboundMessageRow = {
   provider_message_id: string;
   phone_e164: string;
   raw_text: string;
+  interactive_action_id?: string | null;
   country_code: string;
   limit_value: number;
   status: ChannelInboundMessageStatus;
@@ -44,7 +45,7 @@ export type ChannelInboxQuery = <T extends QueryResultRow>(text: string, values?
 export type ChannelInboxTransaction = <T>(callback: (client: DatabaseClient) => Promise<T>) => Promise<T>;
 
 const columns = `
-  id, provider, provider_message_id, phone_e164, raw_text, country_code, limit_value,
+  id, provider, provider_message_id, phone_e164, raw_text, interactive_action_id, country_code, limit_value,
   status, customer_id, conversation_id, search_request_id,
   result, error_code, processing_token, processing_started_at, recovery_state, contextual_queue, attempt_count, context_fingerprint
 `;
@@ -56,6 +57,7 @@ function toRecord(row: ChannelInboundMessageRow): ChannelInboundMessageRecord {
     providerMessageId: row.provider_message_id,
     phoneE164: row.phone_e164,
     rawText: row.raw_text,
+    interactiveActionId: row.interactive_action_id ?? null,
     countryCode: row.country_code,
     limitValue: row.limit_value,
     status: row.status,
@@ -83,13 +85,14 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
 
   async createOrFind(input: ChannelInboundMessageInput, options?: { contextual: boolean }) {
     const phoneE164 = normalizeBrazilianMobilePhone(input.phone_e164);
+    const useCtxQueue = Boolean(options?.contextual && !input.interactive_action_id);
     const inserted = await this.execute<ChannelInboundMessageRow>(
       `INSERT INTO channel_inbound_messages (
-         provider, provider_message_id, phone_e164, raw_text, country_code, limit_value${options?.contextual ? ", contextual_queue" : ""}
-       ) VALUES ($1, $2, $3, $4, $5, $6${options?.contextual ? ", TRUE" : ""})
+         provider, provider_message_id, phone_e164, raw_text, interactive_action_id, country_code, limit_value${useCtxQueue ? ", contextual_queue" : ""}
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7${useCtxQueue ? ", TRUE" : ""})
        ON CONFLICT (provider, provider_message_id) DO NOTHING
        RETURNING ${columns}`,
-      [input.provider, input.provider_message_id, phoneE164, input.raw_text, input.country_code, input.limit],
+      [input.provider, input.provider_message_id, phoneE164, input.raw_text, input.interactive_action_id ?? null, input.country_code, input.limit],
     );
     if (inserted.rows[0]) return { record: toRecord(inserted.rows[0]), created: true };
 

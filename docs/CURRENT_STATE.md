@@ -83,6 +83,7 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 | **Conversação Contextual Híbrida (IA)** | `CONVERSATION_AI_ENABLED` | `false` | Motor B2 que combina memória contextual, hipóteses e chamadas OpenAI. *(Nota: tem precedência sobre o alias legado `CONTEXTUAL_CONVERSATION_ENABLED`). Embora o padrão de código seja `false`, relatórios do operador indicam que o ambiente instalado pode ter sido configurado com `true`.* |
 | **Fallback de Interpretação por IA** | `MESSAGE_INTERPRETATION_FALLBACK_ENABLED` | `false` | Chamada LLM para extração de localização quando a resolução determinística falha. |
 | **Autenticação Profissional OTP** | `PROFESSIONAL_AUTH_ENABLED` | `false` | Habilita o endpoint público de emissão e validação de OTP de 6 dígitos no WhatsApp. |
+| **Ações Interativas / Button-First (ADR-006 / WP6.4)** | `INTERACTIVE_ACTIONS_ENABLED` | `false` | Habilita a emissão de tokens de ação e outbounds interativos (botões) para ações pós-conexão no WhatsApp. |
 
 ---
 
@@ -183,7 +184,7 @@ Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e
   * Se o profissional tornou-se inelegível: resposta determinística `CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE` sem criação de contato.
   * Se a lista ultrapassou 24 horas: resposta determinística canônica do T18 `CONTEXTUAL_EXPIRED_SELECTION`.
   * Zero chamadas de interpretação/composição de IA ou geocodificação na retomada.
-* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — ACCEPTED / EM ANDAMENTO (WP6.1 A WP6.3 IMPLEMENTADOS; RUNTIME INTERATIVO WP6.4 A WP6.6 PENDENTE):**
+* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — ACCEPTED / EM ANDAMENTO (WP6.1 A WP6.4 IMPLEMENTADOS NO CÓDIGO SOB FEATURE FLAG; HOMOLOGAÇÃO DE TRANSPORTE PENDENTE):**
   * Na evolução futura com a WhatsApp Cloud API oficial:
     * O código público `CC-XXXXXXXX` será mantido como identificador auditável e mecanismo de fallback textual.
     * A experiência primária do usuário **não** deve exigir digitação manual de códigos: ações determinísticas (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*) devem ser apresentadas como botões interativos nativos (Interactive Messages / Quick Replies) nos clientes compatíveis.

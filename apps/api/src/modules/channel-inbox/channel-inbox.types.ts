@@ -13,6 +13,7 @@ export type ChannelInboundMessageRecord = {
   providerMessageId: string;
   phoneE164: string;
   rawText: string;
+  interactiveActionId?: string | null;
   countryCode: string;
   limitValue: number;
   status: ChannelInboundMessageStatus;

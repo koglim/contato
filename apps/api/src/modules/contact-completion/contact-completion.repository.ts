@@ -237,21 +237,27 @@ export class PostgresContactCompletionRepository implements ContactCompletionRep
       textContent: string;
       businessKey: string;
       completionEventId?: string | null;
+      messageType?: "text" | "interactive";
+      interactivePayload?: unknown | null;
     }
   ): Promise<string> {
     const recipient = normalizeBrazilianMobilePhone(input.recipientPhoneE164);
+    const messageType = input.messageType ?? (input.interactivePayload ? "interactive" : "text");
+    const interactivePayload = messageType === "interactive" ? (input.interactivePayload ?? null) : null;
     const res = await db.query<{ id: string }>(
       `INSERT INTO channel_outbound_messages (
-         purpose, provider, recipient_phone_e164, text_content, business_key, completion_event_id
+         purpose, provider, recipient_phone_e164, message_type, text_content, interactive_payload, business_key, completion_event_id
        )
-       VALUES ($1, $2, $3, $4, $5, $6)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
        ON CONFLICT (business_key) WHERE business_key IS NOT NULL DO NOTHING
        RETURNING id`,
       [
         input.purpose,
         input.provider,
         recipient,
+        messageType,
         input.textContent,
+        interactivePayload ? JSON.stringify(interactivePayload) : null,
         input.businessKey,
         input.completionEventId ?? null,
       ]

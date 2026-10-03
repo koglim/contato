@@ -110,6 +110,8 @@ export interface ContactCompletionRepository {
       textContent: string;
       businessKey: string;
       completionEventId?: string | null;
+      messageType?: "text" | "interactive";
+      interactivePayload?: unknown | null;
     }
   ): Promise<string>;
   markInboundProcessed(

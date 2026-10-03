@@ -202,3 +202,4 @@ A tabela a seguir documenta os nomes canônicos e responsabilidades das variáve
 | **Conversação IA (Legacy)**| `CONTEXTUAL_CONVERSATION_ENABLED` | *Alias legado.* O código audita ambas as variáveis, e **`CONVERSATION_AI_ENABLED` tem precedência absoluta** caso ambas estejam definidas. |
 | **Modelo de IA** | `OPENAI_CONVERSATION_MODEL` | Nome do modelo LLM homologado para a conversação (ex.: gpt-5.6-luna). *(Tem precedência sobre o alias legado `CONTEXTUAL_CONVERSATION_MODEL`)*. |
 | **Modelo de IA** | `OPENAI_CONVERSATION_TIMEOUT_MS` | Timeout máximo para requisições de modelo (padrão: 20000ms). |
+| **Ações Interativas** | `INTERACTIVE_ACTIONS_ENABLED` | Flag booleana que habilita a emissão de tokens de ação opacos e outbounds interativos (botões) para ações pós-conexão (padrão: `false`). |

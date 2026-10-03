@@ -33,7 +33,7 @@ test("inbox repository uses the provider-scoped key and claims with a recoverabl
   const created = await current.repository.createOrFind({ provider: "test", provider_message_id: "msg-001", phone_e164: "+5566999999999", raw_text: "Sinop", country_code: "BR", limit: 3 });
   assert.equal(created.created, true);
   assert.match(current.calls[0]!.text, /ON CONFLICT \(provider, provider_message_id\) DO NOTHING/u);
-  assert.match(current.calls[0]!.text, /phone_e164, raw_text, country_code, limit_value/u);
+  assert.match(current.calls[0]!.text, /phone_e164, raw_text, interactive_action_id, country_code, limit_value/u);
   assert.equal((await current.repository.claim(id, randomUUID(), 60))?.status, "processing");
   assert.match(current.calls[2]!.text, /status IN \('received', 'failed'\)/u);
   assert.match(current.calls[1]!.text, /lease_expires_at/);

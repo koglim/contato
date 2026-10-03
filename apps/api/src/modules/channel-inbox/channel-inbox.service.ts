@@ -5,6 +5,7 @@ import {
   opportunityMessageSchema,
   contextualMessageSchema,
   contactCompletionMessageSchema,
+  interactiveActionResultSchema,
   type ChannelInboundMessageInput,
 } from "@contatocerto/shared";
 import { InboxFenceError, InboxPermanentError, InboxContextChangedError } from "./inbox-recovery.policy.js";
@@ -12,6 +13,7 @@ import { PostgresCustomerRepository, CustomerPhoneIdentityCollisionError } from 
 import type { ContextualInboxHandler } from "../contextual-conversation/contextual.service.js";
 import type { ProfessionalOpportunityService } from "../professional-opportunity/professional-opportunity.service.js";
 import type { ContactCompletionService } from "../contact-completion/contact-completion.service.js";
+import type { InteractiveActionService } from "../interactive-action/interactive-action.service.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
 import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
 import type { ChannelInboxConfig } from "../../config/channel-inbox.js";
@@ -77,7 +79,8 @@ function sameInboundPayload(record: ChannelInboundMessageRecord, input: ChannelI
   return record.phoneE164 === input.phone_e164
     && record.rawText === input.raw_text
     && record.countryCode === input.country_code
-    && record.limitValue === input.limit;
+    && record.limitValue === input.limit
+    && (record.interactiveActionId ?? null) === (input.interactive_action_id ?? null);
 }
 
 class InboxOutcomeError extends Error {
@@ -94,6 +97,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     private readonly professionalOpportunities?: Pick<ProfessionalOpportunityService, "handle">,
     private readonly contextualConversation?: ContextualInboxHandler,
     private readonly contactCompletions?: Pick<ContactCompletionService, "handle">,
+    private readonly interactiveActions?: Pick<InteractiveActionService, "handle">,
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
@@ -126,6 +130,16 @@ export class DefaultChannelInboxService implements ChannelInboxService {
     if (!processingToken) return { kind: "channel_message_processing" };
     try {
       if (claimed.result !== null) throw new InboxPermanentError("conversation_state_invalid");
+      if (claimed.interactiveActionId) {
+        if (!this.interactiveActions) {
+          throw new InboxPermanentError("dependency_missing");
+        }
+        const interactiveOutcome = await this.interactiveActions.handle(claimed);
+        if (interactiveOutcome) {
+          return { kind: "response", response: interactiveOutcome };
+        }
+        throw new InboxPermanentError("conversation_state_invalid");
+      }
       const completion = await this.contactCompletions?.handle(claimed);
       if (completion) return { kind: "response", response: completion };
       const opportunity = await this.professionalOpportunities?.handle(claimed);
@@ -209,6 +223,21 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   }
 
   private async replay(record: ChannelInboundMessageRecord): Promise<ChannelInboxOutcome> {
+    const interactive = interactiveActionResultSchema.safeParse(record.result);
+    if (interactive.success) {
+      const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id);
+      if (!outbound) return this.invalidResult(record.id);
+      return {
+        kind: "response",
+        response: {
+          message_id: record.id,
+          duplicate: true,
+          reply_text: outbound.textContent,
+          outbound: { id: outbound.id, status: outbound.status },
+          result: interactive.data,
+        },
+      };
+    }
     const contextual = contextualMessageSchema.safeParse(record.result);
     if (contextual.success) {
       const outbound = await this.channelOutboundMessageRepository.findByInboundMessageId(record.id);

@@ -1,7 +1,12 @@
 import {
   normalizeBrazilianMobilePhone,
+  INTERACTIVE_ACTION_TOKEN_TTL_DAYS,
+  type InteractiveOutboundPayload,
 } from "@contatocerto/shared";
 import type { DatabaseClient } from "../../database/connection.js";
+import { readInteractiveActionConfig } from "../../config/interactive-action.js";
+import { generateInteractiveActionToken } from "../interactive-action/interactive-action.crypto.js";
+import { PostgresInteractiveActionRepository } from "../interactive-action/interactive-action.repository.js";
 import { bilateralSnapshotSchema } from "../bilateral-contact/bilateral-contact.policy.js";
 import { PostgresContactCompletionRepository } from "./contact-completion.repository.js";
 import type {
@@ -136,17 +141,78 @@ export async function executeCompletionDeclaration(
     });
 
     const promptText = `${ctx.actorLabel} declarou a conclusão do serviço da solicitação ${contact.public_code}. Se o serviço foi finalizado, responda “confirmar ${contact.public_code}”. Se houver divergência, responda “contestar ${contact.public_code}”.`;
-    await repo.insertOutboundNotification(db, {
-      purpose:
-        ctx.counterpartRole === "customer"
-          ? "customer_contact_update"
-          : "professional_contact_notification",
-      provider: ctx.provider,
-      recipientPhoneE164: ctx.counterpartPhone,
-      textContent: promptText,
-      businessKey: `contact:${contact.id}:completion:prompt`,
-      completionEventId: event.id,
-    });
+
+    const interactiveConfig = readInteractiveActionConfig();
+
+    if (interactiveConfig.enabled && ctx.counterpartRole === "customer") {
+      const tokenConfirm = generateInteractiveActionToken();
+      const tokenContest = generateInteractiveActionToken();
+      const payload: InteractiveOutboundPayload = {
+        schema_version: 1,
+        type: "button_group",
+        body: promptText,
+        actions: [
+          {
+            action_id: tokenConfirm,
+            label: "Confirmar",
+          },
+          {
+            action_id: tokenContest,
+            label: "Contestar",
+          },
+        ],
+      };
+
+      const outboundId = await repo.insertOutboundNotification(db, {
+        purpose: "customer_contact_update",
+        provider: ctx.provider,
+        recipientPhoneE164: ctx.counterpartPhone,
+        textContent: promptText,
+        businessKey: `contact:${contact.id}:completion:prompt`,
+        completionEventId: event.id,
+        messageType: "interactive",
+        interactivePayload: payload,
+      });
+
+      const tokenRepo = new PostgresInteractiveActionRepository();
+      const ttlMs = INTERACTIVE_ACTION_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
+      const expiresAt = new Date(Date.now() + ttlMs);
+
+      await tokenRepo.createTokens(db, [
+        {
+          publicToken: tokenConfirm,
+          outboundMessageId: outboundId,
+          contactId: contact.id,
+          completionId: completion.id,
+          actionType: "confirm_completion",
+          intendedActorRole: "customer",
+          intendedPhoneE164: ctx.counterpartPhone,
+          expiresAt,
+        },
+        {
+          publicToken: tokenContest,
+          outboundMessageId: outboundId,
+          contactId: contact.id,
+          completionId: completion.id,
+          actionType: "contest_completion",
+          intendedActorRole: "customer",
+          intendedPhoneE164: ctx.counterpartPhone,
+          expiresAt,
+        },
+      ]);
+    } else {
+      await repo.insertOutboundNotification(db, {
+        purpose:
+          ctx.counterpartRole === "customer"
+            ? "customer_contact_update"
+            : "professional_contact_notification",
+        provider: ctx.provider,
+        recipientPhoneE164: ctx.counterpartPhone,
+        textContent: promptText,
+        businessKey: `contact:${contact.id}:completion:prompt`,
+        completionEventId: event.id,
+      });
+    }
 
     const replyText = `Solicitação de conclusão registrada para ${contact.public_code}. Aguardando confirmação ${ctx.counterpartLabel}.`;
     return {

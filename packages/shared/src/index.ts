@@ -221,11 +221,15 @@ export {
   interactiveActionTokenStatusSchema,
   interactiveOutboundActionSchema,
   interactiveOutboundPayloadSchema,
+  interactiveActionResultSchema,
+  INTERACTIVE_ACTION_TOKEN_TTL_DAYS,
 } from "./schemas/interactive-action.js";
 export type {
   InteractiveActionType,
   InteractiveActionTokenStatus,
   InteractiveOutboundAction,
   InteractiveOutboundPayload,
+  InteractiveActionResult,
 } from "./schemas/interactive-action.js";
+
 

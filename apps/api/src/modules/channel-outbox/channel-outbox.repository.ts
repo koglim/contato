@@ -127,8 +127,9 @@ export type ChannelOutboundMessageRow = {
   purpose: ChannelOutboundMessageRecord["purpose"];
   provider: string;
   recipient_phone_e164: string;
-  message_type: "text";
+  message_type: "text" | "interactive";
   text_content: string;
+  interactive_payload?: unknown | null;
   status: ChannelOutboundMessageStatus;
   processing_token: string | null;
   processing_started_at: Date | null;
@@ -146,14 +147,14 @@ export type ChannelOutboxTransaction = <T>(callback: (client: DatabaseClient) =>
 
 export const channelOutboundMessageColumns = `
   id, channel_inbound_message_id, purpose, provider, recipient_phone_e164, message_type, text_content,
-  status, processing_token, processing_started_at, provider_message_id, attempt_count, last_error_code, sent_at,
-  next_attempt_at, administrative_closed_at, expires_at
+  interactive_payload, status, processing_token, processing_started_at, provider_message_id, attempt_count,
+  last_error_code, sent_at, next_attempt_at, administrative_closed_at, expires_at
 `;
 
 const qualifiedChannelOutboundMessageColumns = `
   outbound.id, outbound.channel_inbound_message_id, outbound.purpose, outbound.provider,
-  outbound.recipient_phone_e164, outbound.message_type, outbound.text_content, outbound.status,
-  outbound.processing_token, outbound.processing_started_at, outbound.provider_message_id,
+  outbound.recipient_phone_e164, outbound.message_type, outbound.text_content, outbound.interactive_payload,
+  outbound.status, outbound.processing_token, outbound.processing_started_at, outbound.provider_message_id,
   outbound.attempt_count, outbound.last_error_code, outbound.sent_at, outbound.next_attempt_at,
   outbound.administrative_closed_at, outbound.expires_at
 `;
@@ -176,6 +177,7 @@ export function toChannelOutboundMessageRecord(row: ChannelOutboundMessageRow): 
     recipientPhoneE164: row.recipient_phone_e164,
     messageType: row.message_type,
     textContent: row.text_content,
+    interactivePayload: (row.interactive_payload as ChannelOutboundMessageRecord["interactivePayload"]) ?? null,
     status: row.status,
     processingToken: row.processing_token,
     processingStartedAt: row.processing_started_at,
@@ -195,13 +197,27 @@ export async function createIndependentOutbound(client: DatabaseClient, input: C
   if (!input.businessKey.trim() || !input.textContent.trim() || !/^\+[1-9]\d{7,14}$/u.test(input.recipientPhoneE164)) {
     throw new Error("Invalid independent outbound context");
   }
+  const messageType = input.messageType ?? (input.interactivePayload ? "interactive" : "text");
+  const interactivePayload = messageType === "interactive" ? (input.interactivePayload ?? null) : null;
   const inserted = await client.query<ChannelOutboundMessageRow>(
     `INSERT INTO channel_outbound_messages (
-       channel_inbound_message_id, purpose, provider, recipient_phone_e164, text_content, business_key, expires_at
-     ) VALUES (NULL, $1, $2, $3, $4, $5, $6)
+       channel_inbound_message_id, purpose, provider, recipient_phone_e164, message_type, text_content,
+       interactive_payload, business_key, expires_at, completion_event_id, professional_unavailability_event_id
+     ) VALUES (NULL, $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
      ON CONFLICT (business_key) WHERE business_key IS NOT NULL DO NOTHING
      RETURNING ${channelOutboundMessageColumns}`,
-    [input.purpose, input.provider, input.recipientPhoneE164, input.textContent, input.businessKey, input.expiresAt ?? null],
+    [
+      input.purpose,
+      input.provider,
+      input.recipientPhoneE164,
+      messageType,
+      input.textContent,
+      interactivePayload ? JSON.stringify(interactivePayload) : null,
+      input.businessKey,
+      input.expiresAt ?? null,
+      input.completionEventId ?? null,
+      input.professionalUnavailabilityEventId ?? null,
+    ],
   );
   if (inserted.rows[0]) return toChannelOutboundMessageRecord(inserted.rows[0]);
   const existing = await client.query<ChannelOutboundMessageRow>(

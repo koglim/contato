@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { phoneE164Schema } from "./phone.js";
+import { interactiveOutboundPayloadSchema } from "./interactive-action.js";
 
 export const channelOutboundMessageStatusSchema = z.enum(["pending", "processing", "sent", "failed"]);
 export const channelOutboundMessagePurposeSchema = z.enum(["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice", "professional_auth_challenge"]);
@@ -25,10 +26,17 @@ export const channelOutboundMessageClaimResponseSchema = z.discriminatedUnion("s
     status: z.literal("processing"),
     provider: z.string().min(1).max(63),
     recipient_phone_e164: phoneE164Schema,
-    message_type: z.literal("text"),
+    message_type: z.enum(["text", "interactive"]),
     text_content: z.string().trim().min(1).max(2_000),
+    interactive_payload: interactiveOutboundPayloadSchema.nullable().optional(),
     processing_token: z.string().uuid(),
-  }).strict(),
+  }).strict().refine((data) => {
+    if (data.message_type === "text") return !data.interactive_payload;
+    if (data.message_type === "interactive") return Boolean(data.interactive_payload);
+    return false;
+  }, {
+    message: "interactive_payload must be provided if and only if message_type is interactive",
+  }),
   outboundClaimBaseSchema.extend({ status: z.literal("sent") }).strict(),
 ]);
 

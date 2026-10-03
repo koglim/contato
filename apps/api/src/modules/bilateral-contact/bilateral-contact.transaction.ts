@@ -4,12 +4,17 @@ import {
   arePhoneIdentitiesEquivalent,
   getPhoneIdentityAliases,
   normalizeBrazilianMobilePhone,
+  INTERACTIVE_ACTION_TOKEN_TTL_DAYS,
+  type InteractiveOutboundPayload,
 } from "@contatocerto/shared";
 import type { DatabaseClient } from "../../database/connection.js";
 import type { ConsentOutcome, SelectShownMatchInput } from "../match-selection/match-selection.types.js";
 import { createIndependentOutbound } from "../channel-outbox/channel-outbox.repository.js";
 import { presentSelectionMessage } from "../selection-message/selection-message.presenter.js";
 import { mapSelectionCommandOutcome } from "../selection-message/selection-message.mapper.js";
+import { readInteractiveActionConfig } from "../../config/interactive-action.js";
+import { generateInteractiveActionToken } from "../interactive-action/interactive-action.crypto.js";
+import { PostgresInteractiveActionRepository } from "../interactive-action/interactive-action.repository.js";
 import { BILATERAL_NOTICE, BILATERAL_NOTICE_VERSION, bilateralSnapshotSchema, safeOpportunityText,
   parseBilateralConfirmation, presentProfessionalOpportunity, type BilateralSnapshot } from "./bilateral-contact.policy.js";
 
@@ -142,8 +147,72 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
     await client.query(`INSERT INTO channel_outbound_messages
       (channel_inbound_message_id, provider, recipient_phone_e164, text_content)
       VALUES ($1, $2, $3, $4)`, [input.selectionKey, context.inbound.provider, normalizeBrazilianMobilePhone(snapshot.customer_phone_e164), presentSelectionMessage(contract)]);
-    await createIndependentOutbound(client, { businessKey: `contact:${contactId}:initial`, purpose: "professional_contact_notification",
-      provider: context.inbound.provider, recipientPhoneE164: normalizeBrazilianMobilePhone(snapshot.professional_phone_e164), textContent: presentProfessionalOpportunity(snapshot) });
+    const interactiveConfig = readInteractiveActionConfig();
+
+    if (interactiveConfig.enabled) {
+      const tokenCompletion = generateInteractiveActionToken();
+      const tokenUnavailability = generateInteractiveActionToken();
+      const payload: InteractiveOutboundPayload = {
+        schema_version: 1,
+        type: "button_group",
+        body: presentProfessionalOpportunity(snapshot),
+        actions: [
+          {
+            action_id: tokenCompletion,
+            label: "Concluído",
+          },
+          {
+            action_id: tokenUnavailability,
+            label: "Não consigo atender",
+          },
+        ],
+      };
+
+      const outbound = await createIndependentOutbound(client, {
+        businessKey: `contact:${contactId}:initial`,
+        purpose: "professional_contact_notification",
+        provider: context.inbound.provider,
+        recipientPhoneE164: normalizeBrazilianMobilePhone(snapshot.professional_phone_e164),
+        messageType: "interactive",
+        textContent: presentProfessionalOpportunity(snapshot),
+        interactivePayload: payload,
+      });
+
+      const tokenRepo = new PostgresInteractiveActionRepository();
+      const ttlMs = INTERACTIVE_ACTION_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
+      const expiresAt = new Date(Date.now() + ttlMs);
+
+      await tokenRepo.createTokens(client, [
+        {
+          publicToken: tokenCompletion,
+          outboundMessageId: outbound.id,
+          contactId,
+          completionId: null,
+          actionType: "declare_completion",
+          intendedActorRole: "professional",
+          intendedPhoneE164: snapshot.professional_phone_e164,
+          expiresAt,
+        },
+        {
+          publicToken: tokenUnavailability,
+          outboundMessageId: outbound.id,
+          contactId,
+          completionId: null,
+          actionType: "declare_unavailability",
+          intendedActorRole: "professional",
+          intendedPhoneE164: snapshot.professional_phone_e164,
+          expiresAt,
+        },
+      ]);
+    } else {
+      await createIndependentOutbound(client, {
+        businessKey: `contact:${contactId}:initial`,
+        purpose: "professional_contact_notification",
+        provider: context.inbound.provider,
+        recipientPhoneE164: normalizeBrazilianMobilePhone(snapshot.professional_phone_e164),
+        textContent: presentProfessionalOpportunity(snapshot),
+      });
+    }
     return { contactId, snapshot };
   }
   throw new Error("Opportunity code allocation exhausted");
