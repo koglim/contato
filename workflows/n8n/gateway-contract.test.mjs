@@ -521,7 +521,7 @@ test("gateway extracts authoritative interactive_action_id from supported provid
   assert.equal(res4.inbound.raw_text, "Confirmar");
 });
 
-test("CRITICAL CAPABILITY FAILURE: label-only interactive reply without action ID is NEVER converted to action or text command", () => {
+test("structured interactive reply without authoritative action ID is safely ignored as unsupported_interactive_reply", () => {
   // Scenario 1: buttonsResponseMessage with title 'Confirmar' but empty/missing selectedButtonId
   const labelOnlyButton = event({
     buttonsResponseMessage: {
@@ -560,6 +560,21 @@ test("CRITICAL CAPABILITY FAILURE: label-only interactive reply without action I
   assert.equal(res3.action, "ignore");
   assert.equal(res3.reason, "unsupported_interactive_reply");
   assert.equal(res3.http_status, 200);
+});
+
+test("capability boundary: Evolution 2.3.7 flattened conversation (message.conversation = 'Confirmar') remains ordinary text without interactive ID", () => {
+  // When Evolution 2.3.7 flattens a button click into an ordinary message.conversation:
+  // message = { conversation: "Confirmar" }
+  // There is no structured interactive marker and no action ID.
+  // The gateway cannot distinguish whether the user clicked a button or manually typed text.
+  // It routes to Inbox as regular text without interactive_action_id.
+  const flattenedEvent = event({
+    conversation: "Confirmar",
+  });
+  const res = normalize(flattenedEvent);
+  assert.equal(res.action, "inbox");
+  assert.equal(res.inbound.raw_text, "Confirmar");
+  assert.equal(res.inbound.interactive_action_id, undefined, "Must NOT create interactive_action_id for unstructured text");
 });
 
 test("gateway rejects malformed interactive action IDs safely", () => {
