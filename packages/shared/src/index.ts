@@ -216,4 +216,16 @@ export type {
   ContactCompletionEventRecord,
   ContactCompletionMessage,
 } from "./schemas/contact-completion.js";
+export {
+  interactiveActionTypeSchema,
+  interactiveActionTokenStatusSchema,
+  interactiveOutboundActionSchema,
+  interactiveOutboundPayloadSchema,
+} from "./schemas/interactive-action.js";
+export type {
+  InteractiveActionType,
+  InteractiveActionTokenStatus,
+  InteractiveOutboundAction,
+  InteractiveOutboundPayload,
+} from "./schemas/interactive-action.js";
 

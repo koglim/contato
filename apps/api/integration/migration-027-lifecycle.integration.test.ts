@@ -263,7 +263,7 @@ test("Scenario F: Native v2 bilateral contact blocks rollback with P0027", async
 
     // Attempt migration 027 down — must block with P0027
     await assert.rejects(
-      () => migrateDown(1),
+      () => rollbackThrough("027_add_connection_lifecycle_v2"),
       (err: unknown) => {
         const e = err as { stderr?: string; message?: string };
         const msg = String(e.stderr || e.message);
@@ -327,7 +327,7 @@ test("Scenario G: Professional unavailability event blocks rollback with P0027",
 
     // Attempt migration 027 down — must block with P0027
     await assert.rejects(
-      () => migrateDown(1),
+      () => rollbackThrough("027_add_connection_lifecycle_v2"),
       (err: unknown) => {
         const e = err as { stderr?: string; message?: string };
         const msg = String(e.stderr || e.message);
