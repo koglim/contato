@@ -18,7 +18,7 @@ import { createBilateralContact } from "../src/modules/bilateral-contact/bilater
 after(closeDatabaseConnection);
 
 const internalKey = "interactive-action-integration-key";
-const randomPhone = () => `+5565${Math.floor(100000000 + Math.random() * 899999999)}`;
+const randomPhone = () => `+55659${Math.floor(10000000 + Math.random() * 89999999)}`;
 
 async function createFixture(options: {
   status?: string;
@@ -239,6 +239,7 @@ async function createFixture(options: {
     searchId,
     conversationId,
     app,
+    addContactId: (id: string) => contactIds.add(id),
     createInitialInteractiveOutboundAndTokens,
     sendInteractive,
     cleanup,
@@ -302,6 +303,7 @@ test("Scenario 2: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=fa
     });
 
     assert.ok(newContactId);
+    f.addContactId(newContactId);
 
     // Verify outbound is text and no tokens were created
     const outbounds = (await query<{ message_type: string; interactive_payload: unknown }>(
@@ -371,6 +373,7 @@ test("Scenario 3: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=tr
     });
 
     assert.ok(newContactId);
+    f.addContactId(newContactId);
 
     // Verify outbound is interactive
     const outbounds = (await query<{ message_type: string; interactive_payload: InteractiveOutboundPayload }>(
