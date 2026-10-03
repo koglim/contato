@@ -466,6 +466,191 @@ test("text HTTP envelopes handle empty 204, malformed JSON and all uncertain tra
   const outcome={action:"sent",payload:{processing_token:message.processing_token,provider_message_id:"accepted-id"}};
   assert.equal(confirmationDecision({statusCode:503},message,outcome).provider_message_id,"accepted-id");
 });
+test("gateway extracts authoritative interactive_action_id from supported provider button reply formats", () => {
+  // 1. Evolution buttonsResponseMessage
+  const buttonEvent = event({
+    buttonsResponseMessage: {
+      selectedButtonId: "ia_111111111111111111111111111111111111111111111111",
+      selectedDisplayText: "Concluído",
+    },
+  });
+  const res1 = normalize(buttonEvent);
+  assert.equal(res1.action, "inbox");
+  assert.equal(res1.inbound.interactive_action_id, "ia_111111111111111111111111111111111111111111111111");
+  assert.equal(res1.inbound.raw_text, "Concluído");
+  assert.equal(res1.inbound.provider_message_id, "test-instance:SYNTHETIC001");
+  assert.equal(res1.inbound.phone_e164, "+5566991234567");
+
+  // 2. Evolution templateButtonReplyMessage
+  const templateEvent = event({
+    templateButtonReplyMessage: {
+      selectedId: "ia_222222222222222222222222222222222222222222222222",
+      selectedDisplayText: "Não consigo atender",
+    },
+  });
+  const res2 = normalize(templateEvent);
+  assert.equal(res2.action, "inbox");
+  assert.equal(res2.inbound.interactive_action_id, "ia_222222222222222222222222222222222222222222222222");
+  assert.equal(res2.inbound.raw_text, "Não consigo atender");
+
+  // 3. Evolution listResponseMessage
+  const listEvent = event({
+    listResponseMessage: {
+      singleSelectReply: { selectedRowId: "ia_333333333333333333333333333333333333333333333333" },
+      title: "Opção Confirmar",
+    },
+  });
+  const res3 = normalize(listEvent);
+  assert.equal(res3.action, "inbox");
+  assert.equal(res3.inbound.interactive_action_id, "ia_333333333333333333333333333333333333333333333333");
+  assert.equal(res3.inbound.raw_text, "Opção Confirmar");
+
+  // 4. Meta Cloud interactive.button_reply
+  const metaEvent = event({
+    interactive: {
+      type: "button_reply",
+      button_reply: {
+        id: "ia_444444444444444444444444444444444444444444444444",
+        title: "Confirmar",
+      },
+    },
+  });
+  const res4 = normalize(metaEvent);
+  assert.equal(res4.action, "inbox");
+  assert.equal(res4.inbound.interactive_action_id, "ia_444444444444444444444444444444444444444444444444");
+  assert.equal(res4.inbound.raw_text, "Confirmar");
+});
+
+test("CRITICAL CAPABILITY FAILURE: label-only interactive reply without action ID is NEVER converted to action or text command", () => {
+  // Scenario 1: buttonsResponseMessage with title 'Confirmar' but empty/missing selectedButtonId
+  const labelOnlyButton = event({
+    buttonsResponseMessage: {
+      selectedButtonId: "",
+      selectedDisplayText: "Confirmar",
+    },
+  });
+  const res1 = normalize(labelOnlyButton);
+  assert.equal(res1.action, "ignore");
+  assert.equal(res1.reason, "unsupported_interactive_reply");
+  assert.equal(res1.http_status, 200);
+  assert.equal(res1.inbound, undefined, "Must NOT route to Inbox");
+
+  // Scenario 2: templateButtonReplyMessage with label 'Concluído' but null selectedId
+  const labelOnlyTemplate = event({
+    templateButtonReplyMessage: {
+      selectedId: null,
+      selectedDisplayText: "Concluído",
+    },
+  });
+  const res2 = normalize(labelOnlyTemplate);
+  assert.equal(res2.action, "ignore");
+  assert.equal(res2.reason, "unsupported_interactive_reply");
+  assert.equal(res2.http_status, 200);
+
+  // Scenario 3: Meta interactive button_reply with title 'Não consigo atender' but missing id
+  const labelOnlyMeta = event({
+    interactive: {
+      type: "button_reply",
+      button_reply: {
+        title: "Não consigo atender",
+      },
+    },
+  });
+  const res3 = normalize(labelOnlyMeta);
+  assert.equal(res3.action, "ignore");
+  assert.equal(res3.reason, "unsupported_interactive_reply");
+  assert.equal(res3.http_status, 200);
+});
+
+test("gateway rejects malformed interactive action IDs safely", () => {
+  // Whitespace in action ID
+  const wsEvent = event({
+    buttonsResponseMessage: {
+      selectedButtonId: "ia_ invalid id",
+      selectedDisplayText: "Concluído",
+    },
+  });
+  assert.deepEqual(normalize(wsEvent), {
+    action: "reject",
+    reason: "webhook_interactive_id_invalid",
+    http_status: 422,
+  });
+
+  // Action ID length > 120
+  const longEvent = event({
+    buttonsResponseMessage: {
+      selectedButtonId: "a".repeat(121),
+      selectedDisplayText: "Concluído",
+    },
+  });
+  assert.deepEqual(normalize(longEvent), {
+    action: "reject",
+    reason: "webhook_interactive_id_invalid",
+    http_status: 422,
+  });
+});
+
+test("raw Meta Cloud API button_reply capability fixture demonstrates preservation of opaque action tokens", () => {
+  const rawMetaCloudEvent = {
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        id: "109876543210987",
+        changes: [
+          {
+            value: {
+              messaging_product: "whatsapp",
+              metadata: {
+                display_phone_number: "5566999029086",
+                phone_number_id: "987654321098765",
+              },
+              contacts: [
+                {
+                  profile: { name: "Lucas Profissional" },
+                  wa_id: "5566991234567",
+                },
+              ],
+              messages: [
+                {
+                  from: "5566991234567",
+                  id: "wamid.HBgNNTU2Njk5MTIzNDU2NxUCMRIA",
+                  timestamp: "1791056800",
+                  type: "interactive",
+                  interactive: {
+                    type: "button_reply",
+                    button_reply: {
+                      id: "ia_a1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f7081",
+                      title: "Concluído",
+                    },
+                  },
+                },
+              ],
+            },
+            field: "messages",
+          },
+        ],
+      },
+    ],
+  };
+
+  // Inspect the raw Meta payload structure:
+  const rawMsg = rawMetaCloudEvent.entry[0].changes[0].value.messages[0];
+  assert.equal(rawMsg.type, "interactive");
+  assert.equal(rawMsg.interactive.type, "button_reply");
+  assert.equal(rawMsg.interactive.button_reply.id, "ia_a1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f7081");
+  assert.equal(rawMsg.interactive.button_reply.title, "Concluído");
+
+  // When adapted into an Evolution/gateway normalized message structure:
+  const adaptedMsg = {
+    interactive: rawMsg.interactive,
+  };
+  const gatewayEvt = event(adaptedMsg);
+  const normalized = normalize(gatewayEvt);
+  assert.equal(normalized.action, "inbox");
+  assert.equal(normalized.inbound.interactive_action_id, "ia_a1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f7081");
+  assert.equal(normalized.inbound.raw_text, "Concluído");
+});
+
 test("exports only use node versions present in the pinned n8n source; every reference resolves",()=>{
   const allowed={webhook:[1,1.1,2,2.1],code:[1,2],if:[2,2.1,2.2,2.3],httpRequest:[3,4,4.1,4.2,4.3],
     executeWorkflow:[1,1.1,1.2,1.3],executeWorkflowTrigger:[1,1.1],scheduleTrigger:[1,1.1,1.2,1.3],convertToFile:[1,1.1],respondToWebhook:[1,1.1,1.2,1.3,1.4,1.5]};

@@ -8,6 +8,69 @@ export {
   isOpaqueJid,
 } from "./delivery-contract.mjs";
 
+export function extractEvolutionInteractiveReply(message) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) return null;
+
+  // 1. Evolution / Baileys standard button reply (buttonsResponseMessage)
+  if (message.buttonsResponseMessage && typeof message.buttonsResponseMessage === "object") {
+    const b = message.buttonsResponseMessage;
+    const actionId = typeof b.selectedButtonId === "string" ? b.selectedButtonId.trim() : null;
+    const displayText = typeof b.selectedDisplayText === "string" ? b.selectedDisplayText.trim() : null;
+    if (actionId) {
+      return { actionId, displayText: displayText || actionId };
+    }
+    return { actionId: null, displayText, isInteractive: true };
+  }
+
+  // 2. Evolution / Baileys template button reply (templateButtonReplyMessage)
+  if (message.templateButtonReplyMessage && typeof message.templateButtonReplyMessage === "object") {
+    const t = message.templateButtonReplyMessage;
+    const actionId = typeof t.selectedId === "string" ? t.selectedId.trim() : null;
+    const displayText = typeof t.selectedDisplayText === "string" ? t.selectedDisplayText.trim() : null;
+    if (actionId) {
+      return { actionId, displayText: displayText || actionId };
+    }
+    return { actionId: null, displayText, isInteractive: true };
+  }
+
+  // 3. Evolution / Baileys list reply (listResponseMessage)
+  if (message.listResponseMessage && typeof message.listResponseMessage === "object") {
+    const l = message.listResponseMessage;
+    const actionId = typeof l.singleSelectReply?.selectedRowId === "string" ? l.singleSelectReply.selectedRowId.trim() : null;
+    const displayText = typeof l.title === "string" ? l.title.trim() : null;
+    if (actionId) {
+      return { actionId, displayText: displayText || actionId };
+    }
+    return { actionId: null, displayText, isInteractive: true };
+  }
+
+  // 4. Meta Cloud API native interactive envelope
+  if (message.interactive && typeof message.interactive === "object") {
+    const inter = message.interactive;
+    if (inter.type === "button_reply" && inter.button_reply && typeof inter.button_reply === "object") {
+      const br = inter.button_reply;
+      const actionId = typeof br.id === "string" ? br.id.trim() : null;
+      const displayText = typeof br.title === "string" ? br.title.trim() : null;
+      if (actionId) {
+        return { actionId, displayText: displayText || actionId };
+      }
+      return { actionId: null, displayText, isInteractive: true };
+    }
+    if (inter.type === "list_reply" && inter.list_reply && typeof inter.list_reply === "object") {
+      const lr = inter.list_reply;
+      const actionId = typeof lr.id === "string" ? lr.id.trim() : null;
+      const displayText = typeof lr.title === "string" ? lr.title.trim() : null;
+      if (actionId) {
+        return { actionId, displayText: displayText || actionId };
+      }
+      return { actionId: null, displayText, isInteractive: true };
+    }
+    return { actionId: null, displayText: null, isInteractive: true };
+  }
+
+  return null;
+}
+
 // Embedded verbatim in Code nodes. jwtPayload is supplied by the native Webhook
 // AFTER jwtAuth verification; it must never be taken from request.body.
 export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now() / 1000)) {
@@ -100,7 +163,7 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
 
   const inbound = { provider: config.provider, provider_message_id: `${config.instance}:${key.id}`,
     phone_e164, country_code: "BR", limit: 3 };
-  const message = body.data.message;
+  const message = body.data?.message;
   if (!message || typeof message !== "object" || Array.isArray(message)) return reject("webhook_message_invalid");
   if (message.audioMessage) {
     const audio = message.audioMessage;
@@ -111,6 +174,34 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
       mime_type: typeof audio.mimetype === 'string' ? audio.mimetype.slice(0,100) : '',
       duration_seconds: Number.isFinite(audio.seconds) && audio.seconds>=0 ? audio.seconds : null } };
   }
+
+  const interactiveReply = extractEvolutionInteractiveReply(message);
+  if (interactiveReply) {
+    if (interactiveReply.actionId) {
+      if (typeof interactiveReply.actionId !== "string"
+        || !interactiveReply.actionId
+        || interactiveReply.actionId.length > 120
+        || /\s/u.test(interactiveReply.actionId)) {
+        return reject("webhook_interactive_id_invalid");
+      }
+      const rawText = (typeof interactiveReply.displayText === "string" && interactiveReply.displayText.trim())
+        ? interactiveReply.displayText.trim()
+        : "[Botão]";
+      if (rawText.length > 500) return reject("webhook_text_invalid");
+      return {
+        action: "inbox",
+        inbound: {
+          ...inbound,
+          raw_text: rawText,
+          interactive_action_id: interactiveReply.actionId,
+        },
+      };
+    }
+    // Interactive event detected without an authoritative action ID (e.g. dropped by provider)
+    // NEVER convert label into actionId and NEVER pass it to text command route.
+    return ignore("unsupported_interactive_reply");
+  }
+
   const text = message.conversation ?? message.extendedTextMessage?.text;
   if (text === undefined) return ignore("unsupported_message");
   if (typeof text !== "string" || !text.trim() || text.trim().length > 500) return reject("webhook_text_invalid");

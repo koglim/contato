@@ -80,9 +80,10 @@ As mutações transacionais de negócio do ciclo pós-conexão convergem para m�
 * **Sequenciamento de Ações Interativas (ADR-006):**
   * **WP6.2 (Implementado):** Fundação relacional (Migration 028) e schemas neutros em `@contatocerto/shared`.
   * **WP6.3 (Implementado):** Autoridade transacional compartilhada de domínio extraída e preservação do comportamento textual.
-  * **WP6.4 (Implementado no código sob feature flag):** Runtime de tokens de ação (`InteractiveActionService`), emissão/consumo transacional, outbox interativa e roteamento dual-path no Channel Inbox (desabilitado por padrão via `INTERACTIVE_ACTIONS_ENABLED=false`).
-  * **WP6.5 (Pendente):** Adaptadores de transporte n8n para payloads interativos e testes de contrato.
+  * **WP6.4 (Implementado no repositório sob feature flag):** Runtime de tokens de ação (`InteractiveActionService`), emissão/consumo transacional, outbox interativa e roteamento dual-path no Channel Inbox (`INTERACTIVE_ACTIONS_ENABLED=false`).
+  * **WP6.5 (Implementado no repositório):** Adaptadores de transporte n8n para payloads interativos (`sendButtons` com payload body em `title` para Evolution 2.3.7), extração autoritária de IDs interativos no Gateway, fallback seguro para respostas sem ID (`unsupported_interactive_reply`), suporte a respostas de transporte Meta Cloud e 61 testes de contrato automatizados (`pnpm test:workflows`).
   * **WP6.6 (Pendente):** Homologação de capacidades do provedor e validação controlada em produção.
+* **Invariante de Transporte e Segurança Interativa:** A ativação de botões interativos exige a preservação integral do ID de ação opaco (`ia_<48hex>`) pelo provedor de mensageria. Se o provedor descartar o ID e entregar apenas o texto do botão, o adaptador de gateway rejeita o evento de forma segura (`unsupported_interactive_reply`), jamais tratando o texto como ID autoritativo nem passando diretamente para o parser textual de comandos.
 
 ---
 

@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
-import { claimDecision, transportDecision, confirmationDecision, httpResponse } from "./delivery-contract.mjs";
-import { normalizeGatewayEvent, transcriptionDecision, inboxDecision, mediaAdmissionDecision, mediaClaimDecision } from "./gateway-contract.mjs";
+import { claimDecision, transportDecision, confirmationDecision, httpResponse, buildEvolutionSendRequest } from "./delivery-contract.mjs";
+import { normalizeGatewayEvent, extractEvolutionInteractiveReply, transcriptionDecision, inboxDecision, mediaAdmissionDecision, mediaClaimDecision } from "./gateway-contract.mjs";
 
 const node = (name, type, parameters, x, y = 0, extra = {}) => ({
   id: name.toLowerCase().replaceAll(" ", "-"), name, type: `n8n-nodes-base.${type}`,
@@ -28,10 +28,10 @@ const flow = (name, nodes, connections, timeout) => ({ name, active: false, node
 
 const delivery = flow("ContatoCerto - Shared Outbox Delivery", [
   node("Start", "executeWorkflowTrigger", { inputSource: "passthrough" }, 0),
-  code("Validate claim", `${claimDecision.toString()}\nreturn { json: claimDecision($json, $env.EVOLUTION_PROVIDER) };`, 220),
+  code("Validate claim", `${claimDecision.toString()}\n${buildEvolutionSendRequest.toString()}\nconst decision = claimDecision($json, $env.EVOLUTION_PROVIDER);\nif (decision.action === 'send') {\n  return { json: { ...decision, request: buildEvolutionSendRequest(decision.message, $env.EVOLUTION_INSTANCE) } };\n}\nreturn { json: decision };`, 220),
   branch("Send authorized", "={{ $json.action === 'send' }}", 440),
-  http("Send Evolution", "={{ $env.EVOLUTION_API_BASE_URL + '/message/sendText/' + encodeURIComponent($env.EVOLUTION_INSTANCE) }}",
-    "={{ { number: $json.message.recipient_phone_e164.slice(1), text: $json.message.text_content } }}", "ContatoCerto Evolution", 660),
+  http("Send Evolution", "={{ $env.EVOLUTION_API_BASE_URL + $json.request.endpoint }}",
+    "={{ $json.request.body }}", "ContatoCerto Evolution", 660),
   code("Classify transport", `${transportDecision.toString()}\nconst message = $('Validate claim').item.json.message;\nreturn { json: { message, outcome: transportDecision($json, message) } };`, 880),
   http("Confirm outcome", "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/' + $json.message.id + '/' + $json.outcome.action }}",
     "={{ $json.outcome.payload }}", "ContatoCerto Internal API", 1100, 0, true),
@@ -93,7 +93,7 @@ const transcribe = (name, url, model, credential, x) => {
 const gateway = flow("ContatoCerto - WhatsApp Gateway", [
   node("Evolution webhook", "webhook", { httpMethod: "POST", path: "contatocerto-evolution-inbound", authentication: "jwtAuth",
     responseMode: "responseNode", options: {} }, 0, 0, { credentials: { jwtAuth: { name: "ContatoCerto Evolution Webhook JWT" } } }),
-  code("Validate event", `${normalizeGatewayEvent.toString()}\nreturn { json: normalizeGatewayEvent($json, { instance: $env.EVOLUTION_INSTANCE, provider: $env.EVOLUTION_PROVIDER, origin: $env.EVOLUTION_WEBHOOK_ORIGIN }) };`, 220),
+  code("Validate event", `${extractEvolutionInteractiveReply.toString()}\n${normalizeGatewayEvent.toString()}\nreturn { json: normalizeGatewayEvent($json, { instance: $env.EVOLUTION_INSTANCE, provider: $env.EVOLUTION_PROVIDER, origin: $env.EVOLUTION_WEBHOOK_ORIGIN }) };`, 220),
   branch("Text input", "={{ $json.action === 'inbox' }}", 440),
   { ...http("Channel Inbox", "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}", "={{ $json.inbound }}", "ContatoCerto Internal API", 660),
     parameters: { ...http("Channel Inbox", "", null, "", 0).parameters,

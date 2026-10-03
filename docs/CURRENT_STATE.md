@@ -184,13 +184,14 @@ Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e
   * Se o profissional tornou-se inelegível: resposta determinística `CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE` sem criação de contato.
   * Se a lista ultrapassou 24 horas: resposta determinística canônica do T18 `CONTEXTUAL_EXPIRED_SELECTION`.
   * Zero chamadas de interpretação/composição de IA ou geocodificação na retomada.
-* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — ACCEPTED / EM ANDAMENTO (WP6.1 A WP6.4 IMPLEMENTADOS NO CÓDIGO SOB FEATURE FLAG; HOMOLOGAÇÃO DE TRANSPORTE PENDENTE):**
-  * Na evolução futura com a WhatsApp Cloud API oficial:
-    * O código público `CC-XXXXXXXX` será mantido como identificador auditável e mecanismo de fallback textual.
-    * A experiência primária do usuário **não** deve exigir digitação manual de códigos: ações determinísticas (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*) devem ser apresentadas como botões interativos nativos (Interactive Messages / Quick Replies) nos clientes compatíveis.
-    * Cada ação interativa deve vincular-se de forma determinística ao seu respectivo contato/evento, prevenindo ambiguidades quando um profissional possui múltiplos atendimentos simultâneos.
-    * O modelo arquitetural preferido é a emissão de *tokens de ação opacos com autorização atômica de contato/ação/ator*.
-  * *Compromisso:* A Evolution API permanece como a camada de integração de mensageria vigente. A migração de provedor para Cloud API é um pacote de trabalho independente e não deve ser antecipada.
+* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — ACCEPTED / EM ANDAMENTO (WP6.1 A WP6.5 IMPLEMENTADOS NO REPOSITÓRIO SOB FEATURE FLAG; HOMOLOGAÇÃO DE CAPACIDADES DO PROVEDOR PENDENTE):**
+  * Na evolução com mensageria interativa (WhatsApp Cloud API / Evolution API):
+    * O código público `CC-XXXXXXXX` é mantido como identificador auditável e mecanismo de fallback textual.
+    * A experiência primária do usuário **não** exige digitação manual de códigos: ações determinísticas (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*) são apresentadas como botões interativos nativos (Interactive Messages / Quick Replies) nos clientes compatíveis quando a feature flag estiver ativa.
+    * Cada ação interativa vincula-se de forma determinística ao seu respectivo contato/evento via *tokens de ação opacos com autorização atômica de contato/ação/ator* (`ia_<48hex>`).
+    * **Adaptadores de Transporte (WP6.5):** O Shared Delivery (`workflows/n8n/delivery-contract.mjs`) converte payloads neutros em requisições `/message/sendButtons` (mapeando o corpo da mensagem no campo `title` da Evolution 2.3.7) e aceita respostas no formato Baileys/Evolution ou Meta Cloud. O Gateway (`workflows/n8n/gateway-contract.mjs`) extrai o `interactive_action_id` unicamente a partir de campos estruturados de botões (`buttonsResponseMessage`, `templateButtonReplyMessage`, `listResponseMessage` ou `interactive.button_reply`).
+    * **Invariante de Transporte e Segurança:** A ativação de ações interativas exige a preservação integral do ID de ação opaco pelo provedor de mensageria. Se o provedor descartar o ID e entregar apenas o texto/rótulo do botão (ex.: "Confirmar"), o adaptador de entrada rejeita o evento de forma segura (`unsupported_interactive_reply` com HTTP 200), **nunca** convertendo o rótulo em ID nem roteando o clique para o parser de comandos textuais.
+    * *Status de Homologação:* O código dos adaptadores e os contratos de teste estão integrados no repositório, mas as capacidades reais do provedor em produção ainda não foram homologadas (WP6.6 pendente) e a feature flag `INTERACTIVE_ACTIONS_ENABLED` permanece desativada (`false`).
 
 ---
 
