@@ -291,10 +291,10 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
     };
     await query(
       `INSERT INTO channel_outbound_messages (
-        id, channel_inbound_message_id, provider, recipient_phone_e164,
+        id, channel_inbound_message_id, purpose, provider, recipient_phone_e164,
         message_type, text_content, interactive_payload, status
-      ) VALUES ($1, $2, 'test', $3, 'interactive', 'Confirme a conclusão do serviço', $4::jsonb, 'pending')`,
-      [customerOutboundId, inboundId, customerPhone, JSON.stringify(customerPayload)]
+      ) VALUES ($1, NULL, 'customer_contact_update', 'test', $2, 'interactive', 'Confirme a conclusão do serviço', $3::jsonb, 'pending')`,
+      [customerOutboundId, customerPhone, JSON.stringify(customerPayload)]
     );
 
     const profPayload = {
@@ -308,10 +308,10 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
     };
     await query(
       `INSERT INTO channel_outbound_messages (
-        id, channel_inbound_message_id, provider, recipient_phone_e164,
+        id, channel_inbound_message_id, purpose, provider, recipient_phone_e164,
         message_type, text_content, interactive_payload, status
-      ) VALUES ($1, $2, 'test', $3, 'interactive', 'Atualize o status do atendimento', $4::jsonb, 'pending')`,
-      [profOutboundId, inboundId, professionalPhone, JSON.stringify(profPayload)]
+      ) VALUES ($1, NULL, 'professional_contact_notification', 'test', $2, 'interactive', 'Atualize o status do atendimento', $3::jsonb, 'pending')`,
+      [profOutboundId, professionalPhone, JSON.stringify(profPayload)]
     );
 
     // H. Valid tokens for each of the 4 action types bound to corresponding interactive outbounds
