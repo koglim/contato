@@ -46,3 +46,24 @@ export const interactiveOutboundPayloadSchema = z
     { message: "action_id values must be unique within payload" }
   );
 export type InteractiveOutboundPayload = z.infer<typeof interactiveOutboundPayloadSchema>;
+
+export const INTERACTIVE_ACTION_TOKEN_TTL_DAYS = 30;
+
+export const interactiveActionResultSchema = z
+  .object({
+    action: z.enum([
+      "declared",
+      "confirmed",
+      "contested",
+      "unavailability_declared",
+      "idempotent_replay",
+      "unavailable",
+      "clarification",
+    ]),
+    action_type: interactiveActionTypeSchema.optional(),
+    public_code: z.string().optional(),
+    reply_text: z.string().trim().min(1).max(2_000),
+  })
+  .strict();
+export type InteractiveActionResult = z.infer<typeof interactiveActionResultSchema>;
+

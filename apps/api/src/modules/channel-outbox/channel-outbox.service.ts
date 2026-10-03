@@ -29,6 +29,7 @@ function claimResponse(record: ChannelOutboundMessageRecord) {
     text_content: record.purpose === "professional_auth_challenge"
       ? decryptAuthMessage(process.env.PROFESSIONAL_AUTH_PEPPER ?? "", record.textContent)
       : record.textContent,
+    ...(record.interactivePayload ? { interactive_payload: record.interactivePayload } : {}),
     processing_token: record.processingToken,
   };
 }

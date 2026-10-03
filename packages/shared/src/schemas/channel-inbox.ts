@@ -6,6 +6,7 @@ import { opportunityMessageSchema } from "./opportunity-message.js";
 import { contextualMessageSchema } from "./contextual-message.js";
 
 import { contactCompletionMessageSchema } from "./contact-completion.js";
+import { interactiveActionResultSchema } from "./interactive-action.js";
 
 function hasRawMessageText(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasRawMessageText);
@@ -35,6 +36,14 @@ export const channelInboundMessageRequestSchema = z.object({
   provider_message_id: z.string().trim().min(1).max(255),
   phone_e164: phoneE164Schema.transform(normalizeBrazilianMobilePhone),
   raw_text: z.string().trim().min(1).max(500),
+  interactive_action_id: z
+    .string()
+    .min(1)
+    .max(120)
+    .refine((v) => !/\s/.test(v), {
+      message: "interactive_action_id must not contain whitespace",
+    })
+    .optional(),
   country_code: z.string().trim().length(2).transform((value) => value.toUpperCase()).default("BR"),
   limit: z.number().int().min(1).max(10).default(3),
 }).strict();
@@ -50,6 +59,7 @@ export const channelInboundMessageResponseSchema = z.object({
       opportunityMessageSchema,
       contextualMessageSchema,
       contactCompletionMessageSchema,
+      interactiveActionResultSchema,
     ])
     .refine((value) => !hasRawMessageText(value), {
       message: "channel inbox results must not expose raw message text",

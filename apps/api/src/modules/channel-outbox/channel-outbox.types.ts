@@ -5,6 +5,7 @@ import type {
   MarkChannelOutboundMessageFailedInput,
   MarkChannelOutboundMessageSentInput,
   ChannelOutboundQueueStatus,
+  InteractiveOutboundPayload,
 } from "@contatocerto/shared";
 
 export type ChannelOutboundMessageRecord = {
@@ -13,8 +14,9 @@ export type ChannelOutboundMessageRecord = {
   purpose: ChannelOutboundMessagePurpose;
   provider: string;
   recipientPhoneE164: string;
-  messageType: "text";
+  messageType: "text" | "interactive";
   textContent: string;
+  interactivePayload: InteractiveOutboundPayload | null;
   status: ChannelOutboundMessageStatus;
   processingToken: string | null;
   processingStartedAt: Date | null;
@@ -31,18 +33,24 @@ export type CreateChannelOutboundMessage = {
   channelInboundMessageId: string;
   provider: string;
   recipientPhoneE164: string;
+  messageType?: "text" | "interactive";
   textContent: string;
+  interactivePayload?: InteractiveOutboundPayload | null;
   searchRequestId: string | null;
   matchIds: string[];
 };
 
 export type CreateIndependentChannelOutboundMessage = {
   businessKey: string;
-  purpose: "professional_contact_notification" | "channel_notice" | "professional_auth_challenge";
+  purpose: "professional_contact_notification" | "channel_notice" | "professional_auth_challenge" | "customer_contact_update";
   provider: string;
   recipientPhoneE164: string;
+  messageType?: "text" | "interactive";
   textContent: string;
+  interactivePayload?: InteractiveOutboundPayload | null;
   expiresAt?: Date | null;
+  completionEventId?: string;
+  professionalUnavailabilityEventId?: string;
 };
 
 export interface ChannelOutboundMessageRepository {

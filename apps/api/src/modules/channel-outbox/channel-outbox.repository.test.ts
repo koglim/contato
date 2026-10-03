@@ -108,7 +108,7 @@ test("outbox repository creates an independent purpose and atomically claims the
   assert.equal(independent.purpose, "professional_contact_notification");
   assert.equal(independent.channelInboundMessageId, null);
   assert.match(current.calls[0]!.text, /purpose/u);
-  assert.match(current.calls[0]!.text, /VALUES \(NULL, \$1, \$2, \$3, \$4, \$5, \$6\)/u);
+  assert.match(current.calls[0]!.text, /VALUES \(NULL, \$1, \$2, \$3, \$4, \$5, \$6::jsonb, \$7, \$8, \$9, \$10\)/u);
 
   const claimed = await current.repository.claimNextPending(token, 60);
   assert.equal(claimed?.status, "processing");
