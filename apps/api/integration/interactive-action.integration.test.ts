@@ -23,6 +23,7 @@ const randomPhone = () => `+5565${Math.floor(100000000 + Math.random() * 8999999
 async function createFixture(options: {
   status?: string;
   enableInteractive?: boolean;
+  skipContact?: boolean;
 } = {}) {
   if (options.enableInteractive !== undefined) {
     process.env.INTERACTIVE_ACTIONS_ENABLED = options.enableInteractive ? "true" : "false";
@@ -101,23 +102,25 @@ async function createFixture(options: {
   };
 
   const contactStatus = options.status ?? "shared";
-  await query(
-    `INSERT INTO contacts (
-       id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
-     )
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)`,
-    [
-      contactId,
-      professionalId,
-      customerId,
-      searchId,
-      choiceId,
-      code,
-      JSON.stringify(snapshot),
-      conversationId,
-      contactStatus,
-    ]
-  );
+  if (!options.skipContact) {
+    await query(
+      `INSERT INTO contacts (
+         id, professional_id, customer_id, search_request_id, selection_key, public_code, bilateral_snapshot, selection_conversation_id, status
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)`,
+      [
+        contactId,
+        professionalId,
+        customerId,
+        searchId,
+        choiceId,
+        code,
+        JSON.stringify(snapshot),
+        conversationId,
+        contactStatus,
+      ]
+    );
+  }
 
   async function createInitialInteractiveOutboundAndTokens() {
     const tokenCompletion = generateInteractiveActionToken();
@@ -141,11 +144,11 @@ async function createFixture(options: {
 
     const outboundRes = await query<{ id: string }>(
       `INSERT INTO channel_outbound_messages (
-         purpose, provider, recipient_phone_e164, message_type, text_content, interactive_payload, business_key, status, sent_at
+         purpose, provider, recipient_phone_e164, message_type, text_content, interactive_payload, business_key, status, sent_at, provider_message_id
        )
-       VALUES ('professional_contact_notification', 'test', $1, 'interactive', 'Detalhes da solicitação...', $2::jsonb, $3, 'sent', NOW())
+       VALUES ('professional_contact_notification', 'test', $1, 'interactive', 'Detalhes da solicitação...', $2::jsonb, $3, 'sent', NOW(), $4)
        RETURNING id`,
-      [professionalPhone, JSON.stringify(payload), `contact:${contactId}:initial`]
+      [professionalPhone, JSON.stringify(payload), `contact:${contactId}:initial`, randomUUID()]
     );
     const outboundId = outboundRes.rows[0]!.id;
 
@@ -251,7 +254,7 @@ test("Scenario 1: Token format and cryptographic entropy", async () => {
 });
 
 test("Scenario 2: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=false generates plain text and 0 tokens", async () => {
-  const f = await createFixture({ enableInteractive: false });
+  const f = await createFixture({ enableInteractive: false, skipContact: true });
   try {
     const ready = {
       inbound: {
@@ -320,7 +323,7 @@ test("Scenario 2: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=fa
 });
 
 test("Scenario 3: Bilateral contact creation with INTERACTIVE_ACTIONS_ENABLED=true emits interactive payload and 2 action tokens", async () => {
-  const f = await createFixture({ enableInteractive: true });
+  const f = await createFixture({ enableInteractive: true, skipContact: true });
   try {
     const ready = {
       inbound: {
@@ -603,7 +606,10 @@ test("Scenario 10: Customer executes confirm_completion button action", async ()
     assert.ok(confirmToken);
 
     // Simulate outbound being sent by background delivery worker
-    await query("UPDATE channel_outbound_messages SET status = 'sent' WHERE id = $1", [confirmToken.outbound_message_id]);
+    await query(
+      "UPDATE channel_outbound_messages SET status = 'sent', provider_message_id = $2, sent_at = NOW() WHERE id = $1",
+      [confirmToken.outbound_message_id, randomUUID()]
+    );
 
     // 3. Customer executes confirm_completion
     const res = await f.sendInteractive(confirmToken.public_token, f.customerPhone);
@@ -647,7 +653,10 @@ test("Scenario 11: Customer executes contest_completion button action", async ()
     const contestToken = customerTokens.find((t) => t.action_type === "contest_completion")!;
     assert.ok(contestToken);
 
-    await query("UPDATE channel_outbound_messages SET status = 'sent' WHERE id = $1", [contestToken.outbound_message_id]);
+    await query(
+      "UPDATE channel_outbound_messages SET status = 'sent', provider_message_id = $2, sent_at = NOW() WHERE id = $1",
+      [contestToken.outbound_message_id, randomUUID()]
+    );
 
     // 3. Customer executes contest_completion
     const res = await f.sendInteractive(contestToken.public_token, f.customerPhone);
