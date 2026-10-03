@@ -64,6 +64,24 @@ flowchart TD
 * **ContatoCerto API (Autoridade de Negócio e Domínio):** O backend Fastify é a autoridade absoluta sobre resolução de serviços, elegibilidade, criação de buscas, ranking espacial, consentimento, geração de contatos bilaterais e ciclo de vida de atendimentos.
 * **PostgreSQL / PostGIS (Persistência Canônica):** Camada de dados única e centralizada. É a guardiã das transações, tabelas de fila (`channel_inbound_messages`, `channel_outbound_messages`), locks concorrentes (`FOR UPDATE`) e do catálogo geográfico.
 
+### Autoridade Compartilhada de Domínio Pós-Conexão (CURRENT — WP6.3)
+
+As mutações transacionais de negócio do ciclo pós-conexão convergem para métodos de domínio compartilhados e neutros de provedor (`apps/api/src/modules/contact-completion/contact-completion.domain.ts` e `apps/api/src/modules/professional-opportunity/professional-unavailability.domain.ts`):
+
+* **Separação entre Entrada e Domínio:** O parsing de comandos textuais e a resolução de alvos operam fora da autoridade de mutação de domínio.
+* **Operações Transacionais Canônicas:**
+  * **Declaração de Conclusão:** `executeCompletionDeclaration(db, contact, actorRole, inboundId, options?)`
+  * **Confirmação de Conclusão:** `executeCompletionConfirmation(db, contact, actorRole, inboundId, options?)`
+  * **Contestação de Conclusão:** `executeCompletionContestation(db, contact, actorRole, inboundId, options?)`
+  * **Declaração de Indisponibilidade:** `executeUnavailabilityDeclaration(db, contact, professionalId, inboundId, options?)`
+* **Neutralidade de Provedor e Invariantes:** As operações de domínio gerenciam locks (`FOR UPDATE`), transições atômicas de estado, persistência de eventos no ledger e notificações de contraparte sem conhecer detalhes de provedor ou canal de mensageria.
+* **Comportamento Textual Inalterado:** Os serviços textuais vigentes (`ContactCompletionService`, `ProfessionalOpportunityService`) delegam integralmente a essas operações de domínio, mantendo 100% de compatibilidade e comportamento idêntico.
+* **Sequenciamento de Ações Interativas (ADR-006):**
+  * **CURRENT (WP6.2 / WP6.3):** Fundação relacional (Migration 028), schemas neutros em `@contatocerto/shared` e autoridade transacional compartilhada extraída. O runtime de tokens de ações interativas **NÃO** está ativo.
+  * **WP6.4 (Pendente):** `ActionTokenService`, emissão/consumo de tokens e roteamento dual-path no Channel Inbox.
+  * **WP6.5 (Pendente):** Adaptadores de transporte n8n para payloads interativos e testes de contrato.
+  * **WP6.6 (Pendente):** Homologação de capacidades do provedor e validação controlada em produção.
+
 ---
 
 ## 3. Arquitetura de Contexto e Inteligência Artificial
