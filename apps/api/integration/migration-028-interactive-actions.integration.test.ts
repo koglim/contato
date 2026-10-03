@@ -46,6 +46,16 @@ test("Scenario A & B: Real schema-027 -> schema-028 upgrade and historical compa
   )).rows[0].cnt;
   assert.equal(is028AppliedBefore, 0, "028_add_interactive_actions_foundation must NOT exist before upgrade");
 
+  const oldConstraintBefore = (await query<{ cnt: number }>(
+    "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'channel_outbound_messages_message_type_check'"
+  )).rows[0].cnt;
+  assert.equal(oldConstraintBefore, 1, "channel_outbound_messages_message_type_check must exist under 027");
+
+  const newConstraintBefore = (await query<{ cnt: number }>(
+    "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'channel_outbound_messages_message_type_payload_chk'"
+  )).rows[0].cnt;
+  assert.equal(newConstraintBefore, 0, "channel_outbound_messages_message_type_payload_chk must NOT exist under 027");
+
   // Insert a historical text outbound under 027
   const histCustPhone = phone();
   const histInboundId = randomUUID();
@@ -72,6 +82,17 @@ test("Scenario A & B: Real schema-027 -> schema-028 upgrade and historical compa
       "SELECT count(*)::int AS cnt FROM pgmigrations WHERE name = '028_add_interactive_actions_foundation'"
     )).rows[0].cnt;
     assert.equal(is028AppliedAfter, 1, "028_add_interactive_actions_foundation must exist in pgmigrations");
+
+    // Old constraint dropped, new constraint added
+    const oldConstraintAfter = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'channel_outbound_messages_message_type_check'"
+    )).rows[0].cnt;
+    assert.equal(oldConstraintAfter, 0, "channel_outbound_messages_message_type_check must be dropped in 028");
+
+    const newConstraintAfter = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'channel_outbound_messages_message_type_payload_chk'"
+    )).rows[0].cnt;
+    assert.equal(newConstraintAfter, 1, "channel_outbound_messages_message_type_payload_chk must exist in 028");
 
     // Table interactive_action_tokens exists
     const tableExists = (await query<{ cnt: number }>(
@@ -111,6 +132,12 @@ test("Scenario A & B: Real schema-027 -> schema-028 upgrade and historical compa
       "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'contact_completions_contact_id_id_key'"
     )).rows[0].cnt;
     assert.equal(completionUnique, 1, "contact_completions_contact_id_id_key constraint must exist");
+
+    // Supporting public_token constraint on interactive_action_tokens exists
+    const tokenCheck = (await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'interactive_action_tokens_public_token_chk'"
+    )).rows[0].cnt;
+    assert.equal(tokenCheck, 1, "interactive_action_tokens_public_token_chk constraint must exist");
 
     // Historical row compatibility: unchanged message_type='text' and interactive_payload IS NULL
     const histRow = (await query<{ message_type: string; interactive_payload: unknown }>(
@@ -222,7 +249,14 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
   const customerPhone = phone();
   const professionalPhone = phone();
   const inboundId = randomUUID();
-  const outboundId = randomUUID();
+  const customerOutboundId = randomUUID();
+  const profOutboundId = randomUUID();
+
+  // Semantically opaque tokens for v1 actions
+  const tokenConfirm = "ia_" + randomUUID().replaceAll("-", "");
+  const tokenContest = "ia_" + randomUUID().replaceAll("-", "");
+  const tokenDeclComp = "ia_" + randomUUID().replaceAll("-", "");
+  const tokenDeclUnavail = "ia_" + randomUUID().replaceAll("-", "");
 
   try {
     // Setup fixtures
@@ -244,51 +278,77 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
        VALUES ($1::uuid, 'test', $1::text, $2, 'origem outbound')`,
       [inboundId, customerPhone]
     );
+
+    // Setup provider-neutral interactive outbounds for customer and professional
+    const customerPayload = {
+      schema_version: 1,
+      type: "button_group",
+      body: "O profissional declarou a conclusão do serviço. Por favor, confirme:",
+      actions: [
+        { action_id: tokenConfirm, label: "Confirmar" },
+        { action_id: tokenContest, label: "Contestar" },
+      ],
+    };
     await query(
-      `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status)
-       VALUES ($1, $2, 'test', $3, 'text', 'Aguardando', 'pending')`,
-      [outboundId, inboundId, customerPhone]
+      `INSERT INTO channel_outbound_messages (
+        id, channel_inbound_message_id, provider, recipient_phone_e164,
+        message_type, text_content, interactive_payload, status
+      ) VALUES ($1, $2, 'test', $3, 'interactive', 'Confirme a conclusão do serviço', $4::jsonb, 'pending')`,
+      [customerOutboundId, inboundId, customerPhone, JSON.stringify(customerPayload)]
     );
 
-    // H. Valid tokens for each of the 4 action types
+    const profPayload = {
+      schema_version: 1,
+      type: "button_group",
+      body: "Informações do atendimento. Escolha uma opção:",
+      actions: [
+        { action_id: tokenDeclComp, label: "Concluído" },
+        { action_id: tokenDeclUnavail, label: "Não consigo atender" },
+      ],
+    };
+    await query(
+      `INSERT INTO channel_outbound_messages (
+        id, channel_inbound_message_id, provider, recipient_phone_e164,
+        message_type, text_content, interactive_payload, status
+      ) VALUES ($1, $2, 'test', $3, 'interactive', 'Atualize o status do atendimento', $4::jsonb, 'pending')`,
+      [profOutboundId, inboundId, professionalPhone, JSON.stringify(profPayload)]
+    );
+
+    // H. Valid tokens for each of the 4 action types bound to corresponding interactive outbounds
     // 1. confirm_completion (customer + completion_id)
-    const tokenConfirm = "ia_token_confirm_" + randomUUID();
     await query(
       `INSERT INTO interactive_action_tokens (
         public_token, action_type, contact_id, completion_id, intended_actor_role,
         intended_phone_e164, outbound_message_id, status, expires_at
       ) VALUES ($1, 'confirm_completion', $2, $3, 'customer', $4, $5, 'active', NOW() + INTERVAL '1 day')`,
-      [tokenConfirm, contactId, completionId, customerPhone, outboundId]
+      [tokenConfirm, contactId, completionId, customerPhone, customerOutboundId]
     );
 
     // 2. contest_completion (customer + completion_id)
-    const tokenContest = "ia_token_contest_" + randomUUID();
     await query(
       `INSERT INTO interactive_action_tokens (
         public_token, action_type, contact_id, completion_id, intended_actor_role,
         intended_phone_e164, outbound_message_id, status, expires_at
       ) VALUES ($1, 'contest_completion', $2, $3, 'customer', $4, $5, 'active', NOW() + INTERVAL '1 day')`,
-      [tokenContest, contactId, completionId, customerPhone, outboundId]
+      [tokenContest, contactId, completionId, customerPhone, customerOutboundId]
     );
 
     // 3. declare_completion (professional + NULL completion_id)
-    const tokenDeclComp = "ia_token_decl_comp_" + randomUUID();
     await query(
       `INSERT INTO interactive_action_tokens (
         public_token, action_type, contact_id, completion_id, intended_actor_role,
         intended_phone_e164, outbound_message_id, status, expires_at
       ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
-      [tokenDeclComp, contactId, professionalPhone, outboundId]
+      [tokenDeclComp, contactId, professionalPhone, profOutboundId]
     );
 
     // 4. declare_unavailability (professional + NULL completion_id)
-    const tokenDeclUnavail = "ia_token_decl_unavail_" + randomUUID();
     await query(
       `INSERT INTO interactive_action_tokens (
         public_token, action_type, contact_id, completion_id, intended_actor_role,
         intended_phone_e164, outbound_message_id, status, expires_at
       ) VALUES ($1, 'declare_unavailability', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
-      [tokenDeclUnavail, contactId, professionalPhone, outboundId]
+      [tokenDeclUnavail, contactId, professionalPhone, profOutboundId]
     );
 
     const tokenCount = (await query<{ cnt: number }>(
@@ -304,7 +364,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at
         ) VALUES ($1, 'unknown_action', $2, NULL, 'customer', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
-        ["ia_token_invalid_" + randomUUID(), contactId, customerPhone, outboundId]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, customerPhone, customerOutboundId]
       ),
       /check/i
     );
@@ -316,7 +376,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at
         ) VALUES ($1, 'confirm_completion', $2, NULL, 'customer', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
-        ["ia_token_no_comp_" + randomUUID(), contactId, customerPhone, outboundId]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, customerPhone, customerOutboundId]
       ),
       /check/i
     );
@@ -328,7 +388,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at
         ) VALUES ($1, 'declare_completion', $2, $3, 'professional', $4, $5, 'active', NOW() + INTERVAL '1 day')`,
-        ["ia_token_decl_with_comp_" + randomUUID(), contactId, completionId, professionalPhone, outboundId]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, completionId, professionalPhone, profOutboundId]
       ),
       /check/i
     );
@@ -340,7 +400,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at
         ) VALUES ($1, 'declare_unavailability', $2, $3, 'professional', $4, $5, 'active', NOW() + INTERVAL '1 day')`,
-        ["ia_token_unavail_with_comp_" + randomUUID(), contactId, completionId, professionalPhone, outboundId]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, completionId, professionalPhone, profOutboundId]
       ),
       /check/i
     );
@@ -352,7 +412,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at, consumed_at, consumed_inbound_id
         ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'consumed', NOW() + INTERVAL '1 day', NULL, NULL)`,
-        ["ia_token_consumed_empty_" + randomUUID(), contactId, professionalPhone, outboundId]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, professionalPhone, profOutboundId]
       ),
       /check/i
     );
@@ -364,7 +424,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at, consumed_at, consumed_inbound_id
         ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day', NOW(), $5)`,
-        ["ia_token_active_with_consumed_" + randomUUID(), contactId, professionalPhone, outboundId, inboundId]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, professionalPhone, profOutboundId, inboundId]
       ),
       /check/i
     );
@@ -376,10 +436,78 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at
         ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', 'invalid-phone', $3, 'active', NOW() + INTERVAL '1 day')`,
-        ["ia_token_bad_phone_" + randomUUID(), contactId, outboundId]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, profOutboundId]
       ),
       /check/i
     );
+
+    // Public token constraint tests (Blocker 4)
+    // Empty public_token rejected
+    await assert.rejects(
+      query(
+        `INSERT INTO interactive_action_tokens (
+          public_token, action_type, contact_id, completion_id, intended_actor_role,
+          intended_phone_e164, outbound_message_id, status, expires_at
+        ) VALUES ('', 'declare_completion', $1, NULL, 'professional', $2, $3, 'active', NOW() + INTERVAL '1 day')`,
+        [contactId, professionalPhone, profOutboundId]
+      ),
+      /check/i
+    );
+
+    // Whitespace public_token rejected (space inside, leading space, trailing newline)
+    await assert.rejects(
+      query(
+        `INSERT INTO interactive_action_tokens (
+          public_token, action_type, contact_id, completion_id, intended_actor_role,
+          intended_phone_e164, outbound_message_id, status, expires_at
+        ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
+        ["ia token space", contactId, professionalPhone, profOutboundId]
+      ),
+      /check/i
+    );
+    await assert.rejects(
+      query(
+        `INSERT INTO interactive_action_tokens (
+          public_token, action_type, contact_id, completion_id, intended_actor_role,
+          intended_phone_e164, outbound_message_id, status, expires_at
+        ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
+        [" ia_token_leading", contactId, professionalPhone, profOutboundId]
+      ),
+      /check/i
+    );
+    await assert.rejects(
+      query(
+        `INSERT INTO interactive_action_tokens (
+          public_token, action_type, contact_id, completion_id, intended_actor_role,
+          intended_phone_e164, outbound_message_id, status, expires_at
+        ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
+        ["ia_token_trailing\n", contactId, professionalPhone, profOutboundId]
+      ),
+      /check/i
+    );
+
+    // Token with length > 120 rejected
+    const tooLongToken = "ia_" + "a".repeat(118); // 121 characters
+    await assert.rejects(
+      query(
+        `INSERT INTO interactive_action_tokens (
+          public_token, action_type, contact_id, completion_id, intended_actor_role,
+          intended_phone_e164, outbound_message_id, status, expires_at
+        ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
+        [tooLongToken, contactId, professionalPhone, profOutboundId]
+      )
+    );
+
+    // Token with exact length 120 accepted
+    const exact120Token = "ia_" + "b".repeat(117); // 120 characters
+    await query(
+      `INSERT INTO interactive_action_tokens (
+        public_token, action_type, contact_id, completion_id, intended_actor_role,
+        intended_phone_e164, outbound_message_id, status, expires_at
+      ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
+      [exact120Token, contactId, professionalPhone, profOutboundId]
+    );
+    await query("DELETE FROM interactive_action_tokens WHERE public_token = $1", [exact120Token]);
 
     // P. Public token uniqueness enforced
     await assert.rejects(
@@ -388,7 +516,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at
         ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
-        [tokenDeclComp, contactId, professionalPhone, outboundId]
+        [tokenDeclComp, contactId, professionalPhone, profOutboundId]
       ),
       (err: unknown) => (err as { code?: string }).code === "23505"
     );
@@ -400,7 +528,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at
         ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
-        ["ia_token_no_outbound_" + randomUUID(), contactId, professionalPhone, randomUUID()]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, professionalPhone, randomUUID()]
       ),
       (err: unknown) => (err as { code?: string }).code === "23503"
     );
@@ -412,7 +540,7 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at, consumed_at, consumed_inbound_id
         ) VALUES ($1, 'declare_completion', $2, NULL, 'professional', $3, $4, 'consumed', NOW() + INTERVAL '1 day', NOW(), $5)`,
-        ["ia_token_bad_inbound_" + randomUUID(), contactId, professionalPhone, outboundId, randomUUID()]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactId, professionalPhone, profOutboundId, randomUUID()]
       ),
       (err: unknown) => (err as { code?: string }).code === "23503"
     );
@@ -431,13 +559,13 @@ test("Scenario H through S: interactive_action_tokens table constraints and inte
           public_token, action_type, contact_id, completion_id, intended_actor_role,
           intended_phone_e164, outbound_message_id, status, expires_at
         ) VALUES ($1, 'confirm_completion', $2, $3, 'customer', $4, $5, 'active', NOW() + INTERVAL '1 day')`,
-        ["ia_token_mismatch_" + randomUUID(), contactIdB, completionId, customerPhone, outboundId]
+        ["ia_" + randomUUID().replaceAll("-", ""), contactIdB, completionId, customerPhone, customerOutboundId]
       ),
       (err: unknown) => (err as { code?: string }).code === "23503"
     );
   } finally {
     await query("DELETE FROM interactive_action_tokens WHERE contact_id IN ($1, $2)", [contactId, contactIdB]);
-    await query("DELETE FROM channel_outbound_messages WHERE id = $1", [outboundId]);
+    await query("DELETE FROM channel_outbound_messages WHERE id IN ($1, $2)", [customerOutboundId, profOutboundId]);
     await query("DELETE FROM channel_inbound_messages WHERE id = $1", [inboundId]);
     await query("DELETE FROM contact_completions WHERE id = $1", [completionId]);
     await query("DELETE FROM contacts WHERE id IN ($1, $2)", [contactId, contactIdB]);
@@ -479,6 +607,17 @@ test("Scenario T & X: Compatible rollback with zero interactive data and clean r
   )).rows[0].cnt;
   assert.equal(inboundCol, 0, "interactive_action_id column must be dropped");
 
+  // Old text-only constraint restored in schema 027
+  const oldConstraintRestored = (await query<{ cnt: number }>(
+    "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'channel_outbound_messages_message_type_check'"
+  )).rows[0].cnt;
+  assert.equal(oldConstraintRestored, 1, "channel_outbound_messages_message_type_check must be restored under 027");
+
+  const newConstraintRemoved = (await query<{ cnt: number }>(
+    "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'channel_outbound_messages_message_type_payload_chk'"
+  )).rows[0].cnt;
+  assert.equal(newConstraintRemoved, 0, "channel_outbound_messages_message_type_payload_chk must be removed after rollback");
+
   // Reapply 028 (Scenario X)
   await migrateUp(1);
 
@@ -486,6 +625,11 @@ test("Scenario T & X: Compatible rollback with zero interactive data and clean r
     "SELECT count(*)::int AS cnt FROM pgmigrations WHERE name = '028_add_interactive_actions_foundation'"
   )).rows[0].cnt;
   assert.equal(is028Reapplied, 1, "028 must be reapplied cleanly");
+
+  const newConstraintReapplied = (await query<{ cnt: number }>(
+    "SELECT count(*)::int AS cnt FROM pg_constraint WHERE conname = 'channel_outbound_messages_message_type_payload_chk'"
+  )).rows[0].cnt;
+  assert.equal(newConstraintReapplied, 1, "channel_outbound_messages_message_type_payload_chk must be reapplied");
 });
 
 test("Scenario U: P0028 rollback blocker when interactive_action_tokens rows exist", async () => {
@@ -494,6 +638,7 @@ test("Scenario U: P0028 rollback blocker when interactive_action_tokens rows exi
   const customerId = randomUUID(), professionalId = randomUUID(), searchId = randomUUID(), contactId = randomUUID();
   const inboundId = randomUUID(), outboundId = randomUUID(), tokenId = randomUUID();
   const customerPhone = phone(), professionalPhone = phone();
+  const opaqueTokenU = "ia_" + randomUUID().replaceAll("-", "");
 
   try {
     await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, customerPhone]);
@@ -501,14 +646,16 @@ test("Scenario U: P0028 rollback blocker when interactive_action_tokens rows exi
     await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, 'eletricista', 'selected')", [searchId, customerId]);
     await query("INSERT INTO contacts (id, search_request_id, customer_id, professional_id, status) VALUES ($1, $2, $3, $4, 'shared')", [contactId, searchId, customerId, professionalId]);
     await query("INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text) VALUES ($1::uuid, 'test', $1::text, $2, 'inbound')", [inboundId, customerPhone]);
+
+    // Note: Text outbound is intentionally used here to isolate the token-row rollback blocker without triggering the interactive-outbound rollback blocker.
     await query("INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status) VALUES ($1, $2, 'test', $3, 'text', 'txt', 'pending')", [outboundId, inboundId, customerPhone]);
 
     await query(
       `INSERT INTO interactive_action_tokens (
         id, public_token, action_type, contact_id, completion_id, intended_actor_role,
         intended_phone_e164, outbound_message_id, status, expires_at
-      ) VALUES ($1, 'ia_token_u', 'declare_completion', $2, NULL, 'professional', $3, $4, 'active', NOW() + INTERVAL '1 day')`,
-      [tokenId, contactId, professionalPhone, outboundId]
+      ) VALUES ($1, $2, 'declare_completion', $3, NULL, 'professional', $4, $5, 'active', NOW() + INTERVAL '1 day')`,
+      [tokenId, opaqueTokenU, contactId, professionalPhone, outboundId]
     );
 
     let rollbackErr: unknown = null;
@@ -547,6 +694,14 @@ test("Scenario V: P0028 rollback blocker when interactive outbound message exist
   const customerPhone = phone();
   const inboundId = randomUUID();
   const outboundId = randomUUID();
+  const opaqueActionId = "ia_" + randomUUID().replaceAll("-", "");
+
+  const payload = {
+    schema_version: 1,
+    type: "button_group",
+    body: "Mensagem interativa",
+    actions: [{ action_id: opaqueActionId, label: "Confirmar" }],
+  };
 
   try {
     await query(
@@ -556,8 +711,8 @@ test("Scenario V: P0028 rollback blocker when interactive outbound message exist
     );
     await query(
       `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, interactive_payload, status)
-       VALUES ($1, $2, 'test', $3, 'interactive', 'Interactive Outbound', '{"schema_version":1,"type":"button_group","body":"msg","actions":[{"action_id":"a1","label":"b1"}]}'::jsonb, 'pending')`,
-      [outboundId, inboundId, customerPhone]
+       VALUES ($1, $2, 'test', $3, 'interactive', 'Interactive Outbound', $4::jsonb, 'pending')`,
+      [outboundId, inboundId, customerPhone, JSON.stringify(payload)]
     );
 
     let rollbackErr: unknown = null;
@@ -583,12 +738,13 @@ test("Scenario W: P0028 rollback blocker when inbound interactive_action_id is p
 
   const customerPhone = phone();
   const inboundId = randomUUID();
+  const opaqueInboundActionId = "ia_" + randomUUID().replaceAll("-", "");
 
   try {
     await query(
       `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text, interactive_action_id)
-       VALUES ($1::uuid, 'test', $1::text, $2, 'Confirmar', 'ia_token_inbound_w')`,
-      [inboundId, customerPhone]
+       VALUES ($1::uuid, 'test', $1::text, $2, 'Confirmar', $3)`,
+      [inboundId, customerPhone, opaqueInboundActionId]
     );
 
     let rollbackErr: unknown = null;

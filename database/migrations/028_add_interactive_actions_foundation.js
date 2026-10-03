@@ -4,20 +4,8 @@ exports.up = (pgm) => {
     ALTER TABLE channel_outbound_messages
       ADD COLUMN interactive_payload JSONB NULL;
 
-    DO $$
-    DECLARE
-      r record;
-    BEGIN
-      FOR r IN (
-        SELECT conname
-          FROM pg_constraint
-         WHERE conrelid = 'channel_outbound_messages'::regclass
-           AND contype = 'c'
-           AND pg_get_constraintdef(oid) LIKE '%message_type%'
-      ) LOOP
-        EXECUTE format('ALTER TABLE channel_outbound_messages DROP CONSTRAINT %I', r.conname);
-      END LOOP;
-    END $$;
+    ALTER TABLE channel_outbound_messages
+      DROP CONSTRAINT IF EXISTS channel_outbound_messages_message_type_check;
 
     ALTER TABLE channel_outbound_messages
       ADD CONSTRAINT channel_outbound_messages_message_type_payload_chk
@@ -54,7 +42,10 @@ exports.up = (pgm) => {
       consumed_inbound_id UUID UNIQUE REFERENCES channel_inbound_messages(id) ON DELETE RESTRICT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CHECK (length(public_token) >= 1),
+      CONSTRAINT interactive_action_tokens_public_token_chk CHECK (
+        char_length(public_token) BETWEEN 1 AND 120
+        AND public_token !~ '\\s'
+      ),
       CONSTRAINT check_interactive_action_token_type_role_completion CHECK (
         (action_type = 'confirm_completion' AND completion_id IS NOT NULL AND intended_actor_role = 'customer')
         OR (action_type = 'contest_completion' AND completion_id IS NOT NULL AND intended_actor_role = 'customer')
