@@ -12,7 +12,7 @@ import type { ConsentOutcome, SelectShownMatchInput } from "../match-selection/m
 import { createIndependentOutbound } from "../channel-outbox/channel-outbox.repository.js";
 import { presentSelectionMessage } from "../selection-message/selection-message.presenter.js";
 import { mapSelectionCommandOutcome } from "../selection-message/selection-message.mapper.js";
-import { readInteractiveActionConfig } from "../../config/interactive-action.js";
+import { readInteractiveActionConfig, isInteractiveActionContactEligible } from "../../config/interactive-action.js";
 import { generateInteractiveActionToken } from "../interactive-action/interactive-action.crypto.js";
 import { PostgresInteractiveActionRepository } from "../interactive-action/interactive-action.repository.js";
 import { BILATERAL_NOTICE, BILATERAL_NOTICE_VERSION, bilateralSnapshotSchema, safeOpportunityText,
@@ -148,8 +148,13 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
       (channel_inbound_message_id, provider, recipient_phone_e164, text_content)
       VALUES ($1, $2, $3, $4)`, [input.selectionKey, context.inbound.provider, normalizeBrazilianMobilePhone(snapshot.customer_phone_e164), presentSelectionMessage(contract)]);
     const interactiveConfig = readInteractiveActionConfig();
+    const isEligible = isInteractiveActionContactEligible(
+      snapshot.customer_phone_e164,
+      snapshot.professional_phone_e164,
+      interactiveConfig
+    );
 
-    if (interactiveConfig.enabled) {
+    if (isEligible) {
       const tokenCompletion = generateInteractiveActionToken();
       const tokenUnavailability = generateInteractiveActionToken();
       const payload: InteractiveOutboundPayload = {

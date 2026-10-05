@@ -4,7 +4,7 @@ import {
   type InteractiveOutboundPayload,
 } from "@contatocerto/shared";
 import type { DatabaseClient } from "../../database/connection.js";
-import { readInteractiveActionConfig } from "../../config/interactive-action.js";
+import { readInteractiveActionConfig, isInteractiveActionContactEligible } from "../../config/interactive-action.js";
 import { generateInteractiveActionToken } from "../interactive-action/interactive-action.crypto.js";
 import { PostgresInteractiveActionRepository } from "../interactive-action/interactive-action.repository.js";
 import { bilateralSnapshotSchema } from "../bilateral-contact/bilateral-contact.policy.js";
@@ -143,8 +143,15 @@ export async function executeCompletionDeclaration(
     const promptText = `${ctx.actorLabel} declarou a conclusão do serviço da solicitação ${contact.public_code}. Se o serviço foi finalizado, responda “confirmar ${contact.public_code}”. Se houver divergência, responda “contestar ${contact.public_code}”.`;
 
     const interactiveConfig = readInteractiveActionConfig();
+    const isEligible =
+      ctx.counterpartRole === "customer" &&
+      isInteractiveActionContactEligible(
+        ctx.snapshot.customer_phone_e164,
+        ctx.snapshot.professional_phone_e164,
+        interactiveConfig
+      );
 
-    if (interactiveConfig.enabled && ctx.counterpartRole === "customer") {
+    if (isEligible) {
       const tokenConfirm = generateInteractiveActionToken();
       const tokenContest = generateInteractiveActionToken();
       const payload: InteractiveOutboundPayload = {
