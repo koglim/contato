@@ -41,6 +41,107 @@ test("gateway preserves conversation, escaping and historical instance:id idempo
   assert.doesNotMatch(JSON.stringify(result), /jwtPayload|headers|apikey|server_url/);
 });
 
+test("gateway provider_message_id validation matrix (Meta WAMID and Baileys formats)", () => {
+  // 1. Baileys alphanumeric/hyphen/underscore IDs accepted
+  const baileysId = "BAILEYS-MSG_1234567890ABCDEF";
+  const bInput = event();
+  bInput.body.data.key.id = baileysId;
+  const bRes = normalize(bInput);
+  assert.equal(bRes.action, "inbox");
+  assert.equal(bRes.inbound.provider_message_id, `test-instance:${baileysId}`);
+
+  // 2. Real-shaped wamid. IDs accepted (with dots, base64 chars, and equals sign padding)
+  const metaWamid = "wamid.HBgMNTU5OTg0MTE5MDcwFQIAEhgUM0E3M0U3MTVGRDA3QUMzNTVEMDEA";
+  const mWamidWithPadding = "wamid.HBgNNTU2Njk5MTIzNDU2NxUCMRIA==";
+  for (const wamid of [metaWamid, mWamidWithPadding]) {
+    const mInput = event();
+    mInput.body.data.key.id = wamid;
+    const mRes = normalize(mInput);
+    assert.equal(mRes.action, "inbox");
+    // 3. Exact Meta ID preserved in inbound.provider_message_id without alteration or truncation
+    assert.equal(mRes.inbound.provider_message_id, `test-instance:${wamid}`);
+  }
+
+  // 4. Empty ID rejected (webhook_id_invalid)
+  const emptyInput = event();
+  emptyInput.body.data.key.id = "";
+  assert.deepEqual(normalize(emptyInput), { action: "reject", reason: "webhook_id_invalid", http_status: 422 });
+
+  // Non-string types rejected
+  for (const nonString of [null, undefined, 12345, true, {}, []]) {
+    const badTypeInput = event();
+    badTypeInput.body.data.key.id = nonString;
+    assert.deepEqual(normalize(badTypeInput), { action: "reject", reason: "webhook_id_invalid", http_status: 422 });
+  }
+
+  // 5. Whitespace ID rejected
+  for (const ws of [" ", "   ", "wamid. 123", "wamid.123 ", " wamid.123", "\twamid.123"]) {
+    const wsInput = event();
+    wsInput.body.data.key.id = ws;
+    assert.deepEqual(normalize(wsInput), { action: "reject", reason: "webhook_id_invalid", http_status: 422 });
+  }
+
+  // 6. Newline/control-char ID rejected
+  for (const ctrl of ["wamid\n123", "wamid\r\n123", "wamid\x00123", "wamid\x1b123"]) {
+    const ctrlInput = event();
+    ctrlInput.body.data.key.id = ctrl;
+    assert.deepEqual(normalize(ctrlInput), { action: "reject", reason: "webhook_id_invalid", http_status: 422 });
+  }
+
+  // 7. Over-255 composite ID rejected
+  // config.instance is "test-instance" (13 chars). "test-instance:" is 14 chars.
+  // 14 + 241 = 255 -> allowed
+  // 14 + 242 = 256 -> rejected
+  const allowedLenId = "a".repeat(255 - "test-instance:".length);
+  const okCompositeInput = event();
+  okCompositeInput.body.data.key.id = allowedLenId;
+  assert.equal(normalize(okCompositeInput).action, "inbox");
+
+  const overflowLenId = "a".repeat(256 - "test-instance:".length);
+  const overflowInput = event();
+  overflowInput.body.data.key.id = overflowLenId;
+  assert.deepEqual(normalize(overflowInput), { action: "reject", reason: "webhook_id_invalid", http_status: 422 });
+
+  // 8. Path-like payloads rejected (slashes / and \ are strictly forbidden)
+  for (const pathPayload of ["../../etc/passwd", "/root", "foo/bar", "foo\\bar", "..\\..\\windows\\system32"]) {
+    const pathInput = event();
+    pathInput.body.data.key.id = pathPayload;
+    assert.deepEqual(normalize(pathInput), { action: "reject", reason: "webhook_id_invalid", http_status: 422 });
+  }
+
+  // SQL/injection syntax rejected
+  for (const injection of ["' OR '1'='1", "id; DROP TABLE contacts;--", "id\"--", "id`"]) {
+    const injInput = event();
+    injInput.body.data.key.id = injection;
+    assert.deepEqual(normalize(injInput), { action: "reject", reason: "webhook_id_invalid", http_status: 422 });
+  }
+
+  // 9. Valid text message reaches action=inbox
+  const validMsgInput = event({ conversation: "Olá, preciso de encanador" });
+  validMsgInput.body.data.key.id = metaWamid;
+  const validRes = normalize(validMsgInput);
+  assert.equal(validRes.action, "inbox");
+  assert.equal(validRes.inbound.raw_text, "Olá, preciso de encanador");
+  assert.equal(validRes.inbound.provider_message_id, `test-instance:${metaWamid}`);
+  assert.equal(validRes.inbound.phone_e164, "+5566991234567");
+
+  // 10. Interactive extraction behavior remains unchanged with Meta WAMID
+  const interactiveInput = event({
+    buttonsResponseMessage: {
+      selectedButtonId: "ia_test_action_1234567890",
+      selectedDisplayText: "Confirmar Serviço",
+    },
+  });
+  interactiveInput.body.data.key.id = metaWamid;
+  const interRes = normalize(interactiveInput);
+  assert.equal(interRes.action, "inbox");
+  assert.equal(interRes.inbound.interactive_action_id, "ia_test_action_1234567890");
+  assert.equal(interRes.inbound.raw_text, "Confirmar Serviço");
+  assert.equal(interRes.inbound.provider_message_id, `test-instance:${metaWamid}`);
+});
+
+
+
 test("gateway normalizes Brazilian degraded 8-digit mobile numbers while preserving fixed-line and canonical phones", () => {
   // Scenario A: Degraded Brazilian mobile without 9th digit (e.g. Evolution 2.3.7 bug)
   const degradedMobile = event();

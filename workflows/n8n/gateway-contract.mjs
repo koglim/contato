@@ -158,7 +158,9 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
     return reject("webhook_phone_invalid");
   }
 
-  if (typeof key.id !== "string" || !/^[A-Za-z0-9_-]+$/u.test(key.id)
+  // Official Meta Cloud API assigns message IDs in WAMID format containing '.' and base64 padding '='.
+  // Allowed characters: [A-Za-z0-9_.=-]. Slashes, spaces, quotes, control chars remain strictly forbidden.
+  if (typeof key.id !== "string" || !/^[A-Za-z0-9_.=-]+$/u.test(key.id)
     || `${config.instance}:${key.id}`.length > 255) return reject("webhook_id_invalid");
 
   const inbound = { provider: config.provider, provider_message_id: `${config.instance}:${key.id}`,
