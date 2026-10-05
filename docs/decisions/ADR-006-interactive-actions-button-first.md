@@ -266,6 +266,15 @@ Os parsers de texto e o validador de tokens atuam unicamente como camadas de ext
 4. **WP6.4:** `ActionTokenService` e Inbox Dual-Path na API (testes de integração da API).
 5. **WP6.5:** Adaptadores n8n (Gateway Inbound e Shared Delivery Outbound) com testes de contrato.
 6. **WP6.6:** Validação funcional de capacidades do provedor e homologação controlada em produção.
+7. **WP6.7:** *Canary Rollout Guard* fail-closed com controle bilateral de telefones permitidos antes da ativação global.
+
+### 14. Salvaguarda de Rollout Canário Bilateral (*Canary Rollout Guard*)
+* Para permitir a homologação de botões reais em produção sem expor clientes e profissionais não homologados, a emissão interativa é protegida por um mecanismo estrito *fail-closed*:
+  * `INTERACTIVE_ACTIONS_ENABLED=true|false` (chave mestra).
+  * `INTERACTIVE_ACTIONS_ROLLOUT_MODE=allowlist|all` (padrão: `allowlist`).
+  * `INTERACTIVE_ACTIONS_ALLOWED_PHONES=<csv>` (lista de telefones E.164 autorizados).
+* **Semântica Bilateral Mandatória:** No modo `allowlist`, a emissão interativa ocorre **somente se AMBOS** o cliente (`customer_phone_e164`) e o profissional (`professional_phone_e164`) estiverem na lista autorizada. Se qualquer um dos lados não pertencer à lista, o sistema reverte deterministicamente para mensagens de texto simples e zero tokens são gerados.
+* **Processamento Inbound Não Bloqueado:** A camada de recepção e execução de tokens (`InteractiveActionService.handle()`) não é bloqueada pelo filtro de emissão, garantindo que qualquer token válido previamente emitido seja processado e consumido normalmente.
 
 ---
 

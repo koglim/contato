@@ -23,12 +23,26 @@ const randomPhone = () => `+55659${Math.floor(10000000 + Math.random() * 8999999
 async function createFixture(options: {
   status?: string;
   enableInteractive?: boolean;
+  rolloutMode?: "allowlist" | "all";
+  allowedPhones?: string;
   skipContact?: boolean;
 } = {}) {
   if (options.enableInteractive !== undefined) {
     process.env.INTERACTIVE_ACTIONS_ENABLED = options.enableInteractive ? "true" : "false";
   } else {
     process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
+  }
+
+  if (options.rolloutMode !== undefined) {
+    process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = options.rolloutMode;
+  } else {
+    process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "all";
+  }
+
+  if (options.allowedPhones !== undefined) {
+    process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES = options.allowedPhones;
+  } else {
+    delete process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES;
   }
 
   const customerId = randomUUID();
@@ -227,6 +241,8 @@ async function createFixture(options: {
 
   async function cleanup() {
     delete process.env.INTERACTIVE_ACTIONS_ENABLED;
+    delete process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE;
+    delete process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES;
     const phones = Array.from(usedPhones);
     const cIds = Array.from(contactIds);
 
@@ -1168,3 +1184,391 @@ test("Scenario 23: Completely unknown token returns unavailable and generic cust
     await f.cleanup();
   }
 });
+
+test("Scenario Canary A: ENABLED=true, default rolloutMode (allowlist with empty allowlist) emits text and 0 tokens on bilateral contact", async () => {
+  delete process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE;
+  delete process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES;
+  const f = await createFixture({ enableInteractive: true, skipContact: true });
+  // Overwrite what createFixture set so it tests default environment behavior
+  delete process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE;
+  delete process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES;
+
+  try {
+    const ready = {
+      inbound: {
+        id: f.choiceId,
+        provider: "test",
+        phone_e164: f.customerPhone,
+        raw_text: "sim",
+        created_at: new Date(),
+        decision_at: new Date(),
+      },
+      noticeId: randomUUID(),
+      noticeSentAt: new Date(),
+      choiceKey: f.choiceId,
+      chosenAt: new Date().toISOString(),
+      method: "selection_after_notice" as const,
+    };
+
+    const match = {
+      match_id: randomUUID(),
+      professional_id: f.professionalId,
+      display_name: "Lucas Eletricista",
+      phone_e164: f.professionalPhone,
+      service_name: "eletricista",
+    };
+
+    let newContactId: string | null = null;
+    await withTransaction(async (db) => {
+      const result = await createBilateralContact(
+        db,
+        {
+          customerId: f.customerId,
+          searchRequestId: f.searchId,
+          conversationId: f.conversationId,
+          position: 1,
+          selectionKey: ready.inbound.id,
+          lastMessageText: "sim",
+          confirmBilateral: false,
+        },
+        match,
+        ready,
+        new Date(),
+        () => createOpportunityCode()
+      );
+      newContactId = result.contactId;
+    });
+
+    assert.ok(newContactId);
+    f.addContactId(newContactId);
+
+    const outbounds = (await query<{ message_type: string; interactive_payload: unknown }>(
+      "SELECT message_type, interactive_payload FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${newContactId}:initial`]
+    )).rows;
+    assert.equal(outbounds.length, 1);
+    assert.equal(outbounds[0]!.message_type, "text");
+    assert.equal(outbounds[0]!.interactive_payload, null);
+
+    const tokens = (await query(
+      "SELECT * FROM interactive_action_tokens WHERE contact_id = $1",
+      [newContactId]
+    )).rows;
+    assert.equal(tokens.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario Canary B: ENABLED=true, MODE=allowlist, BOTH phones allowlisted emits interactive payload and tokens", async () => {
+  const f = await createFixture({ skipContact: true });
+  process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
+  process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "allowlist";
+  process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES = `${f.customerPhone},${f.professionalPhone}`;
+
+  try {
+    const ready = {
+      inbound: {
+        id: f.choiceId,
+        provider: "test",
+        phone_e164: f.customerPhone,
+        raw_text: "sim",
+        created_at: new Date(),
+        decision_at: new Date(),
+      },
+      noticeId: randomUUID(),
+      noticeSentAt: new Date(),
+      choiceKey: f.choiceId,
+      chosenAt: new Date().toISOString(),
+      method: "selection_after_notice" as const,
+    };
+
+    const match = {
+      match_id: randomUUID(),
+      professional_id: f.professionalId,
+      display_name: "Lucas Eletricista",
+      phone_e164: f.professionalPhone,
+      service_name: "eletricista",
+    };
+
+    let newContactId: string | null = null;
+    await withTransaction(async (db) => {
+      const result = await createBilateralContact(
+        db,
+        {
+          customerId: f.customerId,
+          searchRequestId: f.searchId,
+          conversationId: f.conversationId,
+          position: 1,
+          selectionKey: ready.inbound.id,
+          lastMessageText: "sim",
+          confirmBilateral: false,
+        },
+        match,
+        ready,
+        new Date(),
+        () => createOpportunityCode()
+      );
+      newContactId = result.contactId;
+    });
+
+    assert.ok(newContactId);
+    f.addContactId(newContactId);
+
+    const outbounds = (await query<{ message_type: string; interactive_payload: InteractiveOutboundPayload }>(
+      "SELECT message_type, interactive_payload FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${newContactId}:initial`]
+    )).rows;
+    assert.equal(outbounds.length, 1);
+    assert.equal(outbounds[0]!.message_type, "interactive");
+    assert.equal(outbounds[0]!.interactive_payload.type, "button_group");
+
+    const tokens = (await query(
+      "SELECT * FROM interactive_action_tokens WHERE contact_id = $1",
+      [newContactId]
+    )).rows;
+    assert.equal(tokens.length, 2);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario Canary C: ENABLED=true, MODE=allowlist, ONLY customer allowlisted emits text and 0 tokens (bilateral guard)", async () => {
+  const f = await createFixture({ skipContact: true });
+  process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
+  process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "allowlist";
+  process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES = `${f.customerPhone}`;
+
+  try {
+    const ready = {
+      inbound: {
+        id: f.choiceId,
+        provider: "test",
+        phone_e164: f.customerPhone,
+        raw_text: "sim",
+        created_at: new Date(),
+        decision_at: new Date(),
+      },
+      noticeId: randomUUID(),
+      noticeSentAt: new Date(),
+      choiceKey: f.choiceId,
+      chosenAt: new Date().toISOString(),
+      method: "selection_after_notice" as const,
+    };
+
+    const match = {
+      match_id: randomUUID(),
+      professional_id: f.professionalId,
+      display_name: "Lucas Eletricista",
+      phone_e164: f.professionalPhone,
+      service_name: "eletricista",
+    };
+
+    let newContactId: string | null = null;
+    await withTransaction(async (db) => {
+      const result = await createBilateralContact(
+        db,
+        {
+          customerId: f.customerId,
+          searchRequestId: f.searchId,
+          conversationId: f.conversationId,
+          position: 1,
+          selectionKey: ready.inbound.id,
+          lastMessageText: "sim",
+          confirmBilateral: false,
+        },
+        match,
+        ready,
+        new Date(),
+        () => createOpportunityCode()
+      );
+      newContactId = result.contactId;
+    });
+
+    assert.ok(newContactId);
+    f.addContactId(newContactId);
+
+    const outbounds = (await query<{ message_type: string; interactive_payload: unknown }>(
+      "SELECT message_type, interactive_payload FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${newContactId}:initial`]
+    )).rows;
+    assert.equal(outbounds.length, 1);
+    assert.equal(outbounds[0]!.message_type, "text");
+    assert.equal(outbounds[0]!.interactive_payload, null);
+
+    const tokens = (await query(
+      "SELECT * FROM interactive_action_tokens WHERE contact_id = $1",
+      [newContactId]
+    )).rows;
+    assert.equal(tokens.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario Canary D: ENABLED=true, MODE=allowlist, ONLY professional allowlisted emits text and 0 tokens (bilateral guard)", async () => {
+  const f = await createFixture({ skipContact: true });
+  process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
+  process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "allowlist";
+  process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES = `${f.professionalPhone}`;
+
+  try {
+    const ready = {
+      inbound: {
+        id: f.choiceId,
+        provider: "test",
+        phone_e164: f.customerPhone,
+        raw_text: "sim",
+        created_at: new Date(),
+        decision_at: new Date(),
+      },
+      noticeId: randomUUID(),
+      noticeSentAt: new Date(),
+      choiceKey: f.choiceId,
+      chosenAt: new Date().toISOString(),
+      method: "selection_after_notice" as const,
+    };
+
+    const match = {
+      match_id: randomUUID(),
+      professional_id: f.professionalId,
+      display_name: "Lucas Eletricista",
+      phone_e164: f.professionalPhone,
+      service_name: "eletricista",
+    };
+
+    let newContactId: string | null = null;
+    await withTransaction(async (db) => {
+      const result = await createBilateralContact(
+        db,
+        {
+          customerId: f.customerId,
+          searchRequestId: f.searchId,
+          conversationId: f.conversationId,
+          position: 1,
+          selectionKey: ready.inbound.id,
+          lastMessageText: "sim",
+          confirmBilateral: false,
+        },
+        match,
+        ready,
+        new Date(),
+        () => createOpportunityCode()
+      );
+      newContactId = result.contactId;
+    });
+
+    assert.ok(newContactId);
+    f.addContactId(newContactId);
+
+    const outbounds = (await query<{ message_type: string; interactive_payload: unknown }>(
+      "SELECT message_type, interactive_payload FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${newContactId}:initial`]
+    )).rows;
+    assert.equal(outbounds.length, 1);
+    assert.equal(outbounds[0]!.message_type, "text");
+    assert.equal(outbounds[0]!.interactive_payload, null);
+
+    const tokens = (await query(
+      "SELECT * FROM interactive_action_tokens WHERE contact_id = $1",
+      [newContactId]
+    )).rows;
+    assert.equal(tokens.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario Canary E: Customer completion prompt guarded by allowlist (emits text when not allowlisted)", async () => {
+  const f = await createFixture({ skipContact: false });
+  // Enable interactive globally, but allowlist only the customer phone (professional missing => not eligible)
+  process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
+  process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "allowlist";
+  process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES = `${f.customerPhone}`;
+
+  try {
+    const { tokenCompletion } = await f.createInitialInteractiveOutboundAndTokens();
+
+    // Professional declares completion
+    await f.sendInteractive(tokenCompletion, f.professionalPhone);
+
+    // Verify completion prompt outbound is text and no customer tokens were generated
+    const promptOutbounds = (await query<{ message_type: string; interactive_payload: unknown }>(
+      "SELECT message_type, interactive_payload FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${f.contactId}:completion:prompt`]
+    )).rows;
+    assert.equal(promptOutbounds.length, 1);
+    assert.equal(promptOutbounds[0]!.message_type, "text");
+    assert.equal(promptOutbounds[0]!.interactive_payload, null);
+
+    const customerTokens = (await query(
+      "SELECT * FROM interactive_action_tokens WHERE contact_id = $1 AND intended_actor_role = 'customer'",
+      [f.contactId]
+    )).rows;
+    assert.equal(customerTokens.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario Canary F: Customer completion prompt emits interactive when BOTH phones are allowlisted", async () => {
+  const f = await createFixture({ skipContact: false });
+  process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
+  process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "allowlist";
+  process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES = `${f.customerPhone},${f.professionalPhone}`;
+
+  try {
+    const { tokenCompletion } = await f.createInitialInteractiveOutboundAndTokens();
+
+    // Professional declares completion
+    await f.sendInteractive(tokenCompletion, f.professionalPhone);
+
+    // Verify completion prompt outbound is interactive and 2 customer tokens were generated
+    const promptOutbounds = (await query<{ message_type: string; interactive_payload: InteractiveOutboundPayload }>(
+      "SELECT message_type, interactive_payload FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${f.contactId}:completion:prompt`]
+    )).rows;
+    assert.equal(promptOutbounds.length, 1);
+    assert.equal(promptOutbounds[0]!.message_type, "interactive");
+    assert.equal(promptOutbounds[0]!.interactive_payload.type, "button_group");
+
+    const customerTokens = (await query(
+      "SELECT * FROM interactive_action_tokens WHERE contact_id = $1 AND intended_actor_role = 'customer'",
+      [f.contactId]
+    )).rows;
+    assert.equal(customerTokens.length, 2);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario Canary G: Existing valid token executes successfully regardless of rollout config (inbound not gated)", async () => {
+  const f = await createFixture({ skipContact: false });
+  // Set rollout to allowlist with EMPTY allowed phones (emissions blocked)
+  process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
+  process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "allowlist";
+  delete process.env.INTERACTIVE_ACTIONS_ALLOWED_PHONES;
+
+  try {
+    // Generate valid pre-existing token
+    const { tokenCompletion } = await f.createInitialInteractiveOutboundAndTokens();
+
+    // Professional clicks/sends the token
+    const res = await f.sendInteractive(tokenCompletion, f.professionalPhone);
+    assert.equal(res.status, 200);
+
+    const parsed = channelInboundMessageResponseSchema.parse(res.body);
+    assert.equal(parsed.result.action, "declared");
+    assert.equal(parsed.result.action_type, "declare_completion");
+
+    // Token was consumed properly
+    const tokenDb = (await query<{ status: string }>(
+      "SELECT status FROM interactive_action_tokens WHERE public_token = $1",
+      [tokenCompletion]
+    )).rows[0]!;
+    assert.equal(tokenDb.status, "consumed");
+  } finally {
+    await f.cleanup();
+  }
+});
+
