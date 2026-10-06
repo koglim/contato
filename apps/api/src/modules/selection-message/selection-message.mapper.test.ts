@@ -29,8 +29,8 @@ test("selection message mapper hides operational replay data and formats selecte
   });
   assert.equal(selectionMessageContractSchema.safeParse(original).success, true);
   assert.equal(presentSelectionMessage(original), [
-    "Ana Eletricista foi avisado sobre sua solicitação e poderá entrar em contato com você.",
-    "Se preferir falar com ele primeiro:\n\n*Ana Eletricista*\nEletricista\n📞 +5566999999999",
+    "Você escolheu Ana Eletricista. Se quiser, já pode falar com ele:",
+    "*Ana Eletricista*\nEletricista\n📞 +5566999999999",
   ].join("\n\n"));
   for (const privateField of ["replayed", "contact_id", "match_id", "professional_id"]) {
     assert.equal(selectionMessageContractSchema.safeParse({ ...original, [privateField]: true }).success, false);

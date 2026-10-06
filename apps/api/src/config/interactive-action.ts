@@ -1,11 +1,15 @@
 import { normalizeBrazilianMobilePhone, phoneE164Schema } from "@contatocerto/shared";
 
 export type InteractiveActionRolloutMode = "allowlist" | "all";
+export type ProfessionalOpportunityTransport = "buttons" | "template";
 
 export interface InteractiveActionConfig {
   enabled: boolean;
   rolloutMode: InteractiveActionRolloutMode;
   allowedPhones: ReadonlySet<string>;
+  professionalOpportunityTransport: ProfessionalOpportunityTransport;
+  professionalOpportunityTemplateName?: string;
+  professionalOpportunityTemplateLanguage?: string;
 }
 
 export function readInteractiveActionConfig(
@@ -39,10 +43,51 @@ export function readInteractiveActionConfig(
     }
   }
 
+  const transportRaw = env.PROFESSIONAL_OPPORTUNITY_TRANSPORT ?? "buttons";
+  const transportTrimmed = transportRaw.trim();
+  const professionalOpportunityTransport = (transportTrimmed === "" ? "buttons" : transportTrimmed) as ProfessionalOpportunityTransport;
+  if (professionalOpportunityTransport !== "buttons" && professionalOpportunityTransport !== "template") {
+    throw new Error("PROFESSIONAL_OPPORTUNITY_TRANSPORT must be 'buttons' or 'template'");
+  }
+
+  let professionalOpportunityTemplateName: string | undefined;
+  let professionalOpportunityTemplateLanguage: string | undefined;
+
+  if (professionalOpportunityTransport === "template") {
+    const tplNameRaw = env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME?.trim();
+    if (!tplNameRaw) {
+      throw new Error(
+        "WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME is required when PROFESSIONAL_OPPORTUNITY_TRANSPORT is 'template'"
+      );
+    }
+    if (!/^[a-z0-9_]+$/.test(tplNameRaw)) {
+      throw new Error(
+        "WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME must be a lower-case Meta-safe identifier"
+      );
+    }
+    professionalOpportunityTemplateName = tplNameRaw;
+
+    const tplLangRaw = env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE?.trim();
+    if (!tplLangRaw) {
+      throw new Error(
+        "WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE is required when PROFESSIONAL_OPPORTUNITY_TRANSPORT is 'template'"
+      );
+    }
+    if (!/^[a-z]{2}(_[A-Z]{2})?$/.test(tplLangRaw)) {
+      throw new Error(
+        "WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE must be in standard format (e.g. pt_BR)"
+      );
+    }
+    professionalOpportunityTemplateLanguage = tplLangRaw;
+  }
+
   return {
     enabled,
     rolloutMode,
     allowedPhones,
+    professionalOpportunityTransport,
+    professionalOpportunityTemplateName,
+    professionalOpportunityTemplateLanguage,
   };
 }
 

@@ -157,21 +157,54 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
     if (isEligible) {
       const tokenCompletion = generateInteractiveActionToken();
       const tokenUnavailability = generateInteractiveActionToken();
-      const payload: InteractiveOutboundPayload = {
-        schema_version: 1,
-        type: "button_group",
-        body: presentProfessionalOpportunity(snapshot),
-        actions: [
-          {
-            action_id: tokenCompletion,
-            label: "Concluído",
-          },
-          {
-            action_id: tokenUnavailability,
-            label: "Não consigo atender",
-          },
-        ],
-      };
+      let payload: InteractiveOutboundPayload;
+
+      if (interactiveConfig.professionalOpportunityTransport === "template") {
+        const locationStr =
+          snapshot.city && snapshot.state
+            ? `${snapshot.city} / ${snapshot.state}`
+            : snapshot.city || snapshot.state || "Local não informado";
+
+        payload = {
+          schema_version: 1,
+          type: "template_quick_reply",
+          template_name: interactiveConfig.professionalOpportunityTemplateName!,
+          language_code: interactiveConfig.professionalOpportunityTemplateLanguage!,
+          body_parameters: [
+            snapshot.service_name,
+            locationStr,
+            snapshot.summary,
+            snapshot.customer_phone_e164,
+            snapshot.public_code,
+          ],
+          actions: [
+            {
+              action_id: tokenCompletion,
+              label: "Concluído",
+            },
+            {
+              action_id: tokenUnavailability,
+              label: "Não consigo atender",
+            },
+          ],
+        };
+      } else {
+        payload = {
+          schema_version: 1,
+          type: "button_group",
+          body: presentProfessionalOpportunity(snapshot),
+          actions: [
+            {
+              action_id: tokenCompletion,
+              label: "Concluído",
+            },
+            {
+              action_id: tokenUnavailability,
+              label: "Não consigo atender",
+            },
+          ],
+        };
+      }
 
       const outbound = await createIndependentOutbound(client, {
         businessKey: `contact:${contactId}:initial`,

@@ -150,6 +150,47 @@ test("interactive claim validation rejects malformed payloads and out-of-spec ac
     ...message(),
     interactive_payload: base.interactive_payload,
   }), "evolution"), /claim_invalid/u);
+
+  // Valid template_quick_reply claim
+  const templateItem = {
+    ...base,
+    interactive_payload: {
+      schema_version: 1,
+      type: "template_quick_reply",
+      template_name: "contato_certo_nova_solicitacao_v1",
+      language: "pt_BR",
+      body_parameters: ["João", "Sinop", "Eletricista", "Instalação de chuveiro"],
+      actions: [
+        { action_id: "ia_111111111111111111111111111111111111111111111111", label: "Concluído" },
+        { action_id: "ia_222222222222222222222222222222222222222222222222", label: "Não consigo atender" },
+      ],
+    },
+  };
+  const templateDecision = claimDecision(response(templateItem), "evolution");
+  assert.equal(templateDecision.action, "send");
+  assert.equal(templateDecision.message.interactive_payload.type, "template_quick_reply");
+  assert.equal(templateDecision.message.interactive_payload.template_name, "contato_certo_nova_solicitacao_v1");
+  assert.equal(templateDecision.message.interactive_payload.language, "pt_BR");
+  assert.deepEqual(templateDecision.message.interactive_payload.body_parameters, ["João", "Sinop", "Eletricista", "Instalação de chuveiro"]);
+  assert.equal(templateDecision.message.interactive_payload.actions.length, 2);
+
+  // Invalid template name
+  assert.throws(() => claimDecision(response({
+    ...templateItem,
+    interactive_payload: { ...templateItem.interactive_payload, template_name: "Invalid-Name!" },
+  }), "evolution"), /claim_invalid/u);
+
+  // Invalid template language
+  assert.throws(() => claimDecision(response({
+    ...templateItem,
+    interactive_payload: { ...templateItem.interactive_payload, language: "invalid-lang" },
+  }), "evolution"), /claim_invalid/u);
+
+  // Invalid body parameters (empty parameter)
+  assert.throws(() => claimDecision(response({
+    ...templateItem,
+    interactive_payload: { ...templateItem.interactive_payload, body_parameters: [""] },
+  }), "evolution"), /claim_invalid/u);
 });
 
 test("buildEvolutionSendRequest creates accurate endpoints and bodies for text and interactive", () => {
@@ -162,7 +203,7 @@ test("buildEvolutionSendRequest creates accurate endpoints and bodies for text a
     text: textMsg.text_content,
   });
 
-  // 2. Interactive message
+  // 2. Interactive message (button_group)
   const interMsg = interactiveMessage("+5566991234567");
   const interReq = buildEvolutionSendRequest(interMsg, "pilot-instance");
   assert.equal(interReq.endpoint, "/message/sendButtons/pilot-instance");
@@ -181,6 +222,62 @@ test("buildEvolutionSendRequest creates accurate endpoints and bodies for text a
       id: "ia_222222222222222222222222222222222222222222222222",
     },
   ]);
+
+  // 3. Interactive message (template_quick_reply)
+  const templateMsg = {
+    ...interMsg,
+    interactive_payload: {
+      schema_version: 1,
+      type: "template_quick_reply",
+      template_name: "contato_certo_nova_solicitacao_v1",
+      language: "pt_BR",
+      body_parameters: ["Carlos Cliente", "Sinop", "Eletricista", "Quadro de força"],
+      actions: [
+        { action_id: "ia_111111111111111111111111111111111111111111111111", label: "Concluído" },
+        { action_id: "ia_222222222222222222222222222222222222222222222222", label: "Não consigo atender" },
+      ],
+    },
+  };
+  const templateReq = buildEvolutionSendRequest(templateMsg, "contato-certo-oficial");
+  assert.equal(templateReq.endpoint, "/message/sendTemplate/contato-certo-oficial");
+  assert.deepEqual(templateReq.body, {
+    number: "5566991234567",
+    name: "contato_certo_nova_solicitacao_v1",
+    language: "pt_BR",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: "Carlos Cliente" },
+          { type: "text", text: "Sinop" },
+          { type: "text", text: "Eletricista" },
+          { type: "text", text: "Quadro de força" },
+        ],
+      },
+      {
+        type: "button",
+        sub_type: "quick_reply",
+        index: "0",
+        parameters: [
+          {
+            type: "payload",
+            payload: "ia_111111111111111111111111111111111111111111111111",
+          },
+        ],
+      },
+      {
+        type: "button",
+        sub_type: "quick_reply",
+        index: "1",
+        parameters: [
+          {
+            type: "payload",
+            payload: "ia_222222222222222222222222222222222222222222222222",
+          },
+        ],
+      },
+    ],
+  });
 
   // Invalid instance
   assert.throws(() => buildEvolutionSendRequest(textMsg, ""), /channel_instance_not_allowed/u);

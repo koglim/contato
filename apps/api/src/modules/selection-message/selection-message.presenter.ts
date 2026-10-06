@@ -6,8 +6,8 @@ export function presentSelectionMessage(contract: SelectionMessageContract): str
     case "selected": {
       const ref = contract.public_code ? `\n\nRef.: ${contract.public_code}` : "";
       return [
-        `${contract.professional_name} foi avisado sobre sua solicitação e poderá entrar em contato com você.`,
-        `Se preferir falar com ele primeiro:\n\n*${contract.professional_name}*\n${contract.service_name}\n📞 ${contract.professional_phone_e164}${ref}`,
+        `Você escolheu ${contract.professional_name}. Se quiser, já pode falar com ele:`,
+        `*${contract.professional_name}*\n${contract.service_name}\n📞 ${contract.professional_phone_e164}${ref}`,
       ].join("\n\n");
     }
     case "consent_required":

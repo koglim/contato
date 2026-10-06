@@ -30,7 +30,7 @@ export const interactiveOutboundActionSchema = z
   .strict();
 export type InteractiveOutboundAction = z.infer<typeof interactiveOutboundActionSchema>;
 
-export const interactiveOutboundPayloadSchema = z
+export const interactiveButtonGroupPayloadSchema = z
   .object({
     schema_version: z.literal(1),
     type: z.literal("button_group"),
@@ -45,6 +45,50 @@ export const interactiveOutboundPayloadSchema = z
     },
     { message: "action_id values must be unique within payload" }
   );
+export type InteractiveButtonGroupPayload = z.infer<typeof interactiveButtonGroupPayloadSchema>;
+
+export const interactiveTemplateQuickReplyPayloadSchema = z
+  .object({
+    schema_version: z.literal(1),
+    type: z.literal("template_quick_reply"),
+    template_name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(512)
+      .regex(/^[a-z0-9_]+$/, {
+        message: "template_name must be a lower-case Meta-safe identifier",
+      }),
+    language_code: z
+      .string()
+      .trim()
+      .min(2)
+      .max(10)
+      .regex(/^[a-z]{2}(_[A-Z]{2})?$/, {
+        message: "language_code must be standard format like pt_BR or en_US",
+      }),
+    body_parameters: z
+      .array(z.string().max(1024))
+      .min(1)
+      .max(15),
+    actions: z.array(interactiveOutboundActionSchema).min(1).max(3),
+  })
+  .strict()
+  .refine(
+    (payload) => {
+      const ids = payload.actions.map((a) => a.action_id);
+      return new Set(ids).size === ids.length;
+    },
+    { message: "action_id values must be unique within payload" }
+  );
+export type InteractiveTemplateQuickReplyPayload = z.infer<
+  typeof interactiveTemplateQuickReplyPayloadSchema
+>;
+
+export const interactiveOutboundPayloadSchema = z.discriminatedUnion("type", [
+  interactiveButtonGroupPayloadSchema,
+  interactiveTemplateQuickReplyPayloadSchema,
+]);
 export type InteractiveOutboundPayload = z.infer<typeof interactiveOutboundPayloadSchema>;
 
 export const INTERACTIVE_ACTION_TOKEN_TTL_DAYS = 30;

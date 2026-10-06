@@ -68,6 +68,17 @@ export function extractEvolutionInteractiveReply(message) {
     return { actionId: null, displayText: null, isInteractive: true };
   }
 
+  // 5. Meta Cloud API template quick reply callback normalized into message.button
+  if (message.button && typeof message.button === "object") {
+    const btn = message.button;
+    const actionId = typeof btn.payload === "string" ? btn.payload.trim() : null;
+    const displayText = typeof btn.text === "string" ? btn.text.trim() : null;
+    if (actionId) {
+      return { actionId, displayText: displayText || actionId };
+    }
+    return { actionId: null, displayText, isInteractive: true };
+  }
+
   return null;
 }
 
