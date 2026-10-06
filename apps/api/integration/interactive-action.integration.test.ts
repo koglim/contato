@@ -1574,6 +1574,12 @@ test("Scenario Canary G: Existing valid token executes successfully regardless o
 });
 
 test("Scenario Canary H: Real Cross-Layer test: Bilateral Contact Template Generation -> Outbox Claim -> Evolution SendTemplate", async () => {
+  const prevEnabled = process.env.INTERACTIVE_ACTIONS_ENABLED;
+  const prevMode = process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE;
+  const prevTransport = process.env.PROFESSIONAL_OPPORTUNITY_TRANSPORT;
+  const prevTmplName = process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME;
+  const prevTmplLang = process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE;
+
   const f = await createFixture({ skipContact: true });
   process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
   process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "all";
@@ -1582,6 +1588,12 @@ test("Scenario Canary H: Real Cross-Layer test: Bilateral Contact Template Gener
   process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE = "pt_BR";
 
   try {
+    // Explicitly set city, state and search text on search_requests to match the canary opportunity contract
+    await query(
+      "UPDATE search_requests SET city = 'Sinop', state = 'MT', raw_text = 'preciso de eletricista em Sinop' WHERE id = $1",
+      [f.searchId]
+    );
+
     const ready = {
       inbound: {
         id: f.choiceId,
@@ -1727,9 +1739,16 @@ test("Scenario Canary H: Real Cross-Layer test: Bilateral Contact Template Gener
     assert.equal(btn1.parameters[0].type, "payload");
     assert.equal(btn1.parameters[0].payload, tokenUnavailability);
   } finally {
-    delete process.env.PROFESSIONAL_OPPORTUNITY_TRANSPORT;
-    delete process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME;
-    delete process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE;
+    if (prevEnabled !== undefined) process.env.INTERACTIVE_ACTIONS_ENABLED = prevEnabled;
+    else delete process.env.INTERACTIVE_ACTIONS_ENABLED;
+    if (prevMode !== undefined) process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = prevMode;
+    else delete process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE;
+    if (prevTransport !== undefined) process.env.PROFESSIONAL_OPPORTUNITY_TRANSPORT = prevTransport;
+    else delete process.env.PROFESSIONAL_OPPORTUNITY_TRANSPORT;
+    if (prevTmplName !== undefined) process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME = prevTmplName;
+    else delete process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME;
+    if (prevTmplLang !== undefined) process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE = prevTmplLang;
+    else delete process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE;
     await f.cleanup();
   }
 });
