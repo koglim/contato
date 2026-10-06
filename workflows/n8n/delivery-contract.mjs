@@ -72,39 +72,87 @@ export function claimDecision(response, expectedProvider) {
 
   if (message.message_type === "interactive") {
     const payload = message.interactive_payload;
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)
-      || payload.schema_version !== 1 || payload.type !== "button_group"
-      || typeof payload.body !== "string" || !payload.body.trim() || payload.body.length > 2000) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload) || payload.schema_version !== 1) {
       throw new Error("outbox_claim_invalid");
     }
-    if (!Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
-      throw new Error("outbox_claim_invalid");
+
+    if (payload.type === "button_group") {
+      if (typeof payload.body !== "string" || !payload.body.trim() || payload.body.length > 2000) {
+        throw new Error("outbox_claim_invalid");
+      }
+      if (!Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
+        throw new Error("outbox_claim_invalid");
+      }
+      const actionIds = new Set();
+      for (const a of payload.actions) {
+        if (!a || typeof a !== "object" || Array.isArray(a)
+          || typeof a.action_id !== "string" || !a.action_id || a.action_id.length > 120 || /\s/u.test(a.action_id)) {
+          throw new Error("outbox_claim_invalid");
+        }
+        if (typeof a.label !== "string" || !a.label.trim() || a.label.trim().length > 20) {
+          throw new Error("outbox_claim_invalid");
+        }
+        if (actionIds.has(a.action_id)) {
+          throw new Error("outbox_claim_invalid");
+        }
+        actionIds.add(a.action_id);
+      }
+      return { action: "send", message: {
+        id: message.id, purpose: message.purpose, provider: message.provider,
+        recipient_phone_e164: message.recipient_phone_e164, message_type: "interactive",
+        text_content: message.text_content, interactive_payload: {
+          schema_version: 1,
+          type: "button_group",
+          body: payload.body,
+          actions: payload.actions.map(act => ({ action_id: act.action_id, label: act.label.trim() })),
+        },
+        processing_token: message.processing_token,
+      } };
     }
-    const actionIds = new Set();
-    for (const a of payload.actions) {
-      if (!a || typeof a !== "object" || Array.isArray(a)
-        || typeof a.action_id !== "string" || !a.action_id || a.action_id.length > 120 || /\s/u.test(a.action_id)) {
+
+    if (payload.type === "template_quick_reply") {
+      if (typeof payload.template_name !== "string" || !/^[a-z0-9_]+$/.test(payload.template_name)) {
         throw new Error("outbox_claim_invalid");
       }
-      if (typeof a.label !== "string" || !a.label.trim() || a.label.trim().length > 20) {
+      if (typeof payload.language_code !== "string" || !/^[a-z]{2}(_[A-Z]{2})?$/.test(payload.language_code)) {
         throw new Error("outbox_claim_invalid");
       }
-      if (actionIds.has(a.action_id)) {
+      if (!Array.isArray(payload.body_parameters) || payload.body_parameters.some(p => typeof p !== "string" || !p.trim())) {
         throw new Error("outbox_claim_invalid");
       }
-      actionIds.add(a.action_id);
+      if (!Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
+        throw new Error("outbox_claim_invalid");
+      }
+      const actionIds = new Set();
+      for (const a of payload.actions) {
+        if (!a || typeof a !== "object" || Array.isArray(a)
+          || typeof a.action_id !== "string" || !a.action_id || a.action_id.length > 120 || /\s/u.test(a.action_id)) {
+          throw new Error("outbox_claim_invalid");
+        }
+        if (typeof a.label !== "string" || !a.label.trim() || a.label.trim().length > 20) {
+          throw new Error("outbox_claim_invalid");
+        }
+        if (actionIds.has(a.action_id)) {
+          throw new Error("outbox_claim_invalid");
+        }
+        actionIds.add(a.action_id);
+      }
+      return { action: "send", message: {
+        id: message.id, purpose: message.purpose, provider: message.provider,
+        recipient_phone_e164: message.recipient_phone_e164, message_type: "interactive",
+        text_content: message.text_content, interactive_payload: {
+          schema_version: 1,
+          type: "template_quick_reply",
+          template_name: payload.template_name,
+          language_code: payload.language_code,
+          body_parameters: [...payload.body_parameters],
+          actions: payload.actions.map(act => ({ action_id: act.action_id, label: act.label.trim() })),
+        },
+        processing_token: message.processing_token,
+      } };
     }
-    return { action: "send", message: {
-      id: message.id, purpose: message.purpose, provider: message.provider,
-      recipient_phone_e164: message.recipient_phone_e164, message_type: "interactive",
-      text_content: message.text_content, interactive_payload: {
-        schema_version: 1,
-        type: "button_group",
-        body: payload.body,
-        actions: payload.actions.map(act => ({ action_id: act.action_id, label: act.label.trim() })),
-      },
-      processing_token: message.processing_token,
-    } };
+
+    throw new Error("outbox_claim_invalid");
   }
 
   throw new Error("outbox_claim_invalid");
@@ -134,23 +182,74 @@ export function buildEvolutionSendRequest(message, instance) {
 
   if (message.message_type === "interactive") {
     const payload = message.interactive_payload;
-    if (!payload || payload.schema_version !== 1 || payload.type !== "button_group"
-      || typeof payload.body !== "string" || !payload.body.trim()
-      || !Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
+    if (!payload || payload.schema_version !== 1) {
       throw new Error("interactive_payload_invalid");
     }
-    return {
-      endpoint: `/message/sendButtons/${encodedInstance}`,
-      body: {
-        number,
-        title: payload.body,
-        buttons: payload.actions.map((act) => ({
-          type: "reply",
-          displayText: act.label,
-          id: act.action_id,
-        })),
-      },
-    };
+
+    if (payload.type === "button_group") {
+      if (typeof payload.body !== "string" || !payload.body.trim()
+        || !Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
+        throw new Error("interactive_payload_invalid");
+      }
+      return {
+        endpoint: `/message/sendButtons/${encodedInstance}`,
+        body: {
+          number,
+          title: payload.body,
+          buttons: payload.actions.map((act) => ({
+            type: "reply",
+            displayText: act.label,
+            id: act.action_id,
+          })),
+        },
+      };
+    }
+
+    if (payload.type === "template_quick_reply") {
+      if (typeof payload.template_name !== "string" || !payload.template_name.trim()
+        || typeof payload.language_code !== "string" || !payload.language_code.trim()
+        || !Array.isArray(payload.body_parameters)
+        || !Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
+        throw new Error("interactive_payload_invalid");
+      }
+
+      const components = [];
+      if (payload.body_parameters.length > 0) {
+        components.push({
+          type: "body",
+          parameters: payload.body_parameters.map((param) => ({
+            type: "text",
+            text: param,
+          })),
+        });
+      }
+
+      payload.actions.forEach((act, index) => {
+        components.push({
+          type: "button",
+          sub_type: "quick_reply",
+          index: String(index),
+          parameters: [
+            {
+              type: "payload",
+              payload: act.action_id,
+            },
+          ],
+        });
+      });
+
+      return {
+        endpoint: `/message/sendTemplate/${encodedInstance}`,
+        body: {
+          number,
+          name: payload.template_name,
+          language: payload.language_code,
+          components,
+        },
+      };
+    }
+
+    throw new Error("interactive_payload_invalid");
   }
 
   throw new Error("message_type_unsupported");

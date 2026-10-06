@@ -14,6 +14,7 @@ import { generateInteractiveActionToken } from "../src/modules/interactive-actio
 import { PostgresInteractiveActionRepository } from "../src/modules/interactive-action/interactive-action.repository.js";
 import { InteractiveActionService } from "../src/modules/interactive-action/interactive-action.service.js";
 import { createBilateralContact } from "../src/modules/bilateral-contact/bilateral-contact.transaction.js";
+import { claimDecision, buildEvolutionSendRequest } from "../../../workflows/n8n/delivery-contract.mjs";
 
 after(closeDatabaseConnection);
 
@@ -1568,6 +1569,186 @@ test("Scenario Canary G: Existing valid token executes successfully regardless o
     )).rows[0]!;
     assert.equal(tokenDb.status, "consumed");
   } finally {
+    await f.cleanup();
+  }
+});
+
+test("Scenario Canary H: Real Cross-Layer test: Bilateral Contact Template Generation -> Outbox Claim -> Evolution SendTemplate", async () => {
+  const prevEnabled = process.env.INTERACTIVE_ACTIONS_ENABLED;
+  const prevMode = process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE;
+  const prevTransport = process.env.PROFESSIONAL_OPPORTUNITY_TRANSPORT;
+  const prevTmplName = process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME;
+  const prevTmplLang = process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE;
+
+  const f = await createFixture({ skipContact: true });
+  process.env.INTERACTIVE_ACTIONS_ENABLED = "true";
+  process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = "all";
+  process.env.PROFESSIONAL_OPPORTUNITY_TRANSPORT = "template";
+  process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME = "contato_certo_nova_solicitacao_v1";
+  process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE = "pt_BR";
+
+  try {
+    // Explicitly set city, state and search text on search_requests to match the canary opportunity contract
+    await query(
+      "UPDATE search_requests SET city = 'Sinop', state = 'MT', raw_text = 'preciso de eletricista em Sinop' WHERE id = $1",
+      [f.searchId]
+    );
+
+    const ready = {
+      inbound: {
+        id: f.choiceId,
+        provider: "evolution",
+        phone_e164: f.customerPhone,
+        raw_text: "sim",
+        created_at: new Date(),
+        decision_at: new Date(),
+      },
+      noticeId: randomUUID(),
+      noticeSentAt: new Date(),
+      choiceKey: f.choiceId,
+      chosenAt: new Date().toISOString(),
+      method: "selection_after_notice" as const,
+    };
+
+    const match = {
+      match_id: randomUUID(),
+      professional_id: f.professionalId,
+      display_name: "Lucas Eletricista",
+      phone_e164: f.professionalPhone,
+      service_name: "eletricista",
+    };
+
+    let newContactId: string | null = null;
+    await withTransaction(async (db) => {
+      const result = await createBilateralContact(
+        db,
+        {
+          customerId: f.customerId,
+          searchRequestId: f.searchId,
+          conversationId: f.conversationId,
+          position: 1,
+          selectionKey: ready.inbound.id,
+          lastMessageText: "sim",
+          confirmBilateral: false,
+        },
+        match,
+        ready,
+        new Date(),
+        () => createOpportunityCode()
+      );
+      newContactId = result.contactId;
+    });
+
+    assert.ok(newContactId);
+    f.addContactId(newContactId);
+
+    // 1. Fetch persisted outbound message directly from database
+    const outbounds = (await query<{
+      id: string;
+      purpose: string;
+      provider: string;
+      recipient_phone_e164: string;
+      message_type: string;
+      text_content: string;
+      interactive_payload: InteractiveOutboundPayload;
+      status: string;
+      attempt_count: number;
+    }>(
+      "SELECT id, purpose, provider, recipient_phone_e164, message_type, text_content, interactive_payload, status, attempt_count FROM channel_outbound_messages WHERE business_key = $1",
+      [`contact:${newContactId}:initial`]
+    )).rows;
+
+    assert.equal(outbounds.length, 1);
+    const domainOutbound = outbounds[0]!;
+    assert.equal(domainOutbound.message_type, "interactive");
+    assert.equal(domainOutbound.interactive_payload.type, "template_quick_reply");
+
+    const payload = domainOutbound.interactive_payload;
+    if (payload.type === "template_quick_reply") {
+      assert.equal(payload.template_name, "contato_certo_nova_solicitacao_v1");
+      assert.equal(payload.language_code, "pt_BR");
+      assert.equal(payload.body_parameters.length, 5);
+      assert.equal(payload.body_parameters[0], "eletricista");
+      assert.equal(payload.body_parameters[1], "Sinop / MT");
+      assert.equal(payload.body_parameters[2], "preciso de eletricista em Sinop");
+      assert.equal(payload.body_parameters[3], f.customerPhone);
+      assert.match(payload.body_parameters[4]!, /^CC-/);
+      assert.equal(payload.actions.length, 2);
+    }
+
+    // 2. Fetch the domain-generated action tokens
+    const tokens = (await query<{ action_type: string; public_token: string }>(
+      "SELECT action_type, public_token FROM interactive_action_tokens WHERE contact_id = $1 ORDER BY action_type ASC",
+      [newContactId]
+    )).rows;
+    assert.equal(tokens.length, 2);
+    const tokenCompletion = tokens.find((t) => t.action_type === "declare_completion")!.public_token;
+    const tokenUnavailability = tokens.find((t) => t.action_type === "declare_unavailability")!.public_token;
+
+    // 3. Pass real domain outbound directly to outbox claimDecision (simulating n8n claim)
+    const processingToken = randomUUID();
+    const claimResponse = {
+      statusCode: 200,
+      body: {
+        ...domainOutbound,
+        status: "processing",
+        processing_token: processingToken,
+      },
+    };
+
+    const claimed = claimDecision(claimResponse, "evolution");
+    assert.equal(claimed.action, "send");
+    assert.equal(claimed.message.message_type, "interactive");
+    assert.equal(claimed.message.interactive_payload.type, "template_quick_reply");
+    assert.equal(claimed.message.interactive_payload.template_name, "contato_certo_nova_solicitacao_v1");
+    assert.equal(claimed.message.interactive_payload.language_code, "pt_BR");
+    assert.equal(claimed.message.interactive_payload.body_parameters.length, 5);
+    assert.equal(claimed.message.interactive_payload.actions[0].action_id, tokenCompletion);
+    assert.equal(claimed.message.interactive_payload.actions[1].action_id, tokenUnavailability);
+
+    // 4. Pass claimed message to buildEvolutionSendRequest
+    const sendReq = buildEvolutionSendRequest(claimed.message, "contato-certo-oficial");
+    assert.equal(sendReq.endpoint, "/message/sendTemplate/contato-certo-oficial");
+    assert.equal(sendReq.body.name, "contato_certo_nova_solicitacao_v1");
+    assert.equal(sendReq.body.language, "pt_BR");
+    assert.equal(sendReq.body.components.length, 3);
+
+    // Body component has exactly 5 parameters
+    const bodyComp = sendReq.body.components[0];
+    assert.equal(bodyComp.type, "body");
+    assert.equal(bodyComp.parameters.length, 5);
+    assert.equal(bodyComp.parameters[0].text, "eletricista");
+    assert.equal(bodyComp.parameters[1].text, "Sinop / MT");
+    assert.equal(bodyComp.parameters[2].text, "preciso de eletricista em Sinop");
+    assert.equal(bodyComp.parameters[3].text, f.customerPhone);
+    assert.match(bodyComp.parameters[4].text, /^CC-/);
+
+    // Button component index 0 carries completion token
+    const btn0 = sendReq.body.components[1];
+    assert.equal(btn0.type, "button");
+    assert.equal(btn0.sub_type, "quick_reply");
+    assert.equal(btn0.index, "0");
+    assert.equal(btn0.parameters[0].type, "payload");
+    assert.equal(btn0.parameters[0].payload, tokenCompletion);
+
+    // Button component index 1 carries unavailability token
+    const btn1 = sendReq.body.components[2];
+    assert.equal(btn1.type, "button");
+    assert.equal(btn1.sub_type, "quick_reply");
+    assert.equal(btn1.index, "1");
+    assert.equal(btn1.parameters[0].type, "payload");
+    assert.equal(btn1.parameters[0].payload, tokenUnavailability);
+  } finally {
+    if (prevEnabled !== undefined) process.env.INTERACTIVE_ACTIONS_ENABLED = prevEnabled;
+    else delete process.env.INTERACTIVE_ACTIONS_ENABLED;
+    if (prevMode !== undefined) process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE = prevMode;
+    else delete process.env.INTERACTIVE_ACTIONS_ROLLOUT_MODE;
+    if (prevTransport !== undefined) process.env.PROFESSIONAL_OPPORTUNITY_TRANSPORT = prevTransport;
+    else delete process.env.PROFESSIONAL_OPPORTUNITY_TRANSPORT;
+    if (prevTmplName !== undefined) process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME = prevTmplName;
+    else delete process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME;
+    if (prevTmplLang !== undefined) process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE = prevTmplLang;
+    else delete process.env.WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE;
     await f.cleanup();
   }
 });

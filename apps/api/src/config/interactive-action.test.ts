@@ -221,3 +221,84 @@ test("14. mode=all + enabled=false => disabled", () => {
     false
   );
 });
+
+// Scenario 15: default professional opportunity transport is 'buttons'
+test("15. default professional opportunity transport is 'buttons'", () => {
+  const config = readInteractiveActionConfig({});
+  assert.equal(config.professionalOpportunityTransport, "buttons");
+  assert.equal(config.professionalOpportunityTemplateName, undefined);
+  assert.equal(config.professionalOpportunityTemplateLanguage, undefined);
+});
+
+// Scenario 16: explicit professional opportunity transport 'buttons'
+test("16. explicit professional opportunity transport 'buttons'", () => {
+  const config = readInteractiveActionConfig({
+    PROFESSIONAL_OPPORTUNITY_TRANSPORT: "buttons",
+  });
+  assert.equal(config.professionalOpportunityTransport, "buttons");
+});
+
+// Scenario 17: professional opportunity transport 'template' with valid name & language
+test("17. professional opportunity transport 'template' with valid name & language", () => {
+  const config = readInteractiveActionConfig({
+    PROFESSIONAL_OPPORTUNITY_TRANSPORT: "template",
+    WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME: "contato_certo_nova_solicitacao_v1",
+    WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE: "pt_BR",
+  });
+  assert.equal(config.professionalOpportunityTransport, "template");
+  assert.equal(config.professionalOpportunityTemplateName, "contato_certo_nova_solicitacao_v1");
+  assert.equal(config.professionalOpportunityTemplateLanguage, "pt_BR");
+});
+
+// Scenario 18: invalid professional opportunity transport => fail fast
+test("18. invalid professional opportunity transport => fail fast", () => {
+  assert.throws(
+    () =>
+      readInteractiveActionConfig({
+        PROFESSIONAL_OPPORTUNITY_TRANSPORT: "invalid_mode",
+      }),
+    /PROFESSIONAL_OPPORTUNITY_TRANSPORT must be 'buttons' or 'template'/
+  );
+});
+
+// Scenario 19: transport template missing template name or language => fail fast
+test("19. transport template missing template name or language => fail fast", () => {
+  assert.throws(
+    () =>
+      readInteractiveActionConfig({
+        PROFESSIONAL_OPPORTUNITY_TRANSPORT: "template",
+        WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE: "pt_BR",
+      }),
+    /WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME is required/
+  );
+
+  assert.throws(
+    () =>
+      readInteractiveActionConfig({
+        PROFESSIONAL_OPPORTUNITY_TRANSPORT: "template",
+        WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME: "contato_certo_nova_solicitacao_v1",
+      }),
+    /WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE is required/
+  );
+
+  assert.throws(
+    () =>
+      readInteractiveActionConfig({
+        PROFESSIONAL_OPPORTUNITY_TRANSPORT: "template",
+        WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME: "Invalid-Name!",
+        WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE: "pt_BR",
+      }),
+    /WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME must be a lower-case Meta-safe identifier/
+  );
+
+  assert.throws(
+    () =>
+      readInteractiveActionConfig({
+        PROFESSIONAL_OPPORTUNITY_TRANSPORT: "template",
+        WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME: "contato_certo_nova_solicitacao_v1",
+        WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE: "invalid-lang",
+      }),
+    /WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE must be in standard format/
+  );
+});
+

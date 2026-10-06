@@ -276,6 +276,26 @@ Os parsers de texto e o validador de tokens atuam unicamente como camadas de ext
 * **Semântica Bilateral Mandatória:** No modo `allowlist`, a emissão interativa ocorre **somente se AMBOS** o cliente (`customer_phone_e164`) e o profissional (`professional_phone_e164`) estiverem na lista autorizada. Se qualquer um dos lados não pertencer à lista, o sistema reverte deterministicamente para mensagens de texto simples e zero tokens são gerados.
 * **Processamento Inbound Não Bloqueado:** A camada de recepção e execução de tokens (`InteractiveActionService.handle()`) não é bloqueada pelo filtro de emissão, garantindo que qualquer token válido previamente emitido seja processado e consumido normalmente.
 
+### 15. Transporte de Notificação ao Profissional via Template UTILITY (WP6.9)
+* **Contexto Operacional e Janela de 24h da Meta:**
+  * O primeiro contato da plataforma com um profissional ocorre quase invariavelmente fora de uma janela de serviço de 24 horas (*customer-service window*) iniciada por ele.
+  * Mensagens normais de texto ou botões interativos livres (`interactive: button_group` via `/message/sendButtons`) são categorizadas como *service messages* e rejeitadas pela Cloud API da Meta fora da janela de 24h.
+  * Para permitir a entrega legal e garantida do primeiro aviso ao profissional, a notificação deve ser enviada como um template de utilidade (*business-initiated message*).
+* **Modelo Canônico de Template:**
+  * Template registrado: `contato_certo_nova_solicitacao_v1` (idioma `pt_BR`, categoria `UTILITY`). Template submetido à Meta; a ativação operacional exige status APPROVED.
+  * Corpo paramétrico: 5 variáveis obrigatórias `{{1}}` (serviço), `{{2}}` (região/local), `{{3}}` (solicitação/resumo), `{{4}}` (telefone do cliente) e `{{5}}` (referência pública).
+  * Componentes interativos: 2 botões de resposta rápida (*Quick Reply*) com rótulos `Concluído` e `Não consigo atender`.
+* **Preservação Estrita da Autoridade de Domínio:**
+  * Os botões do template transmitem deterministicamente como `payload` o token de ação opaco `ia_<opaque>` de 48 caracteres hexadecimais:
+    * Botão 0 (`Concluído`): `ia_<completion_token>`
+    * Botão 1 (`Não consigo atender`): `ia_<unavailability_token>`
+  * Nenhuma decisão de domínio baseia-se no texto visível do botão. Ao clicar, a resposta do webhook do WhatsApp Cloud API (`message.button`) entrega o payload para o n8n Gateway, que extrai o `ia_<opaque>` e o submete ao `InteractiveActionService` exatamente como nos fluxos de botões interativos normais.
+* **Controle de Transporte Configurável e Fail-Safe:**
+  * `PROFESSIONAL_OPPORTUNITY_TRANSPORT=buttons|template` (padrão: `buttons` para total compatibilidade retroativa e testes locais).
+  * `WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_NAME` (ex.: `contato_certo_nova_solicitacao_v1`).
+  * `WHATSAPP_PROFESSIONAL_OPPORTUNITY_TEMPLATE_LANGUAGE` (ex.: `pt_BR`).
+  * Quando configurado como `template`, a transação bilateral de contato emite payload `template_quick_reply` em `channel_outbound_messages.interactive_payload`, que o n8n Shared Delivery despacha via `/message/sendTemplate/{instance}`.
+
 ---
 
 ## Consequências

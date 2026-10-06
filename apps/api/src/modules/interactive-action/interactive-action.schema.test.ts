@@ -244,3 +244,66 @@ test("interactiveOutboundPayloadSchema strictly enforces schema_version = 1 and 
     })
   );
 });
+
+test("interactiveOutboundPayloadSchema validates template_quick_reply with 4 body parameters and language_code", () => {
+  const validTemplatePayload = {
+    schema_version: 1,
+    type: "template_quick_reply",
+    template_name: "contato_certo_nova_solicitacao_v1",
+    language_code: "pt_BR",
+    body_parameters: [
+      "Cliente",
+      "Sinop / MT",
+      "Eletricista",
+      "Troca de fiação. Telefone do cliente: +5511999999999 Ref.: CC-12345678",
+    ],
+    actions: [
+      { action_id: "ia_111111111111111111111111111111111111111111111111", label: "Concluído" },
+      { action_id: "ia_222222222222222222222222222222222222222222222222", label: "Não consigo atender" },
+    ],
+  };
+
+  const parsed = interactiveOutboundPayloadSchema.parse(validTemplatePayload);
+  assert.equal(parsed.type, "template_quick_reply");
+  if (parsed.type === "template_quick_reply") {
+    assert.equal(parsed.language_code, "pt_BR");
+    assert.equal(parsed.body_parameters.length, 4);
+    assert.equal(parsed.actions.length, 2);
+  }
+
+  // Fails closed when an empty parameter or whitespace-only parameter is supplied
+  assert.throws(() =>
+    interactiveOutboundPayloadSchema.parse({
+      ...validTemplatePayload,
+      body_parameters: ["Cliente", "Sinop", "", "Detalhes"],
+    })
+  );
+
+  assert.throws(() =>
+    interactiveOutboundPayloadSchema.parse({
+      ...validTemplatePayload,
+      body_parameters: ["Cliente", "Sinop", "   ", "Detalhes"],
+    })
+  );
+
+  // Rejects invalid language_code format
+  assert.throws(() =>
+    interactiveOutboundPayloadSchema.parse({
+      ...validTemplatePayload,
+      language_code: "invalid_lang",
+    })
+  );
+
+  // Rejects old 'language' key if language_code is missing
+  const payloadWithOldLangKey = {
+    schema_version: validTemplatePayload.schema_version,
+    type: validTemplatePayload.type,
+    template_name: validTemplatePayload.template_name,
+    language: "pt_BR",
+    body_parameters: validTemplatePayload.body_parameters,
+    actions: validTemplatePayload.actions,
+  };
+  assert.throws(() =>
+    interactiveOutboundPayloadSchema.parse(payloadWithOldLangKey)
+  );
+});

@@ -767,6 +767,30 @@ test("raw Meta Cloud API button_reply capability fixture demonstrates preservati
   assert.equal(normalized.inbound.raw_text, "Concluído");
 });
 
+test("gateway extracts authoritative interactive_action_id from template quick reply message.button", () => {
+  // Evolution normalizes Meta Cloud API template quick-reply callback into message.button { payload, text }
+  const buttonEvent = event({
+    button: {
+      payload: "ia_333333333333333333333333333333333333333333333333",
+      text: "Concluído",
+    },
+  });
+  const normalized = normalize(buttonEvent);
+  assert.equal(normalized.action, "inbox");
+  assert.equal(normalized.inbound.interactive_action_id, "ia_333333333333333333333333333333333333333333333333");
+  assert.equal(normalized.inbound.raw_text, "Concluído");
+
+  // If button payload is missing, it must NEVER drop through to text or invent actionId
+  const missingPayloadEvent = event({
+    button: {
+      text: "Concluído",
+    },
+  });
+  const ignored = normalize(missingPayloadEvent);
+  assert.equal(ignored.action, "ignore");
+  assert.equal(ignored.reason, "unsupported_interactive_reply");
+});
+
 test("exports only use node versions present in the pinned n8n source; every reference resolves",()=>{
   const allowed={webhook:[1,1.1,2,2.1],code:[1,2],if:[2,2.1,2.2,2.3],httpRequest:[3,4,4.1,4.2,4.3],
     executeWorkflow:[1,1.1,1.2,1.3],executeWorkflowTrigger:[1,1.1],scheduleTrigger:[1,1.1,1.2,1.3],convertToFile:[1,1.1],respondToWebhook:[1,1.1,1.2,1.3,1.4,1.5]};
