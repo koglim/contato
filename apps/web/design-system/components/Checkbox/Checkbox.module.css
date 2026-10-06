@@ -1,0 +1,95 @@
+.wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cc-space-2);
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Operational 40px touch/click target area */
+.checkboxContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  margin: -11px 0 0 -11px;
+}
+
+.root {
+  width: 18px; /* 18px Canonical visual size */
+  height: 18px;
+  border-radius: var(--cc-radius-1); /* 4px */
+  border: 1px solid var(--cc-border-default);
+  background-color: var(--cc-bg-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+  transition: background-color var(--cc-duration-fast) var(--cc-ease-standard),
+              border-color var(--cc-duration-fast) var(--cc-ease-standard);
+}
+
+.root:focus-visible {
+  outline: var(--cc-focus-ring-width) solid var(--cc-focus-ring-color);
+  outline-offset: 2px;
+}
+
+.root[data-state="checked"] {
+  background-color: var(--cc-action-primary);
+  border-color: var(--cc-action-primary);
+}
+
+.root:disabled {
+  cursor: not-allowed;
+}
+
+.errorRoot {
+  border-color: var(--cc-status-danger-default) !important;
+}
+
+.indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cc-primitive-white);
+}
+
+.checkIcon {
+  width: 13px;
+  height: 13px;
+  stroke-width: 3px;
+}
+
+.labelContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-0-5);
+  padding-top: 1px;
+}
+
+.label {
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+  color: var(--cc-text-primary);
+  cursor: pointer;
+  line-height: var(--cc-type-body-md-line-height);
+}
+
+.description {
+  font-size: var(--cc-type-caption-size);
+  color: var(--cc-text-secondary);
+}
+
+.errorText {
+  font-size: var(--cc-type-caption-size);
+  color: var(--cc-status-danger-text);
+  font-weight: var(--cc-font-weight-medium);
+}

@@ -1,0 +1,101 @@
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--cc-radius-3);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color var(--cc-duration-fast) var(--cc-ease-standard),
+              border-color var(--cc-duration-fast) var(--cc-ease-standard),
+              color var(--cc-duration-fast) var(--cc-ease-standard);
+  user-select: none;
+  box-sizing: border-box;
+  padding: 0;
+}
+
+.iconButton:focus-visible {
+  outline: var(--cc-focus-ring-width) solid var(--cc-focus-ring-color);
+  outline-offset: var(--cc-focus-ring-offset);
+}
+
+.iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.size-sm {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.size-md {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.size-lg {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.variant-primary {
+  background-color: var(--cc-action-primary);
+  color: var(--cc-action-primary-text);
+  border-color: var(--cc-action-primary);
+}
+.variant-primary:hover:not(:disabled) {
+  background-color: var(--cc-action-primary-hover);
+  border-color: var(--cc-action-primary-hover);
+}
+
+.variant-secondary {
+  background-color: var(--cc-action-secondary-bg);
+  color: var(--cc-action-secondary-text);
+  border-color: var(--cc-action-secondary-border);
+}
+.variant-secondary:hover:not(:disabled) {
+  background-color: var(--cc-action-secondary-hover);
+}
+
+.variant-tertiary {
+  background-color: transparent;
+  color: var(--cc-action-ghost-text);
+  border-color: transparent;
+}
+.variant-tertiary:hover:not(:disabled) {
+  background-color: var(--cc-action-ghost-hover);
+}
+
+.variant-danger {
+  background-color: var(--cc-status-danger-default);
+  color: var(--cc-primitive-white);
+  border-color: var(--cc-status-danger-default);
+}
+.variant-danger:hover:not(:disabled) {
+  background-color: var(--cc-status-danger-hover);
+}
+
+.iconContainer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.spinIcon {
+  width: 20px;
+  height: 20px;
+  animation: cc-spin 1s linear infinite;
+}
+
+@keyframes cc-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

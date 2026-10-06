@@ -1,0 +1,54 @@
+.tableWrapper {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--cc-border-default);
+  border-radius: var(--cc-radius-4);
+  background-color: var(--cc-bg-surface);
+  box-sizing: border-box;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+}
+
+.head {
+  background-color: var(--cc-bg-subtle);
+  border-bottom: 1px solid var(--cc-border-default);
+}
+
+.row {
+  border-bottom: 1px solid var(--cc-border-subtle);
+  transition: background-color var(--cc-duration-fast) var(--cc-ease-standard);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:hover {
+  background-color: var(--cc-bg-subtle);
+}
+
+.headerCell {
+  height: 40px; /* ~40px Canonical Header Height */
+  padding: 0 var(--cc-space-4);
+  font-size: var(--cc-type-label-md-size);
+  font-weight: var(--cc-font-weight-medium);
+  color: var(--cc-text-secondary);
+  white-space: nowrap;
+}
+
+.cell {
+  height: 48px; /* 48px Canonical Default Row Height */
+  padding: 0 var(--cc-space-4);
+  color: var(--cc-text-primary);
+  vertical-align: middle;
+}
+
+.compact .cell {
+  height: 40px; /* 40px Canonical Compact Row Height */
+}

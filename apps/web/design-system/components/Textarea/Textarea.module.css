@@ -1,0 +1,71 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-1-5);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.disabledWrapper {
+  opacity: 0.6;
+}
+
+.label {
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-label-md-size);
+  font-weight: var(--cc-font-weight-medium);
+  color: var(--cc-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-1);
+}
+
+.required {
+  color: var(--cc-status-danger-default);
+}
+
+.textarea {
+  width: 100%;
+  min-height: 96px; /* 96px Canonical minimum */
+  padding: var(--cc-space-2) var(--cc-space-3);
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+  color: var(--cc-text-primary);
+  background-color: var(--cc-bg-surface);
+  border: 1px solid var(--cc-border-default);
+  border-radius: var(--cc-radius-3); /* 8px */
+  outline: none;
+  resize: vertical;
+  line-height: var(--cc-type-body-md-line-height);
+  box-sizing: border-box;
+  transition: border-color var(--cc-duration-fast) var(--cc-ease-standard);
+}
+
+.textarea:focus-visible {
+  border-color: var(--cc-border-focus);
+  outline: var(--cc-focus-ring-width) solid var(--cc-focus-ring-color);
+  outline-offset: 1px;
+}
+
+.textarea:disabled {
+  cursor: not-allowed;
+}
+
+.error {
+  border-color: var(--cc-status-danger-default) !important;
+}
+
+.error:focus-visible {
+  outline-color: var(--cc-status-danger-default) !important;
+}
+
+.helperText {
+  font-size: var(--cc-type-caption-size);
+  color: var(--cc-text-secondary);
+}
+
+.errorText {
+  font-size: var(--cc-type-caption-size);
+  color: var(--cc-status-danger-text);
+  font-weight: var(--cc-font-weight-medium);
+}

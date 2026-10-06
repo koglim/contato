@@ -1,0 +1,7 @@
+.main {
+  width: 100%;
+  padding-top: var(--cc-space-8); /* 32px Vertical Page Padding */
+  padding-bottom: var(--cc-space-16); /* 64px Bottom Breathing Room */
+  box-sizing: border-box;
+  outline: none;
+}

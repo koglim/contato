@@ -1,0 +1,27 @@
+.container {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+
+.padded {
+  padding-left: var(--cc-layout-page-padding);
+  padding-right: var(--cc-layout-page-padding);
+}
+
+.width-narrow {
+  max-width: var(--cc-width-narrow); /* 720px */
+}
+
+.width-standard {
+  max-width: var(--cc-width-standard); /* 1040px */
+}
+
+.width-wide {
+  max-width: var(--cc-width-wide); /* 1280px */
+}
+
+.width-full {
+  max-width: var(--cc-width-full);
+}

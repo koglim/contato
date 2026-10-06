@@ -45,6 +45,8 @@ Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
 Funcionalidades planejadas para a sequência imediata após a conclusão do bloco NOW:
 
+* **Design System Foundation v1 (WP7.0):** Implementação formal da fundação do Design System do ContatoCerto (`apps/web/design-system/`): tokens primitives/semantic/component, dark mode first-party sem FOUC, escala tipográfica Inter, layout primitives (`Box`, `Stack`, `Inline`, `Grid`, `Container`), catálogo de componentes base (Radix Primitives + CSS Modules), Lucide React, App Shell responsivo e Storybook com a11y addon (conforme [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md)).
+* **Migração Visual do Painel Web (WP7.1+):** Substituição progressiva das telas legadas do `/dashboard` com base na fundação v1, mantendo regras de negócio e rotas existentes intactas.
 * **Avaliações e Reputação (Reviews & Ratings):** Coleta estruturada de notas e depoimentos após a confirmação bilateral da conclusão, com ponderação no algoritmo de ranking.
 * **Telemetria e Analytics do Funil:** Instrumentação e produto de visualização de métricas de conversão ao longo do funil (*candidate → match → shown → selected → bilateral connection → completion*).
 * **Painel Web do Profissional v2:** Expansão do `/dashboard` com tela visual de atendimentos, métricas de exposição, taxa de seleção, histórico financeiro de assinatura e status de reputação.

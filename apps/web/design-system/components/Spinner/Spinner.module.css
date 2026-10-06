@@ -1,0 +1,19 @@
+.spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cc-action-primary);
+}
+
+.size-sm .icon { width: 16px; height: 16px; }
+.size-md .icon { width: 20px; height: 20px; }
+.size-lg .icon { width: 28px; height: 28px; }
+
+.icon {
+  animation: cc-spin 1s linear infinite;
+}
+
+@keyframes cc-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
