@@ -114,7 +114,7 @@ export function claimDecision(response, expectedProvider) {
       if (typeof payload.template_name !== "string" || !/^[a-z0-9_]+$/.test(payload.template_name)) {
         throw new Error("outbox_claim_invalid");
       }
-      if (typeof payload.language !== "string" || !/^[a-z]{2}(_[A-Z]{2})?$/.test(payload.language)) {
+      if (typeof payload.language_code !== "string" || !/^[a-z]{2}(_[A-Z]{2})?$/.test(payload.language_code)) {
         throw new Error("outbox_claim_invalid");
       }
       if (!Array.isArray(payload.body_parameters) || payload.body_parameters.some(p => typeof p !== "string" || !p.trim())) {
@@ -144,7 +144,7 @@ export function claimDecision(response, expectedProvider) {
           schema_version: 1,
           type: "template_quick_reply",
           template_name: payload.template_name,
-          language: payload.language,
+          language_code: payload.language_code,
           body_parameters: [...payload.body_parameters],
           actions: payload.actions.map(act => ({ action_id: act.action_id, label: act.label.trim() })),
         },
@@ -207,7 +207,7 @@ export function buildEvolutionSendRequest(message, instance) {
 
     if (payload.type === "template_quick_reply") {
       if (typeof payload.template_name !== "string" || !payload.template_name.trim()
-        || typeof payload.language !== "string" || !payload.language.trim()
+        || typeof payload.language_code !== "string" || !payload.language_code.trim()
         || !Array.isArray(payload.body_parameters)
         || !Array.isArray(payload.actions) || payload.actions.length < 1 || payload.actions.length > 3) {
         throw new Error("interactive_payload_invalid");
@@ -243,7 +243,7 @@ export function buildEvolutionSendRequest(message, instance) {
         body: {
           number,
           name: payload.template_name,
-          language: payload.language,
+          language: payload.language_code,
           components,
         },
       };

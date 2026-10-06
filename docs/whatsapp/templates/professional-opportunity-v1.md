@@ -3,15 +3,15 @@
 * **Nome do Template:** `contato_certo_nova_solicitacao_v1`
 * **Categoria Meta:** `UTILITY`
 * **Idioma:** `pt_BR`
-* **Status Meta:** Registrado via Evolution API (`POST /template/create/contato-certo-oficial`), Meta ID `1752613799170635`.
+* **Status Meta:** Template submetido à Meta (`POST /template/create/contato-certo-oficial`), Meta ID `1752613799170635`. A ativação operacional exige status APPROVED.
 
 ---
 
 ## 1. Contexto e Motivação
 
-Quando um cliente escolhe um profissional na plataforma ContatoCerto, o sistema notifica o profissional sobre a oportunidade. Como este envio é de iniciativa da empresa (*business-initiated*) e na maioria dos casos o profissional não enviou uma mensagem nas últimas 24 horas, o WhatsApp Cloud API rejeita mensagens livres de texto ou botões comuns (`interactive: button_group`), exigindo o envio de um template pré-aprovado.
+Quando um cliente escolhe um profissional na plataforma ContatoCerto, o sistema notifica o profissional sobre a oportunidade. Como este envio é de iniciativa da empresa (*business-initiated*) e na maioria dos casos o profissional não enviou uma mensagem nas últimas 24 horas, o WhatsApp Cloud API rejeita mensagens livres de texto ou botões comuns (`interactive: button_group`), exigindo o envio de um template pré-registrado.
 
-Este documento especifica o template de utilidade aprovado pela Meta e seu mapeamento transacional estrito com a autoridade de domínio do ContatoCerto.
+Este documento especifica o template de utilidade e seu mapeamento transacional estrito com a autoridade de domínio do ContatoCerto.
 
 ---
 
@@ -30,10 +30,10 @@ Detalhes: {{4}}
 Se não puder atender agora, use o botão abaixo para liberar o cliente para outro profissional.
 ```
 
-* **Variável `{{1}}`:** Nome do cliente (ou "Cliente").
-* **Variável `{{2}}`:** Cidade ou região da busca (ex.: "Sinop").
+* **Variável `{{1}}`:** "Cliente".
+* **Variável `{{2}}`:** Região ou cidade / UF da busca (ex.: "Sinop / MT").
 * **Variável `{{3}}`:** Nome do serviço solicitado (ex.: "Eletricista").
-* **Variável `{{4}}`:** Resumo sanitizado da necessidade ou "Contato direto solicitado".
+* **Variável `{{4}}`:** Detalhes determinísticos da solicitação contendo resumo da necessidade, telefone do cliente e referência pública (ex.: `"Troca de tomada. Telefone do cliente: +55... Ref.: CC-XXXXXXXX"`).
 
 ### 2.2 Botões de Resposta Rápida (Quick Reply Buttons)
 

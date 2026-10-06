@@ -68,7 +68,7 @@ export const interactiveTemplateQuickReplyPayloadSchema = z
         message: "language_code must be standard format like pt_BR or en_US",
       }),
     body_parameters: z
-      .array(z.string().max(1024))
+      .array(z.string().trim().min(1).max(1024))
       .min(1)
       .max(15),
     actions: z.array(interactiveOutboundActionSchema).min(1).max(3),

@@ -165,17 +165,18 @@ export async function createBilateralContact(client: DatabaseClient, input: Sele
             ? `${snapshot.city} / ${snapshot.state}`
             : snapshot.city || snapshot.state || "Local não informado";
 
+        const detailsStr = `${snapshot.summary}. Telefone do cliente: ${snapshot.customer_phone_e164} Ref.: ${snapshot.public_code}`;
+
         payload = {
           schema_version: 1,
           type: "template_quick_reply",
           template_name: interactiveConfig.professionalOpportunityTemplateName!,
           language_code: interactiveConfig.professionalOpportunityTemplateLanguage!,
           body_parameters: [
-            snapshot.service_name,
+            "Cliente",
             locationStr,
-            snapshot.summary,
-            snapshot.customer_phone_e164,
-            snapshot.public_code,
+            snapshot.service_name,
+            detailsStr,
           ],
           actions: [
             {
