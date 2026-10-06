@@ -20,11 +20,14 @@ export function Avatar({
   className = "",
 }: AvatarProps) {
   return (
-    <RadixAvatar.Root className={`${styles.root} ${styles[`size-${size}`]} ${className}`}>
+    <RadixAvatar.Root
+      className={`${styles.root} ${styles[`size-${size}`]} ${className}`}
+      aria-hidden={!alt ? "true" : undefined}
+    >
       {src ? (
         <RadixAvatar.Image src={src} alt={alt} className={styles.image} />
       ) : null}
-      <RadixAvatar.Fallback className={styles.fallback} delayMs={100}>
+      <RadixAvatar.Fallback className={styles.fallback} delayMs={100} aria-hidden="true">
         {initials.slice(0, 2).toUpperCase()}
       </RadixAvatar.Fallback>
     </RadixAvatar.Root>

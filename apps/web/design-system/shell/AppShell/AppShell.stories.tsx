@@ -65,8 +65,8 @@ function renderDashboardContent() {
               <span style={{ fontSize: 13, color: "var(--cc-text-secondary)" }}>Status do Perfil</span>
               <Badge variant="success">Ativo</Badge>
             </div>
-            <h3 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>Elegível</h3>
-            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--cc-text-muted)" }}>
+            <h2 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>Elegível</h2>
+            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--cc-text-secondary)" }}>
               Recebendo solicitações normalmente
             </p>
           </Card>
@@ -78,7 +78,7 @@ function renderDashboardContent() {
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ fontSize: 14 }}>Disponível no WhatsApp</span>
-              <Switch defaultChecked />
+              <Switch aria-label="Disponível no WhatsApp" defaultChecked />
             </div>
           </Card>
 
@@ -87,8 +87,8 @@ function renderDashboardContent() {
               <span style={{ fontSize: 13, color: "var(--cc-text-secondary)" }}>Conexões este mês</span>
               <Badge variant="neutral">Bilateral v2</Badge>
             </div>
-            <h3 style={{ margin: 0, fontSize: 24, fontWeight: 600 }} className="cc-tabular-nums">18</h3>
-            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--cc-text-muted)" }}>
+            <h2 style={{ margin: 0, fontSize: 24, fontWeight: 600 }} className="cc-tabular-nums">18</h2>
+            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--cc-text-secondary)" }}>
               14 concluídos com sucesso
             </p>
           </Card>

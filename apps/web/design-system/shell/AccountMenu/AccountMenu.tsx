@@ -29,7 +29,7 @@ export function AccountMenu({
     <button
       type="button"
       className={`${styles.trigger} ${collapsed ? styles.triggerCollapsed : ""} ${className}`}
-      aria-label={`Menu da conta de ${name}`}
+      aria-label={collapsed ? `Menu da conta de ${name}` : undefined}
     >
       <Avatar
         src={avatarSrc}

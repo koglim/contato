@@ -69,7 +69,7 @@
   /* Status: Warning (Separate semantic domain from Accent) */
   --cc-status-warning-default: var(--cc-primitive-amber-500); /* #FFB703 */
   --cc-status-warning-subtle: var(--cc-primitive-amber-100);  /* #FFF4CC */
-  --cc-status-warning-strong: var(--cc-primitive-amber-600);  /* #D99000 */
+  --cc-status-warning-strong: var(--cc-primitive-amber-800);  /* #8C5B00 - Accessible contrast */
   --cc-status-warning-border: var(--cc-primitive-amber-300);
   --cc-status-warning-text: var(--cc-primitive-amber-800);
 

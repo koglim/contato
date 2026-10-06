@@ -43,7 +43,7 @@
   max-width: 440px;
   font-family: var(--cc-font-sans);
   font-size: var(--cc-type-body-md-size);
-  color: var(--cc-text-secondary);
+  color: var(--cc-primitive-neutral-700);
   line-height: var(--cc-type-body-md-line-height);
 }
 

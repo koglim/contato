@@ -1,0 +1,24 @@
+import { defineConfig } from "vitest/config";
+import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
+import { playwright } from "@vitest/browser-playwright";
+import path from "node:path";
+
+export default defineConfig({
+  plugins: [
+    storybookTest({
+      configDir: path.resolve(__dirname, ".storybook"),
+    }),
+  ],
+  test: {
+    name: "storybook",
+    browser: {
+      enabled: true,
+      provider: playwright(),
+      headless: true,
+      instances: [{ browser: "chromium" }],
+    },
+    testTimeout: 20000,
+    hookTimeout: 20000,
+    fileParallelism: false,
+  },
+});

@@ -16,7 +16,7 @@ type Story = StoryObj<typeof PageShell>;
 
 export const Default: Story = {
   render: () => (
-    <PageShell width="standard">
+    <PageShell as="main" width="standard">
       <PageHeader
         eyebrow="PAINEL DO PROFISSIONAL"
         title="Meus Serviços"

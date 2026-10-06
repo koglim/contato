@@ -98,5 +98,5 @@ test("a11y static contract: AppShell implements skip-link, main landmark and nav
 
 test("a11y static contract: AccountMenu enforces accessible button and interactive state", () => {
   const accountMenuSource = read("design-system/shell/AccountMenu/AccountMenu.tsx");
-  assert.match(accountMenuSource, /aria-label=\{`Menu da conta de \$\{name\}`\}/);
+  assert.match(accountMenuSource, /Menu da conta de \$\{name\}/);
 });

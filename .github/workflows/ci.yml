@@ -54,8 +54,17 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Build and test Storybook with a11y gate
+      - name: Build Storybook
+        run: pnpm --filter @contatocerto/web run build-storybook
+
+      - name: Install Playwright Chromium for Storybook browser tests
+        run: pnpm --filter @contatocerto/web exec playwright install chromium --with-deps
+
+      - name: Storybook browser test gate with real a11y enforcement
         run: pnpm --filter @contatocerto/web run test:storybook
+
+      - name: Storybook static contract gate
+        run: pnpm --filter @contatocerto/web run test:storybook:contract
 
       - name: Verify generated n8n exports
         run: |

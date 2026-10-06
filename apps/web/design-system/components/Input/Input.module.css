@@ -6,7 +6,7 @@
   width: 100%;
 }
 
-.disabledWrapper {
+.disabledWrapper .inputContainer {
   opacity: 0.6;
 }
 

@@ -47,7 +47,7 @@ export const Selected: Story = {
         <strong>Plano Profissional Ativo</strong>
         <Badge variant="accent">Conta Gerenciada</Badge>
       </div>
-      <p style={{ margin: "8px 0 0 0", color: "var(--cc-text-secondary)" }}>
+      <p style={{ margin: "8px 0 0 0", color: "var(--cc-primitive-neutral-700)" }}>
         Recebimento contínuo de novas oportunidades pelo WhatsApp.
       </p>
     </Card>

@@ -50,7 +50,7 @@
 .email {
   font-family: var(--cc-font-sans);
   font-size: var(--cc-type-caption-size);
-  color: var(--cc-text-muted);
+  color: var(--cc-text-secondary);
   line-height: var(--cc-type-caption-line-height);
   white-space: nowrap;
   overflow: hidden;

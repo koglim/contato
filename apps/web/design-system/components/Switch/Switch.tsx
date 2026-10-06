@@ -14,6 +14,8 @@ export interface SwitchProps {
   label?: React.ReactNode;
   description?: React.ReactNode;
   className?: string;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
 }
 
 export function Switch({
@@ -26,6 +28,8 @@ export function Switch({
   label,
   description,
   className = "",
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
 }: SwitchProps) {
   const switchId = id || React.useId();
 
@@ -40,6 +44,8 @@ export function Switch({
           disabled={disabled}
           required={required}
           className={styles.root}
+          aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
         >
           <RadixSwitch.Thumb className={styles.thumb} />
         </RadixSwitch.Root>

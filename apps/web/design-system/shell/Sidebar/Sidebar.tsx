@@ -80,6 +80,7 @@ export function Sidebar({
               onClick={item.onClick}
               className={itemClasses}
               aria-current={item.active ? "page" : undefined}
+              aria-label={collapsed ? item.label : undefined}
             >
               {itemContent}
             </Link>
@@ -90,6 +91,7 @@ export function Sidebar({
               onClick={item.onClick}
               className={itemClasses}
               aria-current={item.active ? "page" : undefined}
+              aria-label={collapsed ? item.label : undefined}
             >
               {itemContent}
             </button>
