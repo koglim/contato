@@ -18,6 +18,9 @@ function ThemeWrapper({ children, theme }: { children: React.ReactNode; theme: "
 
 const preview: Preview = {
   parameters: {
+    a11y: {
+      test: "error",
+    },
     controls: {
       matchers: {
         color: /(background|color)$/i,

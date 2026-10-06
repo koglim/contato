@@ -28,6 +28,22 @@
   display: block;
 }
 
+.sidebarFooter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-2);
+}
+
+.userMenuContainer {
+  width: 100%;
+}
+
+.railToggleContainer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--cc-space-1);
+}
+
 .mainArea {
   flex: 1;
   display: flex;
@@ -38,59 +54,7 @@
 
 .content {
   flex: 1;
-}
-
-.mobileNavWrapper {
-  display: flex;
-  flex-direction: column;
-  gap: var(--cc-space-4);
-}
-
-.mobileNav {
-  display: flex;
-  flex-direction: column;
-  gap: var(--cc-space-1);
-}
-
-.mobileNavItem {
-  display: flex;
-  align-items: center;
-  gap: var(--cc-space-3);
-  height: 44px;
-  padding: 0 var(--cc-space-3);
-  border-radius: var(--cc-radius-3);
-  background: transparent;
-  border: none;
-  font-family: var(--cc-font-sans);
-  font-size: var(--cc-type-body-md-size);
-  font-weight: var(--cc-font-weight-medium);
-  color: var(--cc-text-secondary);
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
-}
-
-.mobileNavItem:hover {
-  background-color: var(--cc-action-ghost-hover);
-  color: var(--cc-text-primary);
-}
-
-.mobileNavItemActive {
-  background-color: var(--cc-action-primary-subtle);
-  color: var(--cc-action-primary);
-}
-
-.navIcon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-}
-
-.mobileUserMenu {
-  padding-top: var(--cc-space-4);
-  border-top: 1px solid var(--cc-border-subtle);
+  outline: none;
 }
 
 @media (max-width: 1023px) {

@@ -4,7 +4,9 @@ import React, { useState } from "react";
 import styles from "./AppShell.module.css";
 import { Sidebar, NavItem } from "../Sidebar";
 import { Header } from "../Header";
-import { Sheet } from "../../components/Sheet";
+import { MobileNavigationDrawer } from "../MobileNavigationDrawer";
+import { IconButton } from "../../components/IconButton";
+import { ChevronLeft, ChevronRight } from "../../icons";
 
 export interface AppShellProps {
   navItems: NavItem[];
@@ -12,6 +14,9 @@ export interface AppShellProps {
   userMenu?: React.ReactNode;
   brandTitle?: string;
   brandSubtitle?: string;
+  sidebarCollapsed?: boolean;
+  defaultSidebarCollapsed?: boolean;
+  onSidebarCollapsedChange?: (collapsed: boolean) => void;
   children: React.ReactNode;
 }
 
@@ -21,9 +26,24 @@ export function AppShell({
   userMenu,
   brandTitle = "ContatoCerto",
   brandSubtitle = "Painel do Profissional",
+  sidebarCollapsed: controlledSidebarCollapsed,
+  defaultSidebarCollapsed = false,
+  onSidebarCollapsedChange,
   children,
 }: AppShellProps) {
+  const [uncontrolledSidebarCollapsed, setUncontrolledSidebarCollapsed] = useState(defaultSidebarCollapsed);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  const isControlled = controlledSidebarCollapsed !== undefined;
+  const isCollapsed = isControlled ? controlledSidebarCollapsed : uncontrolledSidebarCollapsed;
+
+  const handleToggleCollapse = () => {
+    const next = !isCollapsed;
+    if (!isControlled) {
+      setUncontrolledSidebarCollapsed(next);
+    }
+    onSidebarCollapsedChange?.(next);
+  };
 
   return (
     <div className={styles.appShell}>
@@ -38,40 +58,33 @@ export function AppShell({
           brandTitle={brandTitle}
           brandSubtitle={brandSubtitle}
           items={navItems}
-          footer={userMenu}
+          collapsed={isCollapsed}
+          footer={
+            <div className={styles.sidebarFooter}>
+              {userMenu ? <div className={styles.userMenuContainer}>{userMenu}</div> : null}
+              <div className={styles.railToggleContainer}>
+                <IconButton
+                  icon={isCollapsed ? <ChevronRight /> : <ChevronLeft />}
+                  aria-label={isCollapsed ? "Expandir barra lateral" : "Recolher barra lateral"}
+                  variant="tertiary"
+                  size="sm"
+                  onClick={handleToggleCollapse}
+                />
+              </div>
+            </div>
+          }
         />
       </div>
 
-      {/* Mobile Drawer Navigation (Sheet) */}
-      <Sheet
+      {/* Mobile Drawer Navigation */}
+      <MobileNavigationDrawer
         open={mobileDrawerOpen}
         onOpenChange={setMobileDrawerOpen}
-        side="left"
-        title={brandTitle}
-        description={brandSubtitle}
-      >
-        <div className={styles.mobileNavWrapper}>
-          <nav className={styles.mobileNav}>
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => {
-                  item.onClick?.();
-                  setMobileDrawerOpen(false);
-                }}
-                className={`${styles.mobileNavItem} ${item.active ? styles.mobileNavItemActive : ""}`}
-                aria-current={item.active ? "page" : undefined}
-              >
-                <span className={styles.navIcon}>{item.icon}</span>
-                <span>{item.label}</span>
-                {item.badge ? <span>{item.badge}</span> : null}
-              </button>
-            ))}
-          </nav>
-          {userMenu ? <div className={styles.mobileUserMenu}>{userMenu}</div> : null}
-        </div>
-      </Sheet>
+        brandTitle={brandTitle}
+        brandSubtitle={brandSubtitle}
+        items={navItems}
+        footer={userMenu}
+      />
 
       {/* Main Layout Area */}
       <div className={styles.mainArea}>
@@ -79,7 +92,9 @@ export function AppShell({
           onMenuToggle={() => setMobileDrawerOpen(true)}
           actions={headerActions}
         />
-        <div className={styles.content}>{children}</div>
+        <main id="main-content" className={styles.content} tabIndex={-1}>
+          {children}
+        </main>
       </div>
     </div>
   );

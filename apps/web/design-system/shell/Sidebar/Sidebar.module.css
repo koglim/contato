@@ -107,6 +107,11 @@
   color: var(--cc-action-primary) !important;
 }
 
+.navItemCollapsed {
+  justify-content: center;
+  padding: 0;
+}
+
 .icon {
   display: flex;
   align-items: center;

@@ -54,6 +54,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Build and test Storybook with a11y gate
+        run: pnpm --filter @contatocerto/web run test:storybook
+
       - name: Verify generated n8n exports
         run: |
           pnpm build:workflows
