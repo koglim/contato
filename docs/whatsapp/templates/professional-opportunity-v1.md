@@ -20,20 +20,22 @@ Este documento especifica o template de utilidade e seu mapeamento transacional 
 ### 2.1 Corpo da Mensagem (Body)
 
 ```text
-Olá! Um cliente solicitou seu contato no ContatoCerto:
+Você recebeu uma nova solicitação no Contato Certo.
 
-Nome: {{1}}
-Região: {{2}}
-Serviço: {{3}}
-Detalhes: {{4}}
+Serviço: {{1}}
+Local: {{2}}
+Solicitação: {{3}}
+Telefone do cliente: {{4}}
+Ref.: {{5}}
 
-Se não puder atender agora, use o botão abaixo para liberar o cliente para outro profissional.
+Entre em contato com o cliente se puder atender. Depois do atendimento, use “Concluído”. Se não puder atender, use “Não consigo atender”.
 ```
 
-* **Variável `{{1}}`:** "Cliente".
+* **Variável `{{1}}`:** Nome do serviço solicitado (ex.: "Eletricista").
 * **Variável `{{2}}`:** Região ou cidade / UF da busca (ex.: "Sinop / MT").
-* **Variável `{{3}}`:** Nome do serviço solicitado (ex.: "Eletricista").
-* **Variável `{{4}}`:** Detalhes determinísticos da solicitação contendo resumo da necessidade, telefone do cliente e referência pública (ex.: `"Troca de tomada. Telefone do cliente: +55... Ref.: CC-XXXXXXXX"`).
+* **Variável `{{3}}`:** Resumo / solicitação do cliente (ex.: "Troca de tomada").
+* **Variável `{{4}}`:** Telefone do cliente (ex.: `+5566999999999`).
+* **Variável `{{5}}`:** Referência pública do contato (ex.: `CC-ABCD2345`).
 
 ### 2.2 Botões de Resposta Rápida (Quick Reply Buttons)
 

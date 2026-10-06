@@ -1655,11 +1655,12 @@ test("Scenario Canary H: Real Cross-Layer test: Bilateral Contact Template Gener
     if (payload.type === "template_quick_reply") {
       assert.equal(payload.template_name, "contato_certo_nova_solicitacao_v1");
       assert.equal(payload.language_code, "pt_BR");
-      assert.equal(payload.body_parameters.length, 4);
-      assert.equal(payload.body_parameters[0], "Cliente");
-      assert.equal(payload.body_parameters[2], "eletricista");
-      assert.match(payload.body_parameters[3]!, new RegExp(f.customerPhone.replace("+", "\\+")));
-      assert.match(payload.body_parameters[3]!, /Ref\.: CC-/);
+      assert.equal(payload.body_parameters.length, 5);
+      assert.equal(payload.body_parameters[0], "eletricista");
+      assert.equal(payload.body_parameters[1], "Sinop / MT");
+      assert.equal(payload.body_parameters[2], "preciso de eletricista em Sinop");
+      assert.equal(payload.body_parameters[3], f.customerPhone);
+      assert.match(payload.body_parameters[4]!, /^CC-/);
       assert.equal(payload.actions.length, 2);
     }
 
@@ -1689,7 +1690,7 @@ test("Scenario Canary H: Real Cross-Layer test: Bilateral Contact Template Gener
     assert.equal(claimed.message.interactive_payload.type, "template_quick_reply");
     assert.equal(claimed.message.interactive_payload.template_name, "contato_certo_nova_solicitacao_v1");
     assert.equal(claimed.message.interactive_payload.language_code, "pt_BR");
-    assert.equal(claimed.message.interactive_payload.body_parameters.length, 4);
+    assert.equal(claimed.message.interactive_payload.body_parameters.length, 5);
     assert.equal(claimed.message.interactive_payload.actions[0].action_id, tokenCompletion);
     assert.equal(claimed.message.interactive_payload.actions[1].action_id, tokenUnavailability);
 
@@ -1700,12 +1701,15 @@ test("Scenario Canary H: Real Cross-Layer test: Bilateral Contact Template Gener
     assert.equal(sendReq.body.language, "pt_BR");
     assert.equal(sendReq.body.components.length, 3);
 
-    // Body component has exactly 4 parameters
+    // Body component has exactly 5 parameters
     const bodyComp = sendReq.body.components[0];
     assert.equal(bodyComp.type, "body");
-    assert.equal(bodyComp.parameters.length, 4);
-    assert.equal(bodyComp.parameters[0].text, "Cliente");
-    assert.equal(bodyComp.parameters[2].text, "eletricista");
+    assert.equal(bodyComp.parameters.length, 5);
+    assert.equal(bodyComp.parameters[0].text, "eletricista");
+    assert.equal(bodyComp.parameters[1].text, "Sinop / MT");
+    assert.equal(bodyComp.parameters[2].text, "preciso de eletricista em Sinop");
+    assert.equal(bodyComp.parameters[3].text, f.customerPhone);
+    assert.match(bodyComp.parameters[4].text, /^CC-/);
 
     // Button component index 0 carries completion token
     const btn0 = sendReq.body.components[1];

@@ -283,7 +283,7 @@ Os parsers de texto e o validador de tokens atuam unicamente como camadas de ext
   * Para permitir a entrega legal e garantida do primeiro aviso ao profissional, a notificação deve ser enviada como um template de utilidade (*business-initiated message*).
 * **Modelo Canônico de Template:**
   * Template registrado: `contato_certo_nova_solicitacao_v1` (idioma `pt_BR`, categoria `UTILITY`). Template submetido à Meta; a ativação operacional exige status APPROVED.
-  * Corpo paramétrico: 4 variáveis obrigatórias `{{1}}` (cliente), `{{2}}` (região), `{{3}}` (serviço) e `{{4}}` (detalhes com telefone e referência pública).
+  * Corpo paramétrico: 5 variáveis obrigatórias `{{1}}` (serviço), `{{2}}` (região/local), `{{3}}` (solicitação/resumo), `{{4}}` (telefone do cliente) e `{{5}}` (referência pública).
   * Componentes interativos: 2 botões de resposta rápida (*Quick Reply*) com rótulos `Concluído` e `Não consigo atender`.
 * **Preservação Estrita da Autoridade de Domínio:**
   * Os botões do template transmitem deterministicamente como `payload` o token de ação opaco `ia_<opaque>` de 48 caracteres hexadecimais:

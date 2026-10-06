@@ -159,7 +159,7 @@ test("interactive claim validation rejects malformed payloads and out-of-spec ac
       type: "template_quick_reply",
       template_name: "contato_certo_nova_solicitacao_v1",
       language_code: "pt_BR",
-      body_parameters: ["Cliente", "Sinop / MT", "Eletricista", "Instalação de chuveiro. Telefone do cliente: +5511888888888 Ref.: CC-12345678"],
+      body_parameters: ["Eletricista", "Sinop / MT", "Instalação de chuveiro", "+5511888888888", "CC-12345678"],
       actions: [
         { action_id: "ia_111111111111111111111111111111111111111111111111", label: "Concluído" },
         { action_id: "ia_222222222222222222222222222222222222222222222222", label: "Não consigo atender" },
@@ -171,7 +171,7 @@ test("interactive claim validation rejects malformed payloads and out-of-spec ac
   assert.equal(templateDecision.message.interactive_payload.type, "template_quick_reply");
   assert.equal(templateDecision.message.interactive_payload.template_name, "contato_certo_nova_solicitacao_v1");
   assert.equal(templateDecision.message.interactive_payload.language_code, "pt_BR");
-  assert.deepEqual(templateDecision.message.interactive_payload.body_parameters, ["Cliente", "Sinop / MT", "Eletricista", "Instalação de chuveiro. Telefone do cliente: +5511888888888 Ref.: CC-12345678"]);
+  assert.deepEqual(templateDecision.message.interactive_payload.body_parameters, ["Eletricista", "Sinop / MT", "Instalação de chuveiro", "+5511888888888", "CC-12345678"]);
   assert.equal(templateDecision.message.interactive_payload.actions.length, 2);
 
   // Invalid template name
@@ -231,7 +231,7 @@ test("buildEvolutionSendRequest creates accurate endpoints and bodies for text a
       type: "template_quick_reply",
       template_name: "contato_certo_nova_solicitacao_v1",
       language_code: "pt_BR",
-      body_parameters: ["Cliente", "Sinop / MT", "Eletricista", "Quadro de força. Telefone do cliente: +5511888888888 Ref.: CC-12345678"],
+      body_parameters: ["Eletricista", "Sinop / MT", "Quadro de força", "+5511888888888", "CC-12345678"],
       actions: [
         { action_id: "ia_111111111111111111111111111111111111111111111111", label: "Concluído" },
         { action_id: "ia_222222222222222222222222222222222222222222222222", label: "Não consigo atender" },
@@ -248,10 +248,11 @@ test("buildEvolutionSendRequest creates accurate endpoints and bodies for text a
       {
         type: "body",
         parameters: [
-          { type: "text", text: "Cliente" },
-          { type: "text", text: "Sinop / MT" },
           { type: "text", text: "Eletricista" },
-          { type: "text", text: "Quadro de força. Telefone do cliente: +5511888888888 Ref.: CC-12345678" },
+          { type: "text", text: "Sinop / MT" },
+          { type: "text", text: "Quadro de força" },
+          { type: "text", text: "+5511888888888" },
+          { type: "text", text: "CC-12345678" },
         ],
       },
       {
