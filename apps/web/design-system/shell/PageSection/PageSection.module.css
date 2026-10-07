@@ -1,0 +1,45 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--cc-space-8); /* 32px Independent Sections Rhythm */
+  box-sizing: border-box;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--cc-space-4);
+  margin-bottom: var(--cc-space-4);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-heading-md-size);
+  font-weight: var(--cc-font-weight-semibold);
+  color: var(--cc-text-primary);
+  line-height: var(--cc-type-heading-md-line-height);
+}
+
+.description {
+  margin: var(--cc-space-1) 0 0;
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+  color: var(--cc-text-secondary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+}

@@ -1,0 +1,46 @@
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--cc-space-8) var(--cc-space-6);
+  border: 1px dashed var(--cc-border-strong);
+  border-radius: var(--cc-radius-5); /* 12px */
+  background-color: var(--cc-bg-surface);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.iconContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--cc-radius-full);
+  background-color: var(--cc-bg-muted);
+  color: var(--cc-text-secondary);
+  margin-bottom: var(--cc-space-4);
+}
+
+.title {
+  margin: 0 0 var(--cc-space-1-5) 0;
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-heading-sm-size);
+  font-weight: var(--cc-font-weight-semibold);
+  color: var(--cc-text-primary);
+}
+
+.description {
+  margin: 0;
+  max-width: 440px;
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+  color: var(--cc-text-secondary);
+  line-height: var(--cc-type-body-md-line-height);
+}
+
+.action {
+  margin-top: var(--cc-space-5);
+}

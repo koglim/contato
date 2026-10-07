@@ -1,0 +1,111 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-1-5);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.disabledWrapper .inputContainer {
+  opacity: 0.6;
+}
+
+.label {
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-label-md-size);
+  font-weight: var(--cc-font-weight-medium);
+  color: var(--cc-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-1);
+}
+
+.required {
+  color: var(--cc-status-danger-default);
+}
+
+.inputContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 1px solid var(--cc-border-default);
+  border-radius: var(--cc-radius-3); /* 8px */
+  background-color: var(--cc-bg-surface);
+  transition: border-color var(--cc-duration-fast) var(--cc-ease-standard),
+              box-shadow var(--cc-duration-fast) var(--cc-ease-standard);
+  box-sizing: border-box;
+}
+
+.inputContainer:focus-within {
+  border-color: var(--cc-border-focus);
+  outline: var(--cc-focus-ring-width) solid var(--cc-focus-ring-color);
+  outline-offset: 1px;
+}
+
+.errorContainer {
+  border-color: var(--cc-status-danger-default) !important;
+}
+
+.errorContainer:focus-within {
+  outline-color: var(--cc-status-danger-default) !important;
+}
+
+.input {
+  width: 100%;
+  height: 40px; /* 40px Canonical form target */
+  padding: 0 var(--cc-space-3);
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+  color: var(--cc-text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.input::placeholder {
+  color: var(--cc-text-muted);
+}
+
+.input:disabled {
+  cursor: not-allowed;
+}
+
+.hasLeftIcon {
+  padding-left: var(--cc-space-8);
+}
+
+.hasRightIcon {
+  padding-right: var(--cc-space-8);
+}
+
+.leftIcon {
+  position: absolute;
+  left: var(--cc-space-2);
+  display: flex;
+  align-items: center;
+  color: var(--cc-text-secondary);
+  pointer-events: none;
+}
+
+.rightIcon {
+  position: absolute;
+  right: var(--cc-space-2);
+  display: flex;
+  align-items: center;
+  color: var(--cc-text-secondary);
+}
+
+.helperText {
+  font-size: var(--cc-type-caption-size);
+  color: var(--cc-text-secondary);
+  line-height: var(--cc-type-caption-line-height);
+}
+
+.errorText {
+  font-size: var(--cc-type-caption-size);
+  color: var(--cc-status-danger-text);
+  line-height: var(--cc-type-caption-line-height);
+  font-weight: var(--cc-font-weight-medium);
+}

@@ -1,0 +1,55 @@
+.content {
+  min-width: 180px;
+  background-color: var(--cc-bg-elevated);
+  border: 1px solid var(--cc-border-default);
+  border-radius: var(--cc-radius-4); /* 10px Popover/Dropdown */
+  box-shadow: var(--cc-shadow-md);
+  padding: var(--cc-space-1);
+  z-index: var(--cc-z-dropdown);
+  box-sizing: border-box;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+  height: 36px;
+  padding: 0 var(--cc-space-3);
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+  color: var(--cc-text-primary);
+  border-radius: var(--cc-radius-2);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+
+.item[data-highlighted] {
+  background-color: var(--cc-action-ghost-hover);
+}
+
+.item[data-disabled] {
+  color: var(--cc-text-muted);
+  cursor: not-allowed;
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  color: var(--cc-text-secondary);
+  width: 16px;
+  height: 16px;
+}
+
+.dangerItem {
+  color: var(--cc-status-danger-default);
+}
+
+.dangerItem[data-highlighted] {
+  background-color: var(--cc-status-danger-subtle);
+  color: var(--cc-status-danger-strong);
+}
+
+.dangerItem .icon {
+  color: inherit;
+}

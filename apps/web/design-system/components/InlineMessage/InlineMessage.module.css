@@ -1,0 +1,24 @@
+.message {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cc-space-1-5);
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-sm-size);
+  line-height: var(--cc-type-body-sm-line-height);
+  box-sizing: border-box;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.text {
+  color: inherit;
+}
+
+.variant-info { color: var(--cc-status-info-strong); }
+.variant-success { color: var(--cc-status-success-strong); }
+.variant-warning { color: var(--cc-status-warning-strong); }
+.variant-danger { color: var(--cc-status-danger-strong); }

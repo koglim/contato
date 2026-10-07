@@ -1,0 +1,70 @@
+/* ==========================================================================
+   ContatoCerto Design System — Primitive Tokens
+   ========================================================================== */
+
+:root {
+  /* Brand */
+  --cc-primitive-blue-50: #EAF2FF;
+  --cc-primitive-blue-100: #D0E1FD;
+  --cc-primitive-blue-200: #A6C5FB;
+  --cc-primitive-blue-300: #6EA0F9;
+  --cc-primitive-blue-400: #3B7DF8;
+  --cc-primitive-blue-500: #1B65F7;
+  --cc-primitive-blue-600: #0B63F6; /* Primary */
+  --cc-primitive-blue-700: #084CC1; /* Primary Dark */
+  --cc-primitive-blue-800: #06378C;
+  --cc-primitive-blue-900: #04245C;
+
+  /* Accent (Yellow/Amber) */
+  --cc-primitive-amber-50: #FFFDF5;
+  --cc-primitive-amber-100: #FFF4CC; /* Accent Light */
+  --cc-primitive-amber-200: #FFE599;
+  --cc-primitive-amber-300: #FFD266;
+  --cc-primitive-amber-400: #FFC433;
+  --cc-primitive-amber-500: #FFB703; /* Accent */
+  --cc-primitive-amber-600: #D99000; /* Accent Dark */
+  --cc-primitive-amber-700: #B37400;
+  --cc-primitive-amber-800: #8C5B00;
+  --cc-primitive-amber-900: #5C3C00;
+
+  /* Success (Teal/Emerald) */
+  --cc-primitive-teal-50: #E8F7F3; /* Success Light */
+  --cc-primitive-teal-100: #D1EFE7;
+  --cc-primitive-teal-200: #A3DFCF;
+  --cc-primitive-teal-300: #65C9B0;
+  --cc-primitive-teal-400: #2EB191;
+  --cc-primitive-teal-500: #159477;
+  --cc-primitive-teal-600: #0E7C66; /* Success */
+  --cc-primitive-teal-700: #0B6352;
+  --cc-primitive-teal-800: #084A3D;
+  --cc-primitive-teal-900: #053129;
+
+  /* Danger (Ruby/Red) */
+  --cc-primitive-red-50: #FEECEB; /* Danger Light */
+  --cc-primitive-red-100: #FCD9D7;
+  --cc-primitive-red-200: #F8B3B0;
+  --cc-primitive-red-300: #F28580;
+  --cc-primitive-red-400: #E85750;
+  --cc-primitive-red-500: #DD3B32;
+  --cc-primitive-red-600: #D92D20; /* Danger */
+  --cc-primitive-red-700: #B42318;
+  --cc-primitive-red-800: #912018;
+  --cc-primitive-red-900: #7A271A;
+
+  /* Neutral Scale */
+  --cc-primitive-neutral-50: #F9FAFB;
+  --cc-primitive-neutral-100: #F2F4F7;
+  --cc-primitive-neutral-200: #E4E7EC;
+  --cc-primitive-neutral-300: #D0D5DD;
+  --cc-primitive-neutral-400: #98A2B3;
+  --cc-primitive-neutral-500: #667085;
+  --cc-primitive-neutral-600: #475467;
+  --cc-primitive-neutral-700: #344054;
+  --cc-primitive-neutral-800: #1D2939;
+  --cc-primitive-neutral-900: #101828;
+  --cc-primitive-neutral-950: #0C111D;
+
+  /* Pure */
+  --cc-primitive-white: #FFFFFF;
+  --cc-primitive-black: #000000;
+}

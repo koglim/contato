@@ -1,0 +1,64 @@
+/* ==========================================================================
+   ContatoCerto Design System — Shape, Elevation & Motion Tokens
+   ========================================================================== */
+
+:root {
+  /* Shape / Radius Scale */
+  --cc-radius-0: 0px;
+  --cc-radius-1: 4px;
+  --cc-radius-2: 6px;
+  --cc-radius-3: 8px;   /* Buttons, Inputs, Selects, Textareas */
+  --cc-radius-4: 10px;  /* Popovers, Dropdowns */
+  --cc-radius-5: 12px;  /* Cards */
+  --cc-radius-6: 16px;  /* Dialogs, Sheets */
+  --cc-radius-full: 9999px; /* Avatars, Pills */
+
+  /* Elevation / Shadows (Neutral, Soft, No Colored Glow) */
+  --cc-shadow-none: none;
+  --cc-shadow-xs: 0px 1px 2px rgba(16, 24, 40, 0.05);
+  --cc-shadow-sm: 0px 1px 3px rgba(16, 24, 40, 0.1), 0px 1px 2px rgba(16, 24, 40, 0.06);
+  --cc-shadow-md: 0px 4px 8px -2px rgba(16, 24, 40, 0.1), 0px 2px 4px -2px rgba(16, 24, 40, 0.06);
+  --cc-shadow-lg: 0px 12px 16px -4px rgba(16, 24, 40, 0.08), 0px 4px 6px -2px rgba(16, 24, 40, 0.03);
+  --cc-shadow-xl: 0px 20px 24px -4px rgba(16, 24, 40, 0.08), 0px 8px 8px -4px rgba(16, 24, 40, 0.03);
+
+  /* Motion: Durations */
+  --cc-duration-instant: 0ms;
+  --cc-duration-fast: 100ms;   /* Hover states */
+  --cc-duration-normal: 160ms; /* Tooltip, Dropdown */
+  --cc-duration-medium: 220ms; /* Dialog, Modal */
+  --cc-duration-slow: 320ms;   /* Drawers, Sheets */
+
+  /* Motion: Easings */
+  --cc-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --cc-ease-enter: cubic-bezier(0, 0, 0, 1);
+  --cc-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Z-Index Strategy */
+  --cc-z-base: 0;
+  --cc-z-elevated: 1;
+  --cc-z-sticky: 10;
+  --cc-z-header: 20;
+  --cc-z-dropdown: 30;
+  --cc-z-overlay: 40;
+  --cc-z-modal: 50;
+  --cc-z-toast: 60;
+  --cc-z-tooltip: 70;
+}
+
+[data-theme="dark"] {
+  /* Dark mode elevates primarily via surface and border, subtle shadow */
+  --cc-shadow-xs: 0px 1px 2px rgba(0, 0, 0, 0.3);
+  --cc-shadow-sm: 0px 2px 4px rgba(0, 0, 0, 0.4);
+  --cc-shadow-md: 0px 4px 8px rgba(0, 0, 0, 0.5);
+  --cc-shadow-lg: 0px 12px 20px rgba(0, 0, 0, 0.6);
+  --cc-shadow-xl: 0px 20px 28px rgba(0, 0, 0, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --cc-duration-fast: 0ms;
+    --cc-duration-normal: 0ms;
+    --cc-duration-medium: 0ms;
+    --cc-duration-slow: 0ms;
+  }
+}

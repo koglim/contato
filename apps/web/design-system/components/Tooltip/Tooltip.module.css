@@ -1,0 +1,18 @@
+.content {
+  background-color: var(--cc-primitive-neutral-900);
+  color: var(--cc-primitive-white);
+  border-radius: var(--cc-radius-2); /* 6px */
+  padding: var(--cc-space-1) var(--cc-space-2);
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-caption-size);
+  line-height: var(--cc-type-caption-line-height);
+  box-shadow: var(--cc-shadow-sm);
+  z-index: var(--cc-z-tooltip);
+  max-width: 240px;
+  user-select: none;
+  animation-duration: var(--cc-duration-fast);
+}
+
+.arrow {
+  fill: var(--cc-primitive-neutral-900);
+}

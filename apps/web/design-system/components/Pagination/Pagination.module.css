@@ -1,0 +1,19 @@
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--cc-space-3) 0;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.info {
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-sm-size);
+  color: var(--cc-text-secondary);
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+}

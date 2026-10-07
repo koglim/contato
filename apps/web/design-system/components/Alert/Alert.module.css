@@ -1,0 +1,106 @@
+.alert {
+  display: flex;
+  align-items: flex-start;
+  padding: var(--cc-space-4);
+  border-radius: var(--cc-radius-3); /* 8px */
+  border: 1px solid transparent;
+  gap: var(--cc-space-3);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.iconContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-1);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-label-lg-size);
+  font-weight: var(--cc-font-weight-semibold);
+  line-height: var(--cc-type-label-lg-line-height);
+}
+
+.body {
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+  line-height: var(--cc-type-body-md-line-height);
+}
+
+.closeButton {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  opacity: 0.7;
+  transition: opacity var(--cc-duration-fast) var(--cc-ease-standard);
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.closeButton:hover {
+  opacity: 1;
+}
+
+.closeButton:focus-visible {
+  outline: var(--cc-focus-ring-width) solid var(--cc-focus-ring-color);
+  outline-offset: 2px;
+}
+
+.closeIcon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Info */
+.variant-info {
+  background-color: var(--cc-status-info-subtle);
+  border-color: var(--cc-status-info-border);
+  color: var(--cc-status-info-text);
+}
+.variant-info .title { color: var(--cc-status-info-strong); }
+
+/* Success */
+.variant-success {
+  background-color: var(--cc-status-success-subtle);
+  border-color: var(--cc-status-success-border);
+  color: var(--cc-status-success-text);
+}
+.variant-success .title { color: var(--cc-status-success-strong); }
+
+/* Warning */
+.variant-warning {
+  background-color: var(--cc-status-warning-subtle);
+  border-color: var(--cc-status-warning-border);
+  color: var(--cc-status-warning-text);
+}
+.variant-warning .title { color: var(--cc-status-warning-strong); }
+
+/* Danger */
+.variant-danger {
+  background-color: var(--cc-status-danger-subtle);
+  border-color: var(--cc-status-danger-border);
+  color: var(--cc-status-danger-text);
+}
+.variant-danger .title { color: var(--cc-status-danger-strong); }

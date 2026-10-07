@@ -1,0 +1,70 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--cc-font-sans);
+  font-weight: var(--cc-font-weight-medium);
+  letter-spacing: 0.01em;
+  user-select: none;
+  white-space: nowrap;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+}
+
+.rounded {
+  border-radius: var(--cc-radius-1); /* 4px standard badge */
+}
+
+.pill {
+  border-radius: var(--cc-radius-full);
+}
+
+.size-sm {
+  height: 20px;
+  padding: 0 var(--cc-space-1-5);
+  font-size: var(--cc-type-caption-size);
+  gap: var(--cc-space-1);
+}
+
+.size-md {
+  height: 24px;
+  padding: 0 var(--cc-space-2);
+  font-size: var(--cc-type-body-sm-size);
+  gap: var(--cc-space-1);
+}
+
+.variant-neutral {
+  background-color: var(--cc-bg-muted);
+  color: var(--cc-text-secondary);
+  border-color: var(--cc-border-subtle);
+}
+
+.variant-info {
+  background-color: var(--cc-status-info-subtle);
+  color: var(--cc-status-info-text);
+  border-color: var(--cc-status-info-border);
+}
+
+.variant-success {
+  background-color: var(--cc-status-success-subtle);
+  color: var(--cc-status-success-text);
+  border-color: var(--cc-status-success-border);
+}
+
+.variant-warning {
+  background-color: var(--cc-status-warning-subtle);
+  color: var(--cc-status-warning-text);
+  border-color: var(--cc-status-warning-border);
+}
+
+.variant-danger {
+  background-color: var(--cc-status-danger-subtle);
+  color: var(--cc-status-danger-text);
+  border-color: var(--cc-status-danger-border);
+}
+
+.variant-accent {
+  background-color: var(--cc-accent-subtle);
+  color: var(--cc-accent-text);
+  border-color: var(--cc-accent-default);
+}

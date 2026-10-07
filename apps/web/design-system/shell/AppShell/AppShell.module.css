@@ -1,0 +1,64 @@
+.appShell {
+  display: flex;
+  min-height: 100dvh;
+  background-color: var(--cc-bg-canvas);
+  color: var(--cc-text-primary);
+  box-sizing: border-box;
+}
+
+.skipLink {
+  position: absolute;
+  top: -999px;
+  left: var(--cc-space-4);
+  background-color: var(--cc-action-primary);
+  color: var(--cc-primitive-white);
+  padding: var(--cc-space-2) var(--cc-space-4);
+  border-radius: var(--cc-radius-3);
+  z-index: 9999;
+  text-decoration: none;
+  font-family: var(--cc-font-sans);
+  font-weight: var(--cc-font-weight-medium);
+}
+
+.skipLink:focus {
+  top: var(--cc-space-4);
+}
+
+.desktopSidebar {
+  display: block;
+}
+
+.sidebarFooter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-2);
+}
+
+.userMenuContainer {
+  width: 100%;
+}
+
+.railToggleContainer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--cc-space-1);
+}
+
+.mainArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background-color: var(--cc-bg-canvas);
+}
+
+.content {
+  flex: 1;
+  outline: none;
+}
+
+@media (max-width: 1023px) {
+  .desktopSidebar {
+    display: none;
+  }
+}

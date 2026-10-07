@@ -1,0 +1,102 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--cc-overlay-backdrop);
+  z-index: var(--cc-z-modal);
+  animation: fadeIn var(--cc-duration-fast) var(--cc-ease-enter);
+}
+
+.content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: var(--cc-bg-surface);
+  border: 1px solid var(--cc-border-default);
+  border-radius: var(--cc-radius-6); /* 16px Dialog canonical */
+  box-shadow: var(--cc-shadow-xl);
+  z-index: calc(var(--cc-z-modal) + 1);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  outline: none;
+  width: calc(100vw - var(--cc-layout-gutter-mobile) * 2);
+  animation: scaleIn var(--cc-duration-medium) var(--cc-ease-enter);
+}
+
+/* Canonical Dialog widths */
+.width-sm { max-width: 400px; }
+.width-md { max-width: 560px; }
+.width-lg { max-width: 720px; }
+.width-xl { max-width: 960px; }
+
+.header {
+  position: relative;
+  padding: var(--cc-space-6) var(--cc-space-6) var(--cc-space-4);
+  border-bottom: 1px solid var(--cc-border-subtle);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-heading-md-size);
+  font-weight: var(--cc-font-weight-semibold);
+  color: var(--cc-text-primary);
+  line-height: var(--cc-type-heading-md-line-height);
+  padding-right: var(--cc-space-6);
+}
+
+.description {
+  margin: var(--cc-space-1) 0 0;
+  font-family: var(--cc-font-sans);
+  font-size: var(--cc-type-body-md-size);
+  color: var(--cc-text-secondary);
+  line-height: var(--cc-type-body-md-line-height);
+  padding-right: var(--cc-space-6);
+}
+
+.close {
+  position: absolute;
+  top: var(--cc-space-5);
+  right: var(--cc-space-5);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cc-text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--cc-radius-2);
+  transition: color var(--cc-duration-fast) var(--cc-ease-standard);
+}
+
+.close:hover {
+  color: var(--cc-text-primary);
+}
+
+.close:focus-visible {
+  outline: var(--cc-focus-ring-width) solid var(--cc-focus-ring-color);
+  outline-offset: 2px;
+}
+
+.closeIcon {
+  width: 20px;
+  height: 20px;
+}
+
+.body {
+  padding: var(--cc-space-6);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}

@@ -1,0 +1,64 @@
+.card {
+  box-sizing: border-box;
+  background-color: var(--cc-bg-surface);
+  border: 1px solid var(--cc-border-default);
+  border-radius: var(--cc-radius-5); /* 12px Canonical Card Radius */
+  transition: background-color var(--cc-duration-fast) var(--cc-ease-standard),
+              border-color var(--cc-duration-fast) var(--cc-ease-standard),
+              box-shadow var(--cc-duration-fast) var(--cc-ease-standard);
+}
+
+/* Padding variants */
+.padding-dense {
+  padding: var(--cc-space-4); /* 16px */
+}
+
+.padding-intermediate {
+  padding: var(--cc-space-5); /* 20px */
+}
+
+.padding-default {
+  padding: var(--cc-space-6); /* 24px */
+}
+
+/* Variant Default */
+.variant-default {
+  background-color: var(--cc-bg-surface);
+  border-color: var(--cc-border-default);
+}
+
+/* Variant Interactive */
+.variant-interactive {
+  cursor: pointer;
+}
+
+.variant-interactive:hover {
+  background-color: var(--cc-bg-subtle);
+  border-color: var(--cc-border-strong);
+  box-shadow: var(--cc-shadow-xs);
+}
+
+/* Variant Selected */
+.variant-selected {
+  border-color: var(--cc-action-primary);
+  background-color: var(--cc-action-primary-subtle);
+  outline: 1px solid var(--cc-action-primary);
+}
+
+/* Variant Muted */
+.variant-muted {
+  background-color: var(--cc-bg-muted);
+  border-color: var(--cc-border-subtle);
+}
+
+/* Variant Danger */
+.variant-danger {
+  border-color: var(--cc-status-danger-border);
+  background-color: var(--cc-status-danger-subtle);
+}
+
+/* Variant Warning */
+.variant-warning {
+  border-color: var(--cc-status-warning-border);
+  background-color: var(--cc-status-warning-subtle);
+}

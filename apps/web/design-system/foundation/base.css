@@ -1,0 +1,62 @@
+/* ==========================================================================
+   ContatoCerto Design System — Foundation Reset & Base
+   ========================================================================== */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  tab-size: 4;
+  font-family: var(--cc-font-sans);
+  background-color: var(--cc-bg-canvas);
+  color: var(--cc-text-primary);
+}
+
+body {
+  margin: 0;
+  line-height: var(--cc-type-body-md-line-height);
+  font-size: var(--cc-type-body-md-size);
+  font-weight: var(--cc-font-weight-regular);
+  min-height: 100dvh;
+  background-color: var(--cc-bg-canvas);
+  color: var(--cc-text-primary);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tabular numerals utility for stats, counters, financial numbers and tables */
+.cc-tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Interactive accessibility focus-visible default */
+:focus-visible {
+  outline: var(--cc-focus-ring-width) solid var(--cc-focus-ring-color);
+  outline-offset: var(--cc-focus-ring-offset);
+}
+
+/* Reduced motion accessibility baseline */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Accessible Screen Reader Only Utility */
+.cc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

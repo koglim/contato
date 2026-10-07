@@ -1,0 +1,82 @@
+/* ==========================================================================
+   ContatoCerto Design System — Typography Tokens
+   ========================================================================== */
+
+:root {
+  /* Font Family (Inter loaded via next/font in root layout) */
+  --cc-font-sans: var(--font-inter, "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  --cc-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Font Weights */
+  --cc-font-weight-regular: 400;
+  --cc-font-weight-medium: 500;
+  --cc-font-weight-semibold: 600;
+  --cc-font-weight-bold: 700;
+
+  /* Canonical Typography Scale */
+  /* display-lg: 36px / 44px / 600 */
+  --cc-type-display-lg-size: 36px;
+  --cc-type-display-lg-line-height: 44px;
+  --cc-type-display-lg-weight: var(--cc-font-weight-semibold);
+  --cc-type-display-lg-letter-spacing: -0.025em;
+
+  /* heading-xl: 30px / 38px / 600 */
+  --cc-type-heading-xl-size: 30px;
+  --cc-type-heading-xl-line-height: 38px;
+  --cc-type-heading-xl-weight: var(--cc-font-weight-semibold);
+  --cc-type-heading-xl-letter-spacing: -0.02em;
+
+  /* heading-lg: 24px / 32px / 600 */
+  --cc-type-heading-lg-size: 24px;
+  --cc-type-heading-lg-line-height: 32px;
+  --cc-type-heading-lg-weight: var(--cc-font-weight-semibold);
+  --cc-type-heading-lg-letter-spacing: -0.015em;
+
+  /* heading-md: 20px / 28px / 600 */
+  --cc-type-heading-md-size: 20px;
+  --cc-type-heading-md-line-height: 28px;
+  --cc-type-heading-md-weight: var(--cc-font-weight-semibold);
+  --cc-type-heading-md-letter-spacing: -0.01em;
+
+  /* heading-sm: 18px / 26px / 600 */
+  --cc-type-heading-sm-size: 18px;
+  --cc-type-heading-sm-line-height: 26px;
+  --cc-type-heading-sm-weight: var(--cc-font-weight-semibold);
+  --cc-type-heading-sm-letter-spacing: -0.005em;
+
+  /* body-lg: 16px / 24px / 400 */
+  --cc-type-body-lg-size: 16px;
+  --cc-type-body-lg-line-height: 24px;
+  --cc-type-body-lg-weight: var(--cc-font-weight-regular);
+  --cc-type-body-lg-letter-spacing: 0;
+
+  /* body-md: 14px / 20px / 400 (DEFAULT OPERACIONAL DO PAINEL) */
+  --cc-type-body-md-size: 14px;
+  --cc-type-body-md-line-height: 20px;
+  --cc-type-body-md-weight: var(--cc-font-weight-regular);
+  --cc-type-body-md-letter-spacing: 0;
+
+  /* body-sm: 13px / 18px / 400 */
+  --cc-type-body-sm-size: 13px;
+  --cc-type-body-sm-line-height: 18px;
+  --cc-type-body-sm-weight: var(--cc-font-weight-regular);
+  --cc-type-body-sm-letter-spacing: 0;
+
+  /* label-lg: 14px / 20px / 500 */
+  --cc-type-label-lg-size: 14px;
+  --cc-type-label-lg-line-height: 20px;
+  --cc-type-label-lg-weight: var(--cc-font-weight-medium);
+  --cc-type-label-lg-letter-spacing: 0;
+
+  /* label-md: 13px / 18px / 500 */
+  --cc-type-label-md-size: 13px;
+  --cc-type-label-md-line-height: 18px;
+  --cc-type-label-md-weight: var(--cc-font-weight-medium);
+  --cc-type-label-md-letter-spacing: 0;
+
+  /* caption: 12px / 16px / 400 */
+  --cc-type-caption-size: 12px;
+  --cc-type-caption-line-height: 16px;
+  --cc-type-caption-weight: var(--cc-font-weight-regular);
+  --cc-type-caption-letter-spacing: 0;
+}

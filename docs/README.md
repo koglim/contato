@@ -64,6 +64,7 @@ Para aprofundamento na implementação de subsistemas específicos do ContatoCer
   * [TRANSPORT_DURABILITY.md](TRANSPORT_DURABILITY.md): Integração com Evolution API, idempotência de canal e tolerância a falhas.
   * [workflows/n8n/README.md](../workflows/n8n/README.md): Especificação dos nós, orquestração e fluxos versionados do n8n.
 * **Profissional, Identidade e Negócio:**
+  * [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md): Fundação canônica v1 do Design System (tokens, dark mode, tipografia, layout primitives, shell).
   * [WEB_DASHBOARD.md](WEB_DASHBOARD.md): Portal web do profissional em Next.js (BFF, sessões e autosserviço).
   * [PROFESSIONAL_IDENTITY_FOUNDATION.md](PROFESSIONAL_IDENTITY_FOUNDATION.md): Fundação de identidade individual do profissional.
   * [PROFESSIONAL_PASSWORDLESS_AUTH.md](PROFESSIONAL_PASSWORDLESS_AUTH.md): Autenticação sem senha via OTP de 6 dígitos no WhatsApp.

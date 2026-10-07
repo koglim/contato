@@ -1,0 +1,58 @@
+/* ==========================================================================
+   ContatoCerto Design System — Spacing & Layout Tokens
+   ========================================================================== */
+
+:root {
+  /* Atomic Spacing Scale (4px base, 8px primary rhythm) */
+  --cc-space-0: 0px;
+  --cc-space-0-5: 2px;
+  --cc-space-1: 4px;
+  --cc-space-1-5: 6px;
+  --cc-space-2: 8px;   /* 8px Rhythm Start */
+  --cc-space-3: 12px;
+  --cc-space-4: 16px;
+  --cc-space-5: 20px;
+  --cc-space-6: 24px;
+  --cc-space-8: 32px;
+  --cc-space-10: 40px;
+  --cc-space-12: 48px;
+  --cc-space-16: 64px;
+  --cc-space-20: 80px;
+
+  /* Layout Breakpoints */
+  --cc-breakpoint-sm: 640px;
+  --cc-breakpoint-md: 768px;
+  --cc-breakpoint-lg: 1024px;
+  --cc-breakpoint-xl: 1280px;
+  --cc-breakpoint-2xl: 1536px;
+
+  /* Page Gutters */
+  --cc-layout-gutter-mobile: 16px;
+  --cc-layout-gutter-tablet: 24px;
+  --cc-layout-gutter-desktop: 32px;
+  --cc-layout-page-padding: var(--cc-layout-gutter-desktop);
+
+  /* Content Widths */
+  --cc-width-narrow: 720px;
+  --cc-width-standard: 1040px;
+  --cc-width-wide: 1280px;
+  --cc-width-full: 100%;
+
+  /* Shell Dimensions */
+  --cc-shell-sidebar-width: 248px;
+  --cc-shell-sidebar-collapsed: 72px;
+  --cc-shell-header-height: 64px;
+  --cc-shell-topbar-mobile: 56px;
+}
+
+@media (max-width: 1023px) {
+  :root {
+    --cc-layout-page-padding: var(--cc-layout-gutter-tablet);
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --cc-layout-page-padding: var(--cc-layout-gutter-mobile);
+  }
+}
