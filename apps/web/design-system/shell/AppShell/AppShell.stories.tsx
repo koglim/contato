@@ -141,6 +141,15 @@ export const FullDashboardDemo: Story = {
             items={accountMenuItems}
           />
         }
+        collapsedUserMenu={
+          <AccountMenu
+            name="Lucas Eletricista"
+            email="lucas@sinop.com.br"
+            initials="LE"
+            collapsed={true}
+            items={accountMenuItems}
+          />
+        }
         headerActions={<ThemeToggle />}
       >
         {renderDashboardContent()}
@@ -156,6 +165,49 @@ export const CollapsedRail: Story = {
         navItems={navItems}
         defaultSidebarCollapsed={true}
         userMenu={
+          <AccountMenu
+            name="Lucas Eletricista"
+            email="lucas@sinop.com.br"
+            initials="LE"
+            items={accountMenuItems}
+          />
+        }
+        collapsedUserMenu={
+          <AccountMenu
+            name="Lucas Eletricista"
+            email="lucas@sinop.com.br"
+            initials="LE"
+            collapsed={true}
+            items={accountMenuItems}
+          />
+        }
+        headerActions={<ThemeToggle />}
+      >
+        {renderDashboardContent()}
+      </AppShell>
+    );
+  },
+};
+
+export const MobileDrawerWithFullAccountMenu: Story = {
+  parameters: {
+    viewport: {
+      defaultViewport: "mobile1",
+    },
+  },
+  render: () => {
+    return (
+      <AppShell
+        navItems={navItems}
+        userMenu={
+          <AccountMenu
+            name="Lucas Eletricista"
+            email="lucas@sinop.com.br"
+            initials="LE"
+            items={accountMenuItems}
+          />
+        }
+        collapsedUserMenu={
           <AccountMenu
             name="Lucas Eletricista"
             email="lucas@sinop.com.br"

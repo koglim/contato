@@ -4,6 +4,7 @@ import { MobileNavigationDrawer } from "./MobileNavigationDrawer";
 import { Home, Briefcase, MapPin, Settings } from "../../icons";
 import { Button } from "../../components/Button";
 import { Badge } from "../../components/Badge";
+import { AccountMenu } from "../AccountMenu";
 
 const meta: Meta<typeof MobileNavigationDrawer> = {
   title: "Shell/MobileNavigationDrawer",
@@ -37,4 +38,33 @@ function DrawerDemo() {
 
 export const Default: Story = {
   render: () => <DrawerDemo />,
+};
+
+export const WithUserMenu: Story = {
+  render: () => {
+    function DrawerUserMenuDemo() {
+      const [open, setOpen] = useState(false);
+      return (
+        <div>
+          <Button onClick={() => setOpen(true)}>Abrir Drawer com Menu</Button>
+          <MobileNavigationDrawer
+            open={open}
+            onOpenChange={setOpen}
+            items={items}
+            footer={
+              <AccountMenu
+                name="Lucas Eletricista"
+                email="lucas@sinop.com.br"
+                initials="LE"
+                items={[
+                  { id: "logout", label: "Sair", danger: true, onClick: () => {} },
+                ]}
+              />
+            }
+          />
+        </div>
+      );
+    }
+    return <DrawerUserMenuDemo />;
+  },
 };

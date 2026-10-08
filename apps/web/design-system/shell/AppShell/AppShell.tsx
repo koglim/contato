@@ -12,6 +12,7 @@ export interface AppShellProps {
   navItems: NavItem[];
   headerActions?: React.ReactNode;
   userMenu?: React.ReactNode;
+  collapsedUserMenu?: React.ReactNode;
   brandTitle?: string;
   brandSubtitle?: string;
   sidebarCollapsed?: boolean;
@@ -24,6 +25,7 @@ export function AppShell({
   navItems,
   headerActions,
   userMenu,
+  collapsedUserMenu,
   brandTitle = "ContatoCerto",
   brandSubtitle = "Painel do Profissional",
   sidebarCollapsed: controlledSidebarCollapsed,
@@ -45,6 +47,8 @@ export function AppShell({
     onSidebarCollapsedChange?.(next);
   };
 
+  const activeUserMenu = isCollapsed ? (collapsedUserMenu ?? userMenu) : userMenu;
+
   return (
     <div className={styles.appShell}>
       {/* Skip to Content Accessibility Link */}
@@ -61,8 +65,8 @@ export function AppShell({
           collapsed={isCollapsed}
           footer={
             <div className={styles.sidebarFooter}>
-              {userMenu ? <div className={styles.userMenuContainer}>{userMenu}</div> : null}
-              <div className={styles.railToggleContainer}>
+              {activeUserMenu ? <div className={styles.userMenuContainer}>{activeUserMenu}</div> : null}
+              <div className={`${styles.railToggleContainer} ${isCollapsed ? styles.railToggleCollapsed : ""}`}>
                 <IconButton
                   icon={isCollapsed ? <ChevronRight /> : <ChevronLeft />}
                   aria-label={isCollapsed ? "Expandir barra lateral" : "Recolher barra lateral"}

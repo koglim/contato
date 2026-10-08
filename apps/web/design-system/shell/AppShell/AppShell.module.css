@@ -44,6 +44,10 @@
   padding-top: var(--cc-space-1);
 }
 
+.railToggleCollapsed {
+  justify-content: center;
+}
+
 .mainArea {
   flex: 1;
   display: flex;

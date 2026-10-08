@@ -56,3 +56,42 @@ export const Disabled: Story = {
     </div>
   ),
 };
+
+export const NativeFormIntegration: Story = {
+  render: () => {
+    function FormDemo() {
+      const [submitted, setSubmitted] = React.useState<Record<string, string> | null>(null);
+      return (
+        <form
+          style={{ maxWidth: 360, display: "flex", flexDirection: "column", gap: 16 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+            const entries: Record<string, string> = {};
+            formData.forEach((val, key) => {
+              entries[key] = String(val);
+            });
+            setSubmitted(entries);
+          }}
+        >
+          <Select
+            name="specialty"
+            label="Especialidade"
+            options={options}
+            defaultValue="electrician"
+            required
+          />
+          <button type="submit" style={{ padding: "8px 16px", cursor: "pointer" }}>
+            Enviar formulário
+          </button>
+          {submitted ? (
+            <pre data-testid="form-result" style={{ fontSize: 12, background: "var(--cc-bg-muted)", padding: 8 }}>
+              {JSON.stringify(submitted, null, 2)}
+            </pre>
+          ) : null}
+        </form>
+      );
+    }
+    return <FormDemo />;
+  },
+};

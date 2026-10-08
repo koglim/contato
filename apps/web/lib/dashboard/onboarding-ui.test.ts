@@ -1,10 +1,13 @@
+import "../test-setup";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DashboardContent } from "../../components/dashboard/dashboard-content";
-import type { ProfessionalEligibility, ProfessionalEntitlementSnapshot, ProfessionalResponse } from "@contatocerto/shared";
+import { ProfessionalOnboarding } from "../../components/dashboard/onboarding";
+import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import type { ClaimableProfessional, ProfessionalEligibility, ProfessionalEntitlementSnapshot, ProfessionalResponse } from "@contatocerto/shared";
 
 
 const read = (path: string) => readFileSync(path, "utf8");
@@ -172,5 +175,67 @@ test("demo mode never displays subscription card or subscription warning", () =>
   const demoHtml = renderDashboard("overview", "active", true, false, activeSub);
   assert.doesNotMatch(demoHtml, /Assinatura/u);
   assert.doesNotMatch(demoHtml, /não está participando de novas buscas/u);
+});
+
+function findDanglingAriaLabelledby(html: string): string[] {
+  const matches = [...html.matchAll(/aria-labelledby=["']([^"']+)["']/g)];
+  const dangling: string[] = [];
+  for (const match of matches) {
+    const ids = match[1].split(/\s+/).filter(Boolean);
+    for (const id of ids) {
+      if (!html.includes(`id="${id}"`) && !html.includes(`id='${id}'`)) {
+        dangling.push(id);
+      }
+    }
+  }
+  return dangling;
+}
+
+const mockRouter: AppRouterInstance = {
+  push: () => {},
+  replace: () => {},
+  refresh: () => {},
+  back: () => {},
+  forward: () => {},
+  prefetch: () => {},
+  bfcacheId: "",
+};
+
+function renderOnboarding(claimables: ClaimableProfessional[] = []) {
+  return renderToStaticMarkup(
+    createElement(
+      AppRouterContext.Provider,
+      { value: mockRouter },
+      createElement(ProfessionalOnboarding, { claimableProfiles: claimables })
+    )
+  );
+}
+
+test("ProfessionalOnboarding enforces single h1 and zero dangling aria-labelledby across states", () => {
+  // 1. Zero claimables
+  const zeroHtml = renderOnboarding([]);
+  const zeroH1Matches = zeroHtml.match(/<h1\b[^>]*>/g) || [];
+  assert.equal(zeroH1Matches.length, 1, "Exactly one <h1> must be rendered when zero claimables");
+  assert.match(zeroHtml, /<h1[^>]*>Crie seu perfil profissional<\/h1>/);
+
+  const zeroDangling = findDanglingAriaLabelledby(zeroHtml);
+  assert.equal(zeroDangling.length, 0, `Zero claimables has dangling aria-labelledby: ${zeroDangling.join(", ")}`);
+
+  // 2. With claimables
+  const mockClaimable: ClaimableProfessional = {
+    id: "22222222-2222-4222-8222-222222222222",
+    display_name: "Carlos Eletricista",
+    slug: "carlos-eletricista",
+    status: "active",
+  };
+
+  const withHtml = renderOnboarding([mockClaimable]);
+  const withH1Matches = withHtml.match(/<h1\b[^>]*>/g) || [];
+  assert.equal(withH1Matches.length, 1, "Exactly one <h1> must be rendered when claimables exist");
+  assert.match(withHtml, /<h1[^>]*>Encontramos perfil existente<\/h1>/);
+  assert.match(withHtml, /<h2[^>]*>Criar novo perfil<\/h2>/);
+
+  const withDangling = findDanglingAriaLabelledby(withHtml);
+  assert.equal(withDangling.length, 0, `With claimables has dangling aria-labelledby: ${withDangling.join(", ")}`);
 });
 
