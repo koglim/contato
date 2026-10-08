@@ -1,7 +1,7 @@
 # ADR-006: Ações Interativas e Experiência Button-First no WhatsApp
 
-* **Status:** ACCEPTED / NOT YET IMPLEMENTED
-* **Data:** 2026-10-02
+* **Status:** IMPLEMENTED (WP6.1-WP6.9 / GATE B CLOSED)
+* **Data:** 2026-10-02 (Atualizado: 2026-10-08)
 * **Decisores:** Produto e Arquitetura ContatoCerto
 
 ---
@@ -260,13 +260,15 @@ Os parsers de texto e o validador de tokens atuam unicamente como camadas de ext
 * O acoplamento com a Evolution API é restrito a esses adaptadores de transporte (`DOMAIN_EVOLUTION_COUPLING = PARTIAL`). A API e o domínio desconhecem payloads específicos de provedor.
 
 ### 13. Sequência Canônica de Entrega (Work Packages)
-1. **WP6.1 (Este PR):** Formalização do Contrato Canônico de Implementação (Documentação).
-2. **WP6.2:** Migration 028 e Schemas Compartilhados no `@contatocerto/shared` (sem corte de runtime).
-3. **WP6.3:** Extração dos métodos transacionais de domínio preservando os testes textuais verdes.
-4. **WP6.4:** `ActionTokenService` e Inbox Dual-Path na API (testes de integração da API).
-5. **WP6.5:** Adaptadores n8n (Gateway Inbound e Shared Delivery Outbound) com testes de contrato.
-6. **WP6.6:** Validação funcional de capacidades do provedor e homologação controlada em produção.
-7. **WP6.7:** *Canary Rollout Guard* fail-closed com controle bilateral de telefones permitidos antes da ativação global.
+1. **WP6.1 (Concluído):** Formalização do Contrato Canônico de Implementação (Documentação).
+2. **WP6.2 (Concluído):** Migration 028 e Schemas Compartilhados no `@contatocerto/shared`.
+3. **WP6.3 (Concluído):** Extração dos métodos transacionais de domínio preservando os testes textuais verdes.
+4. **WP6.4 (Concluído):** `ActionTokenService` e Inbox Dual-Path na API (testes de integração da API).
+5. **WP6.5 (Concluído):** Adaptadores n8n (Gateway Inbound e Shared Delivery Outbound) com testes de contrato.
+6. **WP6.6 (Concluído):** Validação funcional de capacidades do provedor e homologação controlada em produção.
+7. **WP6.7 (Concluído):** *Canary Rollout Guard* fail-closed com controle bilateral de telefones permitidos antes da ativação global.
+8. **WP6.8 (Concluído):** Despacho e recepção de templates oficiais de mensageria via Meta Cloud API.
+9. **WP6.9 / Gate B (Concluído e Homologado em Produção Real):** Template UTILITY (`contato_certo_nova_solicitacao_v1`), preservação ponta a ponta do ID de resposta rápida (`message.button.payload -> interactive_action_id`), resolução da identidade canônica do Webhook no Gateway n8n (PR #40) e fechamento bilateral atômico de atendimento no E2E final aprovado ([`../launch-readiness/01-wp6-9-gate-b-closeout.md`](../launch-readiness/01-wp6-9-gate-b-closeout.md)).
 
 ### 14. Salvaguarda de Rollout Canário Bilateral (*Canary Rollout Guard*)
 * Para permitir a homologação de botões reais em produção sem expor clientes e profissionais não homologados, a emissão interativa é protegida por um mecanismo estrito *fail-closed*:

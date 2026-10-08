@@ -80,13 +80,13 @@ As mutações transacionais de negócio do ciclo pós-conexão convergem para m�
 * **Sequenciamento de Ações Interativas (ADR-006):**
   * **WP6.2 (Implementado):** Fundação relacional (Migration 028) e schemas neutros em `@contatocerto/shared`.
   * **WP6.3 (Implementado):** Autoridade transacional compartilhada de domínio extraída e preservação do comportamento textual.
-  * **WP6.4 (Implementado no repositório sob feature flag):** Runtime de tokens de ação (`InteractiveActionService`), emissão/consumo transacional, outbox interativa e roteamento dual-path no Channel Inbox (`INTERACTIVE_ACTIONS_ENABLED=false`).
-  * **WP6.5 (Implementado no repositório):** Adaptadores de transporte n8n para payloads interativos (`sendButtons` com payload body em `title` para Evolution 2.3.7), extração autoritária de IDs interativos no Gateway, suporte a respostas de transporte Meta Cloud e 62 testes de contrato automatizados (`pnpm test:workflows`).
-  * **WP6.6 (Pendente):** Homologação de capacidades do provedor e validação controlada em produção.
+  * **WP6.4 (Implementado no repositório):** Runtime de tokens de ação (`InteractiveActionService`), emissão/consumo transacional, outbox interativa e roteamento dual-path no Channel Inbox.
+  * **WP6.5 (Implementado no repositório):** Adaptadores de transporte n8n para payloads interativos (`sendButtons` e templates), extração autoritária de IDs interativos no Gateway, suporte a respostas de transporte Meta Cloud e testes de contrato automatizados (`pnpm test:workflows`).
+  * **WP6.9 / Gate B (Homologado em Produção Real — CLOSED / PASS):** Preservação ponta a ponta do ID de ação (`Meta button.payload -> interactive_action_id`), resolução canônica do Webhook no Gateway n8n (PR #40), consumo de token atômico exactly-once e conclusão bilateral de atendimento comprovada ([`docs/launch-readiness/01-wp6-9-gate-b-closeout.md`](launch-readiness/01-wp6-9-gate-b-closeout.md)).
 * **Fronteira de Transporte, Ingress e Invariantes Interativos:**
   * **Eventos Interativos Estruturados sem ID:** Se um evento de resposta for estruturalmente interativo mas não contiver um ID de ação autoritativo, o Gateway rejeita de forma segura com `unsupported_interactive_reply` (HTTP 200).
   * **Eventos Achatados em Texto Simples (`message.conversation`):** Se a camada de transporte (como a Evolution 2.3.7) achatar o clique em um texto comum com o rótulo do botão (ex.: "Confirmar"), o Gateway não tem garantia criptográfica de origem e processa o evento como texto comum, sem atribuir `interactive_action_id`. O fallback textual permanece estritamente preservado e o sistema **jamais** aplica heurísticas de adivinhação sobre texto livre.
-  * **Gate de Ativação do WP6.6:** O modo Button-First (`INTERACTIVE_ACTIONS_ENABLED=true`) só pode ser ativado quando o ingress em produção comprovar preservação ponta a ponta do ID (`Meta button_reply.id -> ia_<opaque> -> ContatoCerto interactive_action_id`), seja por atualização da Evolution, patch controlado ou ingress oficial via Meta Cloud API. Até lá, a feature flag permanece `false`.
+  * **Gate de Ativação Concluído:** A preservação do ID ponta a ponta foi comprovada no caminho de produção Meta Cloud API -> Evolution API -> n8n Gateway, com preservação do payload estruturado `message.button.payload -> interactive_action_id` e consumo atômico de token de ação.
 
 ---
 
