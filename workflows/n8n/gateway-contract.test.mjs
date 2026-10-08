@@ -815,3 +815,22 @@ test("exports only use node versions present in the pinned n8n source; every ref
     }
   }
 });
+
+test("gateway export preserves stable canonical webhook identity and webhookId", () => {
+  const workflow = JSON.parse(readFileSync(new URL("gateway.json", import.meta.url), "utf8"));
+  const webhookNodes = workflow.nodes.filter(n => n.type === "n8n-nodes-base.webhook");
+  assert.equal(webhookNodes.length, 1, "gateway must have exactly one webhook node");
+
+  const [wh] = webhookNodes;
+  assert.equal(wh.id, "evolution-webhook");
+  assert.equal(wh.name, "Evolution webhook");
+  assert.equal(wh.type, "n8n-nodes-base.webhook");
+  assert.equal(wh.typeVersion, 2.1);
+  assert.equal(wh.webhookId, "3df44b42-e4d3-4080-a1fb-89acaea99659");
+  assert.equal(wh.parameters?.path, "contatocerto-evolution-inbound");
+  assert.equal(wh.parameters?.httpMethod, "POST");
+  assert.equal(wh.parameters?.authentication, "jwtAuth");
+  assert.equal(wh.parameters?.responseMode, "responseNode");
+  assert.equal(wh.credentials?.jwtAuth?.name, "ContatoCerto Evolution Webhook JWT");
+});
+

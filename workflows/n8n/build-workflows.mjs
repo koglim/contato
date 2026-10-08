@@ -92,7 +92,10 @@ const transcribe = (name, url, model, credential, x) => {
 };
 const gateway = flow("ContatoCerto - WhatsApp Gateway", [
   node("Evolution webhook", "webhook", { httpMethod: "POST", path: "contatocerto-evolution-inbound", authentication: "jwtAuth",
-    responseMode: "responseNode", options: {} }, 0, 0, { credentials: { jwtAuth: { name: "ContatoCerto Evolution Webhook JWT" } } }),
+    responseMode: "responseNode", options: {} }, 0, 0, {
+      webhookId: "3df44b42-e4d3-4080-a1fb-89acaea99659",
+      credentials: { jwtAuth: { name: "ContatoCerto Evolution Webhook JWT" } },
+    }),
   code("Validate event", `${extractEvolutionInteractiveReply.toString()}\n${normalizeGatewayEvent.toString()}\nreturn { json: normalizeGatewayEvent($json, { instance: $env.EVOLUTION_INSTANCE, provider: $env.EVOLUTION_PROVIDER, origin: $env.EVOLUTION_WEBHOOK_ORIGIN }) };`, 220),
   branch("Text input", "={{ $json.action === 'inbox' }}", 440),
   { ...http("Channel Inbox", "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}", "={{ $json.inbound }}", "ContatoCerto Internal API", 660),

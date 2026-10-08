@@ -18,6 +18,7 @@
         "responseMode": "responseNode",
         "options": {}
       },
+      "webhookId": "3df44b42-e4d3-4080-a1fb-89acaea99659",
       "credentials": {
         "jwtAuth": {
           "name": "ContatoCerto Evolution Webhook JWT"
