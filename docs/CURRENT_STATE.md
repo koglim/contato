@@ -184,20 +184,17 @@ Após o deploy da correção determinística (`contatocerto-api` @ `69bbf770026e
   * Se o profissional tornou-se inelegível: resposta determinística `CONTEXTUAL_RESUMABLE_SELECTION_UNAVAILABLE` sem criação de contato.
   * Se a lista ultrapassou 24 horas: resposta determinística canônica do T18 `CONTEXTUAL_EXPIRED_SELECTION`.
   * Zero chamadas de interpretação/composição de IA ou geocodificação na retomada.
-* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — ACCEPTED / EM ANDAMENTO (WP6.1 A WP6.5 IMPLEMENTADOS NO REPOSITÓRIO SOB FEATURE FLAG; HOMOLOGAÇÃO DE CAPACIDADES DO PROVEDOR PENDENTE):**
+* **Ações Interativas e Experiência Button-First no WhatsApp ([ADR-006](decisions/ADR-006-interactive-actions-button-first.md)) — IMPLEMENTADO E HOMOLOGADO EM PRODUÇÃO REAL (WP6.1 A WP6.9 / GATE B — CLOSED / PASS):**
   * Na evolução com mensageria interativa (WhatsApp Cloud API / Evolution API):
     * O código público `CC-XXXXXXXX` é mantido como identificador auditável e mecanismo de fallback textual.
-    * A experiência primária do usuário **não** exige digitação manual de códigos: ações determinísticas (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*) são apresentadas como botões interativos nativos (Interactive Messages / Quick Replies) nos clientes compatíveis quando a feature flag estiver ativa.
-    * Cada ação interativa vincula-se de forma determinística ao seu respectivo contato/evento via *tokens de ação opacos com autorização atômica de contato/ação/ator* (`ia_<48hex>`).
-    * **Adaptadores de Transporte (WP6.5):** O Shared Delivery (`workflows/n8n/delivery-contract.mjs`) converte payloads neutros em requisições `/message/sendButtons` (mapeando o corpo da mensagem no campo `title` da Evolution 2.3.7) e aceita respostas no formato Baileys/Evolution ou Meta Cloud. O Gateway (`workflows/n8n/gateway-contract.mjs`) extrai o `interactive_action_id` unicamente a partir de campos estruturados de botões (`buttonsResponseMessage`, `templateButtonReplyMessage`, `listResponseMessage` ou `interactive.button_reply`).
-    * **Fronteira de Capacidade do Provedor e Semântica de Ingress:**
-      1. Se um evento recebido permanece estruturalmente identificável como interativo mas carece de um ID de ação autoritativo (`selectedButtonId`, `selectedId`, etc.): o Gateway o ignora de forma segura (`unsupported_interactive_reply` com HTTP 200).
-      2. Se a Evolution 2.3.7 achatar o evento do provedor em um `message.conversation` comum contendo apenas o rótulo (ex.: "Confirmar"): o Gateway não tem como distinguir com segurança o clique de um texto digitado manualmente e mantém o evento na rota textual comum sem criar `interactive_action_id` (trata-se de perda de informação na fronteira do provedor, não de decisão de domínio). O fallback textual de comandos permanece 100% preservado e nenhuma heurística adivinhadora de rótulo é permitida.
-    * **Gate Obrigatório de Ativação do WP6.6:** A ativação do modo Button-First em produção (`INTERACTIVE_ACTIONS_ENABLED=true`) exige comprovação rigorosa do fluxo ponta a ponta `Meta button_reply.id -> exato ia_<opaque> -> ContatoCerto interactive_action_id`, dependendo de exatamente UMA das seguintes condições no ingress de produção:
-      * **A.** Versão/rota da Evolution que preserve o ID de resposta do botão; OU
-      * **B.** Patch controlado na Evolution que preserve o ID; OU
-      * **C.** Ingress direto via webhook oficial da Meta Cloud API que preserve o ID.
-      * *Até que essa comprovação seja formalmente homologada em WP6.6:* `INTERACTIVE_ACTIONS_ENABLED=false` sem exceções.
+    * A experiência do usuário contempla ações determinísticas (*Confirmar*, *Contestar*, *Concluído*, *Não consigo atender*) via botões nativos e templates de resposta rápida (*Quick Reply*) protegidos por salvaguarda de rollout bilateral (*Canary Rollout Guard* fail-closed).
+    * Cada ação interativa vincula-se deterministicamente ao seu respectivo contato/evento via *tokens de ação opacos com autorização atômica de contato/ação/ator* (`ia_<48hex>`).
+    * **Adaptadores de Transporte (WP6.5 & WP6.9):** O Shared Delivery (`workflows/n8n/delivery-contract.mjs`) converte payloads neutros em requisições de template oficial da Meta (`/message/sendTemplate/{instance}`) ou botões livres (`/message/sendButtons`). O Gateway (`workflows/n8n/gateway-contract.mjs`) extrai o `interactive_action_id` deterministicamente a partir de `buttonsResponseMessage`, `templateButtonReplyMessage`, `listResponseMessage`, `interactive.button_reply` ou `message.button.payload` (Meta Cloud API).
+    * **Homologação em Produção Real (WP6.9 / Gate B — 2026-10-08):**
+      * Comprovada a entrega do template `contato_certo_nova_solicitacao_v1` via Meta Cloud API com botões Quick Reply ao profissional Richard.
+      * Comprovada a recepção de clique no botão "Concluído" com preservação ponta a ponta de `message.button.payload -> interactive_action_id` pelo Gateway n8n (`HwNYhTmAUT2NI7HW`), após correção definitiva do `webhookId` canônico mesclada no PR #40.
+      * Comprovado consumo atômico exactly-once do token `5d958752-b117-40f7-b555-0870b31bb870`, declaração de conclusão e confirmação bilateral subsequente pelo cliente, transicionando o contato `CC-HDP94B7C` para `completed` com zero duplicações e zero efeito colateral de indisponibilidade ([`docs/launch-readiness/01-wp6-9-gate-b-closeout.md`](launch-readiness/01-wp6-9-gate-b-closeout.md)).
+    * **Achado Opcional Não-Bloqueante:** Tokens de confirmação/contestação gerados no prompt do cliente permanecem com `status = 'active'` se o cliente optar por comando textual em vez de botão. A máquina de estados de domínio rejeita e trata de forma idempotente qualquer submissão tardia sobre contato já `completed`, mantendo o fechamento seguro.
 
 ---
 

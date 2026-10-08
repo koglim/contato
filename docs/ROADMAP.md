@@ -20,6 +20,8 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 * **Ciclo de Conexão Bilateral v2 (PR #17 — Migration 027):** Conexão imediata no status `shared` mediante seleção e consentimento informado do cliente, eliminação do segundo aceite obrigatório do profissional, telemetria imutável de indisponibilidade via `professional_unavailability_events` (P0027), suporte a múltiplas conexões por busca via índice `(search_request_id, professional_id)` e elegibilidade direta para conclusão a partir de `shared`.
 * **Inteligência de Conversa e Seleção v2 (PR #18):** Interação natural na etapa de seleção ("me fale mais do João", "qual o mais perto?", "qual o mais barato?", "compara os dois", "tem mais opções?"), barreira estrita de segurança pergunta vs seleção (ADR-002), apresentadores determinísticos com 0 chamada de composição à IA, fast paths determinísticos com 0 chamadas de IA e comandos de conclusão/confirmação/contestação com código-livre ou código público com resolução inteligente de múltiplos contatos.
 * **Painel Web do Profissional (`/dashboard`):** Aplicação Next.js com BFF, autenticação via cookie assinado, edição de dados cadastrais (telefone em modo somente-leitura), serviços, áreas de atendimento e disponibilidade.
+* **Ações Interativas Button-First e Template Quick Reply (WP6.9 / Gate B — Concluído em Produção Real):** Transporte de oportunidade ao profissional via template oficial da Meta (`contato_certo_nova_solicitacao_v1`) com botões Quick Reply, tokens autoritativos de ação (`ia_<opaque>`), extração determinística ponta a ponta no Gateway n8n após PR #40, declaração de conclusão iniciada por botão e confirmação bilateral com fechamento atômico do contato em `completed` ([`docs/launch-readiness/01-wp6-9-gate-b-closeout.md`](launch-readiness/01-wp6-9-gate-b-closeout.md)).
+* **Design System Foundation v1 (WP7.0 — PR #39):** Implementação formal da fundação do Design System do ContatoCerto (`apps/web/design-system/`): tokens primitives/semantic/component, dark mode first-party sem FOUC, escala tipográfica Inter, layout primitives (`Box`, `Stack`, `Inline`, `Grid`, `Container`), catálogo de componentes base (Radix Primitives + CSS Modules), Lucide React, App Shell responsivo e Storybook com testes automatizados de browser e acessibilidade a11y em CI (conforme [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md)).
 
 ---
 
@@ -27,15 +29,15 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 
 Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
-0. **Launch Readiness / Homologação (FASE ATIVA):**
+0. **Migração Visual do Painel Web (WP7.1+ — FASE ATIVA):**
+   * Substituição progressiva das telas legadas do `/dashboard` com base na fundação v1 do Design System (WP7.0), mantendo regras de negócio e rotas existentes intactas.
+1. **Launch Readiness / Homologação Residual:**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
-   * **Homologação em Produção Real (2026-10-01):** Happy path Golden E2E #2 (busca, apresentação, conexão imediata v2 e confirmação bilateral de conclusão), subfluxo de indisponibilidade profissional com reescolha na mesma busca (T29 parcial em produção) e contestação bilateral de conclusão (T34) validados em produção real com mensagens observadas em status=sent e zero holds. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
-3. **Homologação de Contexto Obsoleto / Seleção Expirada (T18 — Concluída em Produção):** Tratamento conversacional determinístico implementado no repositório (`69bbf770026e72caacb69bd4b3d7ba5d6bf3f9b0`) e validado com sucesso em produção real (busca de 2026-10-01 UTC, ensaio executado em 2026-10-02 UTC na conversa expirada `d65c8a4a-06d3-484f-b94a-0d3806ce99bf`, seleção "2", resposta determinística explícita, zero mutações de negócio, Outbound `02979644-88d5-4976-a3e6-509b5807e035` com `status=sent` e zero holds; garantia de 0 chamadas de IA/geocodificador comprovada pela suíte de testes de integração).
-   * Próximos passos operacionais: reimportar `shared-delivery.json` no n8n antes de habilitar OTP (`PROFESSIONAL_AUTH_ENABLED=true`), homologação do pipeline de áudio em produção e testes de carga/estresse.
-1. **Localização v2 (Fundação de Entrada):**
+   * **Homologação em Produção Real (2026-10-01 a 2026-10-08):** Happy path Golden E2E #2, subfluxos de indisponibilidade profissional, contestação bilateral (T34), seleção expirada (T18) e ciclo completo de notificação via template e conclusão bilateral de atendimento por botões rápidos (WP6.9 / Gate B) comprovados em produção real. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
+2. **Localização v2 (Fundação de Entrada):**
    * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
 3. **Reconciliação n8n / Evolution / Workflows Versionados:**
-   * Atualizar os fluxos instalados no ambiente remoto (EasyPanel) a partir dos arquivos versionados em `workflows/n8n/`, habilitando o envio de desafios de autenticação (`professional_auth_challenge`).
+   * O Shared Delivery e o Gateway foram sincronizados em produção no Gate B. Pendente apenas a reimportação do suporte a `professional_auth_challenge` para habilitar OTP (`PROFESSIONAL_AUTH_ENABLED=true`).
 4. **Sincronização Contínua da Documentação:**
    * Manter a disciplina de atualizar a documentação canônica a cada PR com alteração funcional ou arquitetural.
 
@@ -45,8 +47,6 @@ Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
 Funcionalidades planejadas para a sequência imediata após a conclusão do bloco NOW:
 
-* **Design System Foundation v1 (WP7.0):** Implementação formal da fundação do Design System do ContatoCerto (`apps/web/design-system/`): tokens primitives/semantic/component, dark mode first-party sem FOUC, escala tipográfica Inter, layout primitives (`Box`, `Stack`, `Inline`, `Grid`, `Container`), catálogo de componentes base (Radix Primitives + CSS Modules), Lucide React, App Shell responsivo e Storybook com a11y addon (conforme [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md)).
-* **Migração Visual do Painel Web (WP7.1+):** Substituição progressiva das telas legadas do `/dashboard` com base na fundação v1, mantendo regras de negócio e rotas existentes intactas.
 * **Avaliações e Reputação (Reviews & Ratings):** Coleta estruturada de notas e depoimentos após a confirmação bilateral da conclusão, com ponderação no algoritmo de ranking.
 * **Telemetria e Analytics do Funil:** Instrumentação e produto de visualização de métricas de conversão ao longo do funil (*candidate → match → shown → selected → bilateral connection → completion*).
 * **Painel Web do Profissional v2:** Expansão do `/dashboard` com tela visual de atendimentos, métricas de exposição, taxa de seleção, histórico financeiro de assinatura e status de reputação.
