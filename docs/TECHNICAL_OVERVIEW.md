@@ -86,7 +86,7 @@ As mutações transacionais de negócio do ciclo pós-conexão convergem para m�
 * **Fronteira de Transporte, Ingress e Invariantes Interativos:**
   * **Eventos Interativos Estruturados sem ID:** Se um evento de resposta for estruturalmente interativo mas não contiver um ID de ação autoritativo, o Gateway rejeita de forma segura com `unsupported_interactive_reply` (HTTP 200).
   * **Eventos Achatados em Texto Simples (`message.conversation`):** Se a camada de transporte (como a Evolution 2.3.7) achatar o clique em um texto comum com o rótulo do botão (ex.: "Confirmar"), o Gateway não tem garantia criptográfica de origem e processa o evento como texto comum, sem atribuir `interactive_action_id`. O fallback textual permanece estritamente preservado e o sistema **jamais** aplica heurísticas de adivinhação sobre texto livre.
-  * **Gate de Ativação Concluído:** A preservação do ID ponta a ponta foi comprovada via ingress oficial da Meta Cloud API com payload estruturado em `message.button.payload`, validando operacionalmente o fluxo em produção real.
+  * **Gate de Ativação Concluído:** A preservação do ID ponta a ponta foi comprovada no caminho de produção Meta Cloud API -> Evolution API -> n8n Gateway, com preservação do payload estruturado `message.button.payload -> interactive_action_id` e consumo atômico de token de ação.
 
 ---
 

@@ -13,12 +13,12 @@
 O pacote de trabalho **WP6.9 (Gate B)** encerrou formalmente a homologação do transporte interativo de notificações de oportunidade para profissionais via template oficial da Meta (`contato_certo_nova_solicitacao_v1`), com botões de resposta rápida (*Quick Reply*) contendo tokens opacos autoritativos (`ia_<opaque>`), e a subsequente conclusão bilateral do atendimento.
 
 O teste de ponta a ponta em produção real comprovou:
-1. Entrega do template oficial via Meta Cloud API / Evolution API ao profissional Richard fora da janela de 24h.
-2. Preservação ponta a ponta do ID da ação (`message.button.payload -> interactive_action_id`) através do n8n Gateway (`HwNYhTmAUT2NI7HW`), após a correção canônica da identidade estável do Webhook (`webhookId: 3df44b42-e4d3-4080-a1fb-89acaea99659`) mesclada no PR #40.
+1. Entrega do template oficial via Meta Cloud API / Evolution API ao profissional Richard, com botões Quick Reply visíveis.
+2. Preservação ponta a ponta do ID da ação no caminho Meta Cloud API -> Evolution API -> n8n Gateway (`HwNYhTmAUT2NI7HW`) -> ContatoCerto API (`message.button.payload -> interactive_action_id`), após a correção canônica da identidade estável do Webhook (`webhookId: 3df44b42-e4d3-4080-a1fb-89acaea99659`) mesclada no PR #40.
 3. Transição atômica de declaração de conclusão iniciada pelo clique no botão "Concluído", com consumo de token exatamente uma vez (`5d958752-b117-40f7-b555-0870b31bb870`) e persistência do evento imutável no ledger.
 4. Confirmação bilateral enviada pelo cliente via WhatsApp, culminando na transição final do contato para `status = 'completed'`, com zero duplicações e isolamento completo dos contatos históricos.
 
-Com este resultado, o **Gate B está formalmente aprovado e encerrado**. A dependência de mensageria para evolução do produto está liberada, tornando o **WP7.1 (Migração Visual do Painel Web)** elegível para início.
+Com este resultado, o **Gate B está formalmente aprovado e encerrado**. A dependência de mensageria para evolução do produto está liberada, tornando o **WP7.1 (Migração Visual do Painel Web)** elegível para início (não iniciado neste PR).
 
 ---
 
@@ -117,4 +117,4 @@ O marco **WP6.9 / Gate B** está oficialmente **CONCLUÍDO e APROVADO**.
 
 A evolução do produto segue para a próxima fase estabelecida no roadmap:
 * **WP7.0:** Fundação do Design System (Tokens, App Shell, Storybook) — Concluído no PR #39.
-* **WP7.1:** Migração Visual do Painel Web (`/dashboard`) — **Elegível para início.**
+* **WP7.1:** Migração Visual do Painel Web (`/dashboard`) — **Elegível para início (implementação não iniciada neste PR).**

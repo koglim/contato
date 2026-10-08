@@ -29,8 +29,8 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 
 Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
-0. **Migração Visual do Painel Web (WP7.1+ — FASE ATIVA):**
-   * Substituição progressiva das telas legadas do `/dashboard` com base na fundação v1 do Design System (WP7.0), mantendo regras de negócio e rotas existentes intactas.
+0. **Migração Visual do Painel Web (WP7.1+ — NEXT / ELIGÍVEL PARA INÍCIO):**
+   * Substituição progressiva das telas legadas do `/dashboard` com base na fundação v1 do Design System (WP7.0), mantendo regras de negócio e rotas existentes intactas. Dependência de mensageria liberada pelo fechamento do Gate B; implementação a ser iniciada em branch/PR específico.
 1. **Launch Readiness / Homologação Residual:**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
    * **Homologação em Produção Real (2026-10-01 a 2026-10-08):** Happy path Golden E2E #2, subfluxos de indisponibilidade profissional, contestação bilateral (T34), seleção expirada (T18) e ciclo completo de notificação via template e conclusão bilateral de atendimento por botões rápidos (WP6.9 / Gate B) comprovados em produção real. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
