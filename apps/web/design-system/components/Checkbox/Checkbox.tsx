@@ -7,6 +7,8 @@ import styles from "./Checkbox.module.css";
 
 export interface CheckboxProps {
   id?: string;
+  name?: string;
+  value?: string;
   checked?: boolean;
   defaultChecked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
@@ -20,6 +22,8 @@ export interface CheckboxProps {
 
 export function Checkbox({
   id,
+  name,
+  value,
   checked,
   defaultChecked,
   onCheckedChange,
@@ -37,6 +41,8 @@ export function Checkbox({
       <div className={styles.checkboxContainer}>
         <RadixCheckbox.Root
           id={checkboxId}
+          name={name}
+          value={value}
           checked={checked}
           defaultChecked={defaultChecked}
           onCheckedChange={(val) => {

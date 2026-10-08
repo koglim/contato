@@ -3,6 +3,15 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ClaimableProfessional } from "@contatocerto/shared";
+import { PageShell } from "../../design-system/shell/PageShell";
+import { PageHeader } from "../../design-system/shell/PageHeader";
+import { Card } from "../../design-system/components/Card";
+import { Button } from "../../design-system/components/Button";
+import { Input } from "../../design-system/components/Input";
+import { Textarea } from "../../design-system/components/Textarea";
+import { Badge } from "../../design-system/components/Badge";
+import { InlineMessage } from "../../design-system/components/InlineMessage";
+import { Stack } from "../../design-system/layout/Stack";
 
 export function ProfessionalOnboarding({
   claimableProfiles = [],
@@ -63,47 +72,104 @@ export function ProfessionalOnboarding({
   const hasClaimables = claimableProfiles.length > 0;
 
   return (
-    <section className="onboarding-entry">
-      {hasClaimables ? (
-        <div className="claimable-section" style={{ marginBottom: "2rem" }}>
-          <p className="eyebrow">Perfil identificado</p>
-          <h2>Encontramos perfil existente</h2>
-          <p>Se você já possui cadastro no ContatoCerto com este número de WhatsApp, você pode assumir o perfil diretamente:</p>
-          <div className="claimable-list" style={{ display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1rem" }}>
-            {claimableProfiles.map((item) => (
-              <div key={item.id} className="panel" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem" }}>
-                <div>
-                  <strong style={{ fontSize: "1.1rem" }}>{item.display_name}</strong>
-                  <span style={{ marginLeft: "0.5rem", fontSize: "0.85rem", opacity: 0.8 }}>
-                    ({item.status === "active" ? "Ativo" : item.status === "draft" ? "Rascunho" : "Suspenso"})
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="form-action"
-                  disabled={claimingId === item.id}
-                  onClick={() => handleClaim(item.id)}
-                >
-                  {claimingId === item.id ? "Reivindicando…" : "Este perfil é meu"}
-                </button>
+    <PageShell width="narrow">
+      <Stack gap="6">
+        {hasClaimables ? (
+          <section aria-labelledby="claimable-title">
+            <PageHeader
+              eyebrow="Perfil identificado"
+              title="Encontramos perfil existente"
+              description="Se você já possui cadastro no ContatoCerto com este número de WhatsApp, você pode assumir o perfil diretamente:"
+            />
+            <Stack gap="3" style={{ marginTop: "var(--cc-space-4)" }}>
+              {claimableProfiles.map((item) => (
+                <Card key={item.id} padding="default">
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "var(--cc-space-3)",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--cc-space-2)" }}>
+                      <strong style={{ fontSize: "var(--cc-font-size-base)" }}>{item.display_name}</strong>
+                      <Badge
+                        variant={item.status === "active" ? "success" : item.status === "draft" ? "warning" : "danger"}
+                        pill
+                      >
+                        {item.status === "active" ? "Ativo" : item.status === "draft" ? "Rascunho" : "Suspenso"}
+                      </Badge>
+                    </div>
+                    <Button
+                      variant="primary"
+                      loading={claimingId === item.id}
+                      onClick={() => handleClaim(item.id)}
+                    >
+                      {claimingId === item.id ? "Reivindicando…" : "Este perfil é meu"}
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </Stack>
+            {claimError ? (
+              <div style={{ marginTop: "var(--cc-space-3)" }}>
+                <InlineMessage variant="danger">{claimError}</InlineMessage>
               </div>
-            ))}
-          </div>
-          {claimError ? <p className="form-error" role="alert" style={{ marginTop: "0.5rem" }}>{claimError}</p> : null}
-        </div>
-      ) : null}
+            ) : null}
+          </section>
+        ) : null}
 
-      <p className="eyebrow">{hasClaimables ? "Outra opção" : "Primeiros passos"}</p>
-      <h1>{hasClaimables ? "Criar novo perfil" : "Crie seu perfil profissional"}</h1>
-      <p>Cadastre os dados básicos. Depois você poderá adicionar serviços e áreas de atendimento antes de publicar.</p>
-      <form className="panel form-grid" onSubmit={submit}>
-        <label>Nome profissional<input name="display_name" required minLength={2} maxLength={255} /></label>
-        <label>Telefone de contato<input name="phone_e164" type="tel" placeholder="+5566999999999" required /></label>
-        <label>E-mail opcional<input name="email" type="email" /></label>
-        <label className="form-full">Bio opcional<textarea name="bio" rows={4} maxLength={2000} /></label>
-        <button className="form-action" disabled={pending}>{pending ? "Criando…" : "Criar perfil"}</button>
-        {error ? <p className="form-error" role="alert">{error}</p> : null}
-      </form>
-    </section>
+        <section aria-labelledby="onboarding-form-title">
+          <PageHeader
+            eyebrow={hasClaimables ? "Outra opção" : "Primeiros passos"}
+            title={hasClaimables ? "Criar novo perfil" : "Crie seu perfil profissional"}
+            description="Cadastre os dados básicos. Depois você poderá adicionar serviços e áreas de atendimento antes de publicar."
+          />
+          <Card padding="default" style={{ marginTop: "var(--cc-space-4)" }}>
+            <form onSubmit={submit}>
+              <Stack gap="4">
+                <Input
+                  id="display_name"
+                  name="display_name"
+                  label="Nome profissional"
+                  required
+                  minLength={2}
+                  maxLength={255}
+                />
+                <Input
+                  id="phone_e164"
+                  name="phone_e164"
+                  type="tel"
+                  label="Telefone de contato"
+                  placeholder="+5566999999999"
+                  required
+                />
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  label="E-mail opcional"
+                />
+                <Textarea
+                  id="bio"
+                  name="bio"
+                  label="Bio opcional"
+                  rows={4}
+                  maxLength={2000}
+                />
+                <div>
+                  <Button type="submit" variant="primary" loading={pending}>
+                    {pending ? "Criando…" : "Criar perfil"}
+                  </Button>
+                </div>
+                {error ? <InlineMessage variant="danger">{error}</InlineMessage> : null}
+              </Stack>
+            </form>
+          </Card>
+        </section>
+      </Stack>
+    </PageShell>
   );
 }

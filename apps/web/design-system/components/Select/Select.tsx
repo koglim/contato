@@ -14,6 +14,7 @@ export interface SelectOption {
 export interface SelectProps {
   label: string;
   id?: string;
+  name?: string;
   value?: string;
   defaultValue?: string;
   onValueChange?: (value: string) => void;
@@ -29,6 +30,7 @@ export interface SelectProps {
 export function Select({
   label,
   id,
+  name,
   value,
   defaultValue,
   onValueChange,
@@ -51,6 +53,7 @@ export function Select({
       </label>
 
       <RadixSelect.Root
+        name={name}
         value={value}
         defaultValue={defaultValue}
         onValueChange={onValueChange}

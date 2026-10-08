@@ -22,6 +22,7 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 * **Painel Web do Profissional (`/dashboard`):** Aplicação Next.js com BFF, autenticação via cookie assinado, edição de dados cadastrais (telefone em modo somente-leitura), serviços, áreas de atendimento e disponibilidade.
 * **Ações Interativas Button-First e Template Quick Reply (WP6.9 / Gate B — Concluído em Produção Real):** Transporte de oportunidade ao profissional via template oficial da Meta (`contato_certo_nova_solicitacao_v1`) com botões Quick Reply, tokens autoritativos de ação (`ia_<opaque>`), extração determinística ponta a ponta no Gateway n8n após PR #40, declaração de conclusão iniciada por botão e confirmação bilateral com fechamento atômico do contato em `completed` ([`docs/launch-readiness/01-wp6-9-gate-b-closeout.md`](launch-readiness/01-wp6-9-gate-b-closeout.md)).
 * **Design System Foundation v1 (WP7.0 — PR #39):** Implementação formal da fundação do Design System do ContatoCerto (`apps/web/design-system/`): tokens primitives/semantic/component, dark mode first-party sem FOUC, escala tipográfica Inter, layout primitives (`Box`, `Stack`, `Inline`, `Grid`, `Container`), catálogo de componentes base (Radix Primitives + CSS Modules), Lucide React, App Shell responsivo e Storybook com testes automatizados de browser e acessibilidade a11y em CI (conforme [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md)).
+* **Migração Visual do Painel Web (WP7.1):** Migração integral da camada visual do painel do profissional (`/dashboard`, `/profile`, `/services`, `/service-areas`, `/availability`, onboarding, seletor de perfis, loading e error states) para o ContatoCerto Design System v1, preservando regras de domínio, contratos de BFF e acessibilidade estrita, com remoção de estilos legados em `globals.css`.
 
 ---
 
@@ -29,8 +30,6 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 
 Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
-0. **Migração Visual do Painel Web (WP7.1+ — NEXT / ELIGÍVEL PARA INÍCIO):**
-   * Substituição progressiva das telas legadas do `/dashboard` com base na fundação v1 do Design System (WP7.0), mantendo regras de negócio e rotas existentes intactas. Dependência de mensageria liberada pelo fechamento do Gate B; implementação a ser iniciada em branch/PR específico.
 1. **Launch Readiness / Homologação Residual:**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
    * **Homologação em Produção Real (2026-10-01 a 2026-10-08):** Happy path Golden E2E #2, subfluxos de indisponibilidade profissional, contestação bilateral (T34), seleção expirada (T18) e ciclo completo de notificação via template e conclusão bilateral de atendimento por botões rápidos (WP6.9 / Gate B) comprovados em produção real. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
