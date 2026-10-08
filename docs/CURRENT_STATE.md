@@ -70,10 +70,18 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 
 ### Painel Web do Profissional (`apps/web`)
 * **Portal Next.js em `/dashboard`:** Implementação com BFF (Backend for Frontend) e sessões via cookie assinado.
-* **Migração Visual do Painel Web (WP7.1 — PR #42 em Revisão/Homologação):** Candidato a PR #42 implementando a migração visual integral da camada do painel web para o ContatoCerto Design System v1 (aguardando aprovação/merge em main). Telas do `/dashboard` migradas para `AppShell`, `Sidebar`, `Header`, `PageShell`, componentes primitivos acessíveis (`Card`, `Input`, `Select`, `Button`, `Switch`, `Badge`, `AlertDialog`, etc.) e eliminando dependências de estilos legados no `globals.css`.
-* **Seções Implementadas no Código:** Visão geral (`overview`), dados de perfil (`profile`), categorias de serviços (`services`), áreas de cobertura (`service-areas`), disponibilidade (`availability`), controles de elegibilidade e fluxos de onboarding/claim.
+* **Migração Visual do Painel Web (WP7.1 — COMPLETED no PR #42):** Migração visual integral da camada do painel web para o ContatoCerto Design System v1 concluída e mesclada no `main` (PR #42, commit `9be011983b18957f3186cc5bc121279f6349c6d1`, CI pós-merge `37855033820` SUCCESS).
+* **Escopo Concluído no WP7.1:**
+  * Migração para o `AppShell` responsivo com navegação desktop (`Sidebar`), mobile (`MobileNavigationDrawer`), cabeçalho (`Header`) e menu de conta (`AccountMenu`) com suporte nativo a light/dark mode;
+  * Visão geral (`overview`), dados cadastrais de perfil (`profile`), catálogo de serviços (`services`), áreas de cobertura com diálogo de confirmação (`service-areas`), controles de disponibilidade (`availability`) e checklist de elegibilidade;
+  * Fluxo de onboarding/autocadastro e seletor de múltiplos perfis (`profile-selector`);
+  * Estados compartilhados de carregamento (`loading.tsx` com `Skeleton`) e erro (`error.tsx` com `ErrorState` e ação de retry);
+  * Correções de acessibilidade (a11y) validadas via Storybook e Vitest com Chromium (82 stories);
+  * Limpeza definitiva e remoção das classes legadas do dashboard no `globals.css`.
+* **Invariantes e Comportamentos Preservados:** Preservação estrita das regras de negócio e de domínio, contratos do BFF, semântica de autenticação/sessão, schema do PostgreSQL, workflows do n8n e runtime de produção (zero mutações de backend ou de banco de dados).
 * **Telefone em Modo Somente-Leitura:** No painel atual, o telefone do profissional é exibido como `readOnly` e não pode ser alterado diretamente pelo autosserviço (exige intervenção administrativa).
 * **Ausência de Histórico de Atendimentos / Conclusão no Painel:** O painel atual não possui tela de histórico de serviços nem botões de conclusão de atendimento.
+* **Achado Opcional Não-Bloqueante (Design System Table):** O componente `Table` utiliza identificadores padrão na região de rolagem horizontal (`role="region"`, `aria-label="Tabela de dados"`). Como melhoria futura de endurecimento não-bloqueante, permitir rótulos contextuais (`aria-label`) quando múltiplas tabelas coexistirem na mesma página.
 
 ---
 
