@@ -7,6 +7,7 @@ export default function DashboardError({ reset }: { reset: () => void }) {
   return (
     <PageShell width="narrow">
       <ErrorState
+        headingLevel={1}
         title="Não foi possível carregar o painel"
         description="Verifique a conexão da API e tente novamente."
         onRetry={reset}

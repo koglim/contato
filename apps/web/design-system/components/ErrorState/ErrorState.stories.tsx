@@ -21,3 +21,16 @@ export const Default: Story = {
     </div>
   ),
 };
+
+export const PageLevelError: Story = {
+  render: () => (
+    <div style={{ maxWidth: 640 }}>
+      <ErrorState
+        headingLevel={1}
+        title="Não foi possível carregar o painel"
+        description="Verifique a conexão da API e tente novamente."
+        onRetry={() => alert("Tentando recarregar...")}
+      />
+    </div>
+  ),
+};

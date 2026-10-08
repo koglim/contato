@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ClaimableProfessional } from "@contatocerto/shared";
 import { PageShell } from "../../design-system/shell/PageShell";
 import { PageHeader } from "../../design-system/shell/PageHeader";
+import { PageSection } from "../../design-system/shell/PageSection";
 import { Card } from "../../design-system/components/Card";
 import { Button } from "../../design-system/components/Button";
 import { Input } from "../../design-system/components/Input";
@@ -71,11 +72,55 @@ export function ProfessionalOnboarding({
 
   const hasClaimables = claimableProfiles.length > 0;
 
+  const formContent = (
+    <Card padding="default">
+      <form onSubmit={submit}>
+        <Stack gap="4">
+          <Input
+            id="display_name"
+            name="display_name"
+            label="Nome profissional"
+            required
+            minLength={2}
+            maxLength={255}
+          />
+          <Input
+            id="phone_e164"
+            name="phone_e164"
+            type="tel"
+            label="Telefone de contato"
+            placeholder="+5566999999999"
+            required
+          />
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            label="E-mail opcional"
+          />
+          <Textarea
+            id="bio"
+            name="bio"
+            label="Bio opcional"
+            rows={4}
+            maxLength={2000}
+          />
+          <div>
+            <Button type="submit" variant="primary" loading={pending}>
+              {pending ? "Criando…" : "Criar perfil"}
+            </Button>
+          </div>
+          {error ? <InlineMessage variant="danger">{error}</InlineMessage> : null}
+        </Stack>
+      </form>
+    </Card>
+  );
+
   return (
     <PageShell width="narrow">
       <Stack gap="6">
         {hasClaimables ? (
-          <section aria-labelledby="claimable-title">
+          <section>
             <PageHeader
               eyebrow="Perfil identificado"
               title="Encontramos perfil existente"
@@ -94,7 +139,7 @@ export function ProfessionalOnboarding({
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "var(--cc-space-2)" }}>
-                      <strong style={{ fontSize: "var(--cc-font-size-base)" }}>{item.display_name}</strong>
+                      <strong style={{ fontSize: "var(--cc-type-body-md-size)" }}>{item.display_name}</strong>
                       <Badge
                         variant={item.status === "active" ? "success" : item.status === "draft" ? "warning" : "danger"}
                         pill
@@ -121,54 +166,25 @@ export function ProfessionalOnboarding({
           </section>
         ) : null}
 
-        <section aria-labelledby="onboarding-form-title">
-          <PageHeader
-            eyebrow={hasClaimables ? "Outra opção" : "Primeiros passos"}
-            title={hasClaimables ? "Criar novo perfil" : "Crie seu perfil profissional"}
+        {hasClaimables ? (
+          <PageSection
+            title="Criar novo perfil"
             description="Cadastre os dados básicos. Depois você poderá adicionar serviços e áreas de atendimento antes de publicar."
-          />
-          <Card padding="default" style={{ marginTop: "var(--cc-space-4)" }}>
-            <form onSubmit={submit}>
-              <Stack gap="4">
-                <Input
-                  id="display_name"
-                  name="display_name"
-                  label="Nome profissional"
-                  required
-                  minLength={2}
-                  maxLength={255}
-                />
-                <Input
-                  id="phone_e164"
-                  name="phone_e164"
-                  type="tel"
-                  label="Telefone de contato"
-                  placeholder="+5566999999999"
-                  required
-                />
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  label="E-mail opcional"
-                />
-                <Textarea
-                  id="bio"
-                  name="bio"
-                  label="Bio opcional"
-                  rows={4}
-                  maxLength={2000}
-                />
-                <div>
-                  <Button type="submit" variant="primary" loading={pending}>
-                    {pending ? "Criando…" : "Criar perfil"}
-                  </Button>
-                </div>
-                {error ? <InlineMessage variant="danger">{error}</InlineMessage> : null}
-              </Stack>
-            </form>
-          </Card>
-        </section>
+          >
+            {formContent}
+          </PageSection>
+        ) : (
+          <div>
+            <PageHeader
+              eyebrow="Primeiros passos"
+              title="Crie seu perfil profissional"
+              description="Cadastre os dados básicos. Depois você poderá adicionar serviços e áreas de atendimento antes de publicar."
+            />
+            <div style={{ marginTop: "var(--cc-space-4)" }}>
+              {formContent}
+            </div>
+          </div>
+        )}
       </Stack>
     </PageShell>
   );

@@ -157,13 +157,13 @@ export function DashboardContent({
         <Grid columns="3" gap="4">
           <Card padding="default">
             <Stack gap="2">
-              <p style={{ margin: 0, fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+              <p style={{ margin: 0, fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
                 Cadastro
               </p>
               <div>
                 <StatusBadge status={data.professional.status} />
               </div>
-              <strong style={{ fontSize: "var(--cc-font-size-lg)", color: "var(--cc-text-primary)" }}>
+              <strong style={{ fontSize: "var(--cc-type-heading-md-size)", color: "var(--cc-text-primary)" }}>
                 {activeCount} serviço{activeCount === 1 ? "" : "s"} ativo{activeCount === 1 ? "" : "s"}
               </strong>
             </Stack>
@@ -171,13 +171,13 @@ export function DashboardContent({
 
           <Card padding="default">
             <Stack gap="2">
-              <p style={{ margin: 0, fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+              <p style={{ margin: 0, fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
                 Área principal
               </p>
-              <strong style={{ fontSize: "var(--cc-font-size-lg)", color: "var(--cc-text-primary)" }}>
+              <strong style={{ fontSize: "var(--cc-type-heading-md-size)", color: "var(--cc-text-primary)" }}>
                 {primary ? `${primary.city}, ${primary.state}` : "Ainda não definida"}
               </strong>
-              <span style={{ fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+              <span style={{ fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
                 {primary ? formatKilometers(primary.radius_meters) : "Defina onde você atende"}
               </span>
             </Stack>
@@ -185,13 +185,13 @@ export function DashboardContent({
 
           <Card padding="default">
             <Stack gap="2">
-              <p style={{ margin: 0, fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+              <p style={{ margin: 0, fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
                 Serviço em destaque
               </p>
-              <strong style={{ fontSize: "var(--cc-font-size-lg)", color: "var(--cc-text-primary)" }}>
+              <strong style={{ fontSize: "var(--cc-type-heading-md-size)", color: "var(--cc-text-primary)" }}>
                 {mainService?.service.name ?? "Nenhum serviço cadastrado"}
               </strong>
-              <span style={{ fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+              <span style={{ fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
                 {mainService
                   ? formatPrice(mainService.price_mode, mainService.price_from_cents, mainService.price_to_cents)
                   : "Adicione seu primeiro serviço"}
@@ -209,7 +209,7 @@ function SubscriptionCard({ entitlement }: { entitlement: ProfessionalEntitlemen
     return (
       <Card padding="default">
         <Stack gap="2">
-          <h2 style={{ margin: 0, fontSize: "var(--cc-font-size-lg)", color: "var(--cc-text-primary)" }}>
+          <h2 style={{ margin: 0, fontSize: "var(--cc-type-heading-md-size)", color: "var(--cc-text-primary)" }}>
             Assinatura
           </h2>
           <p style={{ margin: 0, color: "var(--cc-text-secondary)" }}>
@@ -228,7 +228,7 @@ function SubscriptionCard({ entitlement }: { entitlement: ProfessionalEntitlemen
       <Card padding="default">
         <Stack gap="2">
           <div style={{ display: "flex", alignItems: "center", gap: "var(--cc-space-2)" }}>
-            <h2 style={{ margin: 0, fontSize: "var(--cc-font-size-lg)", color: "var(--cc-text-primary)" }}>
+            <h2 style={{ margin: 0, fontSize: "var(--cc-type-heading-md-size)", color: "var(--cc-text-primary)" }}>
               Assinatura ativa
             </h2>
             <Badge variant="success" pill>Ativa</Badge>
@@ -250,7 +250,7 @@ function SubscriptionCard({ entitlement }: { entitlement: ProfessionalEntitlemen
     <Card padding="default">
       <Stack gap="2">
         <div style={{ display: "flex", alignItems: "center", gap: "var(--cc-space-2)" }}>
-          <h2 style={{ margin: 0, fontSize: "var(--cc-font-size-lg)", color: "var(--cc-text-primary)" }}>
+          <h2 style={{ margin: 0, fontSize: "var(--cc-type-heading-md-size)", color: "var(--cc-text-primary)" }}>
             {title}
           </h2>
           <Badge variant={isExpired ? "danger" : "warning"} pill>
@@ -271,6 +271,7 @@ function SubscriptionCard({ entitlement }: { entitlement: ProfessionalEntitlemen
 function EligibilityCard({ eligibility }: { eligibility: ProfessionalEligibility }) {
   const [status, setStatus] = useState(eligibility.profile_status);
   const [message, setMessage] = useState("");
+  const [isError, setIsError] = useState(false);
   const [pending, setPending] = useState(false);
 
   const items = [
@@ -283,11 +284,14 @@ function EligibilityCard({ eligibility }: { eligibility: ProfessionalEligibility
   async function lifecycle(action: "publish" | "unpublish") {
     setPending(true);
     setMessage("");
+    setIsError(false);
     try {
       await save(action, undefined, undefined, "POST");
       setStatus(action === "publish" ? "active" : "draft");
+      setIsError(false);
       setMessage(action === "publish" ? "Perfil publicado." : "Perfil despublicado.");
     } catch (error) {
+      setIsError(true);
       setMessage(error instanceof Error ? error.message : "Não foi possível atualizar o perfil.");
     } finally {
       setPending(false);
@@ -298,7 +302,7 @@ function EligibilityCard({ eligibility }: { eligibility: ProfessionalEligibility
     <Card padding="default">
       <Stack gap="4">
         <div>
-          <h2 style={{ margin: "0 0 var(--cc-space-1) 0", fontSize: "var(--cc-font-size-lg)" }}>
+          <h2 style={{ margin: "0 0 var(--cc-space-1) 0", fontSize: "var(--cc-type-heading-md-size)" }}>
             Prepare seu perfil para publicar
           </h2>
           <p style={{ margin: 0, color: "var(--cc-text-secondary)" }}>
@@ -353,7 +357,7 @@ function EligibilityCard({ eligibility }: { eligibility: ProfessionalEligibility
           ) : null}
         </div>
 
-        {message ? <InlineMessage variant="success">{message}</InlineMessage> : null}
+        {message ? <InlineMessage variant={isError ? "danger" : "success"}>{message}</InlineMessage> : null}
       </Stack>
     </Card>
   );
@@ -438,7 +442,7 @@ function Profile({
                   defaultValue={data.email ?? ""}
                 />
                 <div style={{ display: "grid", gap: "var(--cc-space-1)" }}>
-                  <span style={{ fontSize: "var(--cc-font-size-sm)", fontWeight: "var(--cc-font-weight-medium)" }}>
+                  <span style={{ fontSize: "var(--cc-type-body-sm-size)", fontWeight: "var(--cc-font-weight-medium)" }}>
                     Status do cadastro
                   </span>
                   <div>
@@ -456,11 +460,11 @@ function Profile({
                 defaultValue={data.bio ?? ""}
               />
 
-              <p style={{ margin: 0, fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+              <p style={{ margin: 0, fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
                 Endereço do perfil:{" "}
                 <code
                   style={{
-                    backgroundColor: "var(--cc-bg-surface-muted)",
+                    backgroundColor: "var(--cc-bg-muted)",
                     padding: "2px 6px",
                     borderRadius: "var(--cc-radius-2)",
                     fontFamily: "var(--cc-font-mono)",
@@ -648,14 +652,14 @@ function Services({
                 >
                   <div style={{ display: "grid", gap: "var(--cc-space-1)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "var(--cc-space-2)" }}>
-                      <h3 style={{ margin: 0, fontSize: "var(--cc-font-size-base)", fontWeight: "var(--cc-font-weight-semibold)" }}>
+                      <h3 style={{ margin: 0, fontSize: "var(--cc-type-heading-sm-size)", fontWeight: "var(--cc-font-weight-semibold)" }}>
                         {item.service.name}
                       </h3>
                       <Badge variant={item.is_active ? "success" : "neutral"} pill>
                         {item.is_active ? "Ativo" : "Inativo"}
                       </Badge>
                     </div>
-                    <p style={{ margin: 0, fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+                    <p style={{ margin: 0, fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
                       {item.service.category.name} · {formatPrice(item.price_mode, item.price_from_cents, item.price_to_cents)}
                     </p>
                     <small style={{ color: "var(--cc-text-muted)" }}>
@@ -689,7 +693,7 @@ function Services({
           <Card padding="default">
             <form onSubmit={update}>
               <Stack gap="4">
-                <h3 style={{ margin: 0, fontSize: "var(--cc-font-size-lg)" }}>
+                <h3 style={{ margin: 0, fontSize: "var(--cc-type-heading-md-size)" }}>
                   Editar {editing.service.name}
                 </h3>
                 <Grid columns="2" gap="4">
@@ -717,7 +721,7 @@ function Services({
           <Card padding="default">
             <form onSubmit={submit}>
               <Stack gap="4">
-                <h3 style={{ margin: 0, fontSize: "var(--cc-font-size-lg)" }}>
+                <h3 style={{ margin: 0, fontSize: "var(--cc-type-heading-md-size)" }}>
                   Adicionar serviço
                 </h3>
                 <Select
@@ -797,7 +801,7 @@ function AreaForm({
     <Card padding="default">
       <form onSubmit={submit}>
         <Stack gap="4">
-          <h3 style={{ margin: 0, fontSize: "var(--cc-font-size-lg)" }}>
+          <h3 style={{ margin: 0, fontSize: "var(--cc-type-heading-md-size)" }}>
             {item ? "Editar área" : "Adicionar área"}
           </h3>
 
@@ -866,7 +870,7 @@ function AreaForm({
             <legend
               style={{
                 padding: "0 var(--cc-space-2)",
-                fontSize: "var(--cc-font-size-xs)",
+                fontSize: "var(--cc-type-caption-size)",
                 color: "var(--cc-text-secondary)",
               }}
             >
@@ -989,7 +993,7 @@ function Areas({ items }: { items: ServiceAreaResponse[] }) {
                 >
                   <div style={{ display: "grid", gap: "var(--cc-space-1)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "var(--cc-space-2)" }}>
-                      <h3 style={{ margin: 0, fontSize: "var(--cc-font-size-base)", fontWeight: "var(--cc-font-weight-semibold)" }}>
+                      <h3 style={{ margin: 0, fontSize: "var(--cc-type-heading-sm-size)", fontWeight: "var(--cc-font-weight-semibold)" }}>
                         {item.label ?? `${item.city}, ${item.state}`}
                       </h3>
                       {item.is_primary ? (
@@ -998,7 +1002,7 @@ function Areas({ items }: { items: ServiceAreaResponse[] }) {
                         </Badge>
                       ) : null}
                     </div>
-                    <p style={{ margin: 0, fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+                    <p style={{ margin: 0, fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
                       {item.city}, {item.state} · {formatKilometers(item.radius_meters)}
                     </p>
                     <small style={{ color: "var(--cc-text-muted)" }}>

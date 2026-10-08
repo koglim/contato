@@ -70,7 +70,7 @@ As seguintes capacidades encontram-se implementadas, cobertas por testes automat
 
 ### Painel Web do Profissional (`apps/web`)
 * **Portal Next.js em `/dashboard`:** Implementação com BFF (Backend for Frontend) e sessões via cookie assinado.
-* **Migração Visual do Painel Web (WP7.1):** Telas do `/dashboard` migradas integralmente para o ContatoCerto Design System v1 (`apps/web/design-system/`), utilizando `AppShell`, `Sidebar`, `Header`, `PageShell`, componentes primitivos acessíveis (`Card`, `Input`, `Select`, `Button`, `Switch`, `Badge`, `AlertDialog`, etc.) e eliminando dependências de estilos legados no `globals.css`.
+* **Migração Visual do Painel Web (WP7.1 — PR #42 em Revisão/Homologação):** Candidato a PR #42 implementando a migração visual integral da camada do painel web para o ContatoCerto Design System v1 (aguardando aprovação/merge em main). Telas do `/dashboard` migradas para `AppShell`, `Sidebar`, `Header`, `PageShell`, componentes primitivos acessíveis (`Card`, `Input`, `Select`, `Button`, `Switch`, `Badge`, `AlertDialog`, etc.) e eliminando dependências de estilos legados no `globals.css`.
 * **Seções Implementadas no Código:** Visão geral (`overview`), dados de perfil (`profile`), categorias de serviços (`services`), áreas de cobertura (`service-areas`), disponibilidade (`availability`), controles de elegibilidade e fluxos de onboarding/claim.
 * **Telefone em Modo Somente-Leitura:** No painel atual, o telefone do profissional é exibido como `readOnly` e não pode ser alterado diretamente pelo autosserviço (exige intervenção administrativa).
 * **Ausência de Histórico de Atendimentos / Conclusão no Painel:** O painel atual não possui tela de histórico de serviços nem botões de conclusão de atendimento.

@@ -7,7 +7,12 @@ export interface TableProps extends React.TableHTMLAttributes<HTMLTableElement> 
 
 export function Table({ compact = false, className = "", children, ...props }: TableProps) {
   return (
-    <div className={styles.tableWrapper}>
+    <div
+      className={styles.tableWrapper}
+      tabIndex={0}
+      role="region"
+      aria-label="Tabela de dados"
+    >
       <table className={`${styles.table} ${compact ? styles.compact : ""} ${className}`} {...props}>
         {children}
       </table>

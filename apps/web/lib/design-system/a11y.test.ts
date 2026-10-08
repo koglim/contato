@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -99,4 +99,62 @@ test("a11y static contract: AppShell implements skip-link, main landmark and nav
 test("a11y static contract: AccountMenu enforces accessible button and interactive state", () => {
   const accountMenuSource = read("design-system/shell/AccountMenu/AccountMenu.tsx");
   assert.match(accountMenuSource, /Menu da conta de \$\{name\}/);
+});
+
+test("a11y static contract: ErrorState component supports headingLevel prop for page-level error states", () => {
+  const errorStateSource = read("design-system/components/ErrorState/ErrorState.tsx");
+  assert.match(errorStateSource, /headingLevel\?:\s*1\s*\|\s*2\s*\|\s*3/);
+  assert.match(errorStateSource, /headingLevel\s*===\s*1\s*\?\s*"h1"/);
+
+  const dashboardErrorSource = read("app/dashboard/error.tsx");
+  assert.match(dashboardErrorSource, /headingLevel=\{1\}/);
+});
+
+test("design system token integrity: dashboard views reference only canonical --cc-* tokens", () => {
+  const tokenFiles = ["motion.css", "primitives.css", "semantic.css", "spacing.css", "typography.css"];
+  const canonicalTokens = new Set<string>();
+
+  for (const file of tokenFiles) {
+    const content = read(`design-system/tokens/${file}`);
+    const defined = content.match(/--cc-[a-zA-Z0-9_-]+/g) || [];
+    for (const token of defined) {
+      canonicalTokens.add(token);
+    }
+  }
+
+  function scanDir(relDir: string): string[] {
+    const fullDir = join(webRoot, relDir);
+    if (!existsSync(fullDir)) return [];
+    const results: string[] = [];
+    const entries = readdirSync(fullDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryRel = join(relDir, entry.name);
+      if (entry.isDirectory()) {
+        results.push(...scanDir(entryRel));
+      } else if (entry.isFile() && (entry.name.endsWith(".tsx") || entry.name.endsWith(".css") || entry.name.endsWith(".ts"))) {
+        results.push(entryRel);
+      }
+    }
+    return results;
+  }
+
+  const scannedFiles = [...scanDir("components/dashboard"), ...scanDir("app/dashboard")];
+  const unknownTokens: Array<{ file: string; token: string }> = [];
+
+  for (const relFile of scannedFiles) {
+    const fileContent = read(relFile);
+    const usages = fileContent.match(/var\((--cc-[a-zA-Z0-9_-]+)/g) || [];
+    for (const usage of usages) {
+      const token = usage.replace(/^var\(/, "");
+      if (!canonicalTokens.has(token)) {
+        unknownTokens.push({ file: relFile, token });
+      }
+    }
+  }
+
+  assert.equal(
+    unknownTokens.length,
+    0,
+    `Found unknown --cc-* design tokens: ${JSON.stringify(unknownTokens)}`
+  );
 });

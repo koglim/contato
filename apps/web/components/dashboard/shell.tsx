@@ -74,12 +74,30 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     />
   );
 
+  const collapsedUserMenu = (
+    <AccountMenu
+      name="Profissional"
+      email="Painel do profissional"
+      collapsed={true}
+      items={[
+        {
+          id: "logout",
+          label: "Sair do painel",
+          icon: <LogOut size={16} />,
+          danger: true,
+          onClick: handleLogout,
+        },
+      ]}
+    />
+  );
+
   return (
     <AppShell
       brandTitle="ContatoCerto"
       brandSubtitle="Painel do Profissional"
       navItems={navItems}
       userMenu={userMenu}
+      collapsedUserMenu={collapsedUserMenu}
     >
       {children}
     </AppShell>

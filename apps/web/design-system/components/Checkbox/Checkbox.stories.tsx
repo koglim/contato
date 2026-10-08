@@ -58,3 +58,47 @@ export const Disabled: Story = {
     </div>
   ),
 };
+
+export const NativeFormIntegration: Story = {
+  render: () => {
+    function FormDemo() {
+      const [submitted, setSubmitted] = React.useState<Record<string, string> | null>(null);
+      return (
+        <form
+          style={{ maxWidth: 440, display: "flex", flexDirection: "column", gap: 16 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+            const entries: Record<string, string> = {};
+            formData.forEach((val, key) => {
+              entries[key] = String(val);
+            });
+            setSubmitted(entries);
+          }}
+        >
+          <Checkbox
+            id="terms"
+            name="accept_terms"
+            value="accepted"
+            label="Concordo com os termos"
+            defaultChecked
+          />
+          <Checkbox
+            id="newsletter"
+            name="newsletter"
+            label="Receber novidades por e-mail (default value 'on')"
+          />
+          <button type="submit" style={{ padding: "8px 16px", cursor: "pointer", alignSelf: "flex-start" }}>
+            Enviar formulário
+          </button>
+          {submitted ? (
+            <pre data-testid="checkbox-form-result" style={{ fontSize: 12, background: "var(--cc-bg-muted)", padding: 8 }}>
+              {JSON.stringify(submitted, null, 2)}
+            </pre>
+          ) : null}
+        </form>
+      );
+    }
+    return <FormDemo />;
+  },
+};

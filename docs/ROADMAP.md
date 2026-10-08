@@ -22,7 +22,6 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 * **Painel Web do Profissional (`/dashboard`):** Aplicação Next.js com BFF, autenticação via cookie assinado, edição de dados cadastrais (telefone em modo somente-leitura), serviços, áreas de atendimento e disponibilidade.
 * **Ações Interativas Button-First e Template Quick Reply (WP6.9 / Gate B — Concluído em Produção Real):** Transporte de oportunidade ao profissional via template oficial da Meta (`contato_certo_nova_solicitacao_v1`) com botões Quick Reply, tokens autoritativos de ação (`ia_<opaque>`), extração determinística ponta a ponta no Gateway n8n após PR #40, declaração de conclusão iniciada por botão e confirmação bilateral com fechamento atômico do contato em `completed` ([`docs/launch-readiness/01-wp6-9-gate-b-closeout.md`](launch-readiness/01-wp6-9-gate-b-closeout.md)).
 * **Design System Foundation v1 (WP7.0 — PR #39):** Implementação formal da fundação do Design System do ContatoCerto (`apps/web/design-system/`): tokens primitives/semantic/component, dark mode first-party sem FOUC, escala tipográfica Inter, layout primitives (`Box`, `Stack`, `Inline`, `Grid`, `Container`), catálogo de componentes base (Radix Primitives + CSS Modules), Lucide React, App Shell responsivo e Storybook com testes automatizados de browser e acessibilidade a11y em CI (conforme [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md)).
-* **Migração Visual do Painel Web (WP7.1):** Migração integral da camada visual do painel do profissional (`/dashboard`, `/profile`, `/services`, `/service-areas`, `/availability`, onboarding, seletor de perfis, loading e error states) para o ContatoCerto Design System v1, preservando regras de domínio, contratos de BFF e acessibilidade estrita, com remoção de estilos legados em `globals.css`.
 
 ---
 
@@ -30,14 +29,15 @@ Funcionalidades totalmente concluídas, integradas ao branch `main` e validadas 
 
 Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
-1. **Launch Readiness / Homologação Residual:**
+1. **Migração Visual do Painel Web (WP7.1 — PR #42):** IMPLEMENTED IN PR #42 (AWAITING INDEPENDENT REVIEW / MERGE). Migração integral da camada visual do painel do profissional (`/dashboard`, `/profile`, `/services`, `/service-areas`, `/availability`, onboarding, seletor de perfis, loading e error states) para o ContatoCerto Design System v1, preservando regras de domínio, contratos de BFF e acessibilidade estrita, com remoção de estilos legados em `globals.css`.
+2. **Launch Readiness / Homologação Residual:**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
    * **Homologação em Produção Real (2026-10-01 a 2026-10-08):** Happy path Golden E2E #2, subfluxos de indisponibilidade profissional, contestação bilateral (T34), seleção expirada (T18) e ciclo completo de notificação via template e conclusão bilateral de atendimento por botões rápidos (WP6.9 / Gate B) comprovados em produção real. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
-2. **Localização v2 (Fundação de Entrada):**
+3. **Localização v2 (Fundação de Entrada):**
    * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
-3. **Reconciliação n8n / Evolution / Workflows Versionados:**
+4. **Reconciliação n8n / Evolution / Workflows Versionados:**
    * O Shared Delivery e o Gateway foram sincronizados em produção no Gate B. Pendente apenas a reimportação do suporte a `professional_auth_challenge` para habilitar OTP (`PROFESSIONAL_AUTH_ENABLED=true`).
-4. **Sincronização Contínua da Documentação:**
+5. **Sincronização Contínua da Documentação:**
    * Manter a disciplina de atualizar a documentação canônica a cada PR com alteração funcional ou arquitetural.
 
 ---

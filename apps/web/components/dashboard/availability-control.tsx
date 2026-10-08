@@ -63,7 +63,7 @@ export function AvailabilityControl({
             <h2
               style={{
                 margin: 0,
-                fontSize: "var(--cc-font-size-base)",
+                fontSize: "var(--cc-type-body-md-size)",
                 fontWeight: "var(--cc-font-weight-semibold)",
                 color: "var(--cc-text-primary)",
               }}
@@ -77,7 +77,7 @@ export function AvailabilityControl({
           <p
             style={{
               margin: 0,
-              fontSize: "var(--cc-font-size-sm)",
+              fontSize: "var(--cc-type-body-sm-size)",
               color: available ? "var(--cc-action-primary)" : "var(--cc-text-secondary)",
               fontWeight: available ? "var(--cc-font-weight-medium)" : "normal",
             }}
@@ -85,11 +85,11 @@ export function AvailabilityControl({
             {available ? "Você pode receber novos pedidos." : "Você não receberá novos pedidos agora."}
           </p>
           {!available && !canEnable && disabledReason ? (
-            <p style={{ margin: 0, fontSize: "var(--cc-font-size-sm)", color: "var(--cc-text-secondary)" }}>
+            <p style={{ margin: 0, fontSize: "var(--cc-type-body-sm-size)", color: "var(--cc-text-secondary)" }}>
               {disabledReason}
             </p>
           ) : null}
-          <p style={{ margin: 0, fontSize: "var(--cc-font-size-xs)", color: "var(--cc-text-muted)" }}>
+          <p style={{ margin: 0, fontSize: "var(--cc-type-caption-size)", color: "var(--cc-text-muted)" }}>
             Última confirmação: {formatDate(timestamp)}
           </p>
         </div>
