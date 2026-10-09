@@ -1,6 +1,6 @@
 import type { LocationResolutionCandidate, LocationResolutionInput, LocationResolutionResponse } from "@contatocerto/shared";
 import type { LocationResolutionConfig } from "../../config/location-resolution.js";
-import type { GeocodingProvider, LocationResolutionObserver, LocationResolutionService } from "./location-resolution.types.js";
+import type { GeocodingProvider, LocationResolutionObserver, LocationResolutionService, ReverseGeocodingInput } from "./location-resolution.types.js";
 import { normalizeBrazilianState, parseBrazilianPlaceQuery, resolveBrazilianMunicipality } from "./brazil-municipality-index.js";
 
 const CITY_LAYERS = new Set(["locality", "localadmin"]);
@@ -154,5 +154,17 @@ export class DeterministicLocationResolutionService implements LocationResolutio
     }
     this.report(candidates, collapsedCount, "resolved", collapsedCount ? "equivalent_candidates_collapsed" : "resolved", "pelias");
     return response(input, provider.name, "resolved", top, [], "pelias");
+  }
+
+  async reverseGeocode(input: ReverseGeocodingInput): Promise<LocationResolutionCandidate | null> {
+    const provider = this.getGeocodingProvider();
+    if (typeof provider.reverseGeocode === "function") {
+      try {
+        return await provider.reverseGeocode(input);
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 }

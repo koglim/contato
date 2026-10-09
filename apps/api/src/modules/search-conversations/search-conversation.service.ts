@@ -135,8 +135,22 @@ export class DefaultSearchConversationService implements SearchConversationServi
       return { kind: "conversation_not_active" };
     }
 
-    const serviceText = conversation.pendingSlot === "service" ? input.raw_text : conversation.serviceText;
-    const locationText = conversation.pendingSlot === "location" ? input.raw_text : conversation.locationText!;
+    const serviceText = conversation.pendingSlot === "service" ? (input.raw_text ?? conversation.serviceText) : conversation.serviceText;
+    const locationText = conversation.pendingSlot === "location" ? (input.raw_text ?? conversation.locationText ?? "localização enviada") : conversation.locationText!;
+
+    const coordinates = input.location
+      ? {
+          latitude: input.location.latitude,
+          longitude: input.location.longitude,
+          source: "native_pin",
+        }
+      : conversation.pinLatitude !== null && conversation.pinLatitude !== undefined && conversation.pinLongitude !== null && conversation.pinLongitude !== undefined
+      ? {
+          latitude: conversation.pinLatitude,
+          longitude: conversation.pinLongitude,
+          source: conversation.locationSource ?? "native_pin",
+        }
+      : undefined;
 
     let orchestration;
     try {
@@ -146,6 +160,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
         location_text: locationText,
         country_code: conversation.countryCode,
         limit: conversation.limitValue,
+        ...(coordinates ? { coordinates } : {}),
       }, conversation.customerId ? { customerId: conversation.customerId } : {});
     } catch (error) {
       await this.repository.releaseClaim(conversationId, processingToken);
@@ -157,6 +172,8 @@ export class DefaultSearchConversationService implements SearchConversationServi
       return orchestration;
     }
 
+    const lastMessage = input.raw_text ?? locationText;
+
     if (orchestration.response.status === "needs_location") {
       const updated = await this.repository.updatePending({
         id: conversationId,
@@ -164,8 +181,13 @@ export class DefaultSearchConversationService implements SearchConversationServi
         pendingSlot: "location",
         serviceText,
         locationText,
-        lastMessageText: input.raw_text,
+        lastMessageText: lastMessage,
         ttlMinutes: this.config.ttlMinutes,
+        ...(coordinates ? {
+          pinLatitude: coordinates.latitude,
+          pinLongitude: coordinates.longitude,
+          locationSource: coordinates.source,
+        } : {}),
       });
       if (!updated) return { kind: "conversation_not_active" };
       return {
@@ -186,8 +208,13 @@ export class DefaultSearchConversationService implements SearchConversationServi
         pendingSlot: "service",
         serviceText,
         locationText,
-        lastMessageText: input.raw_text,
+        lastMessageText: lastMessage,
         ttlMinutes: this.config.ttlMinutes,
+        ...(coordinates ? {
+          pinLatitude: coordinates.latitude,
+          pinLongitude: coordinates.longitude,
+          locationSource: coordinates.source,
+        } : {}),
       });
       if (!updated) return { kind: "conversation_not_active" };
       return {
@@ -207,9 +234,14 @@ export class DefaultSearchConversationService implements SearchConversationServi
         processingToken,
         serviceText,
         locationText,
-        lastMessageText: input.raw_text,
+        lastMessageText: lastMessage,
         searchRequestId: orchestration.response.matching.search_request_id,
         ttlMinutes: this.config.ttlMinutes,
+        ...(coordinates ? {
+          pinLatitude: coordinates.latitude,
+          pinLongitude: coordinates.longitude,
+          locationSource: coordinates.source,
+        } : {}),
       });
       if (!moved) return { kind: "conversation_not_active" };
       return {
@@ -228,7 +260,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
       processingToken,
       serviceText,
       locationText,
-      lastMessageText: input.raw_text,
+      lastMessageText: lastMessage,
       searchRequestId: orchestration.response.matching.search_request_id,
     });
     if (!completed) return { kind: "conversation_not_active" };

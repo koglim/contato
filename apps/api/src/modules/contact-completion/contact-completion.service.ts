@@ -36,19 +36,22 @@ export class ContactCompletionService {
   ) {}
 
   async handle(record: ChannelInboundMessageRecord): Promise<ChannelInboundMessageResponse | null> {
-    if (parseGlobalConversationCommand(record.rawText)) {
+    if (!record.rawText) return null;
+    const rawText = record.rawText;
+
+    if (parseGlobalConversationCommand(rawText)) {
       return null;
     }
 
-    let command = parseContactCompletionCommand(record.rawText);
+    let command = parseContactCompletionCommand(rawText);
 
     return this.transaction(async (db) => {
       // If no explicit command parsed, check if this sender is replying to a persisted disambiguation prompt
       if (!command) {
         const lastClarification = await this.repository.findLastClarification(db, record.provider, record.phoneE164);
         if (lastClarification?.options && lastClarification.requested_action) {
-          const normalizedRaw = record.rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-          const hasNegationOrQuestion = /[?\u00bf]/u.test(record.rawText)
+          const normalizedRaw = rawText.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+          const hasNegationOrQuestion = /[?\u00bf]/u.test(rawText)
             || /\b(?:nao|nem|nunca|jamais|cancelar|cancelamento|recuso|recusar|recusado|parar|sair)\b/u.test(normalizedRaw);
           if (normalizedRaw && !hasNegationOrQuestion) {
             const matched = lastClarification.options.filter((opt) => {

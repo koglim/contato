@@ -1,4 +1,4 @@
-import type { MatchingSearchInput, SearchOrchestrationInput } from "@contatocerto/shared";
+import type { LocationResolutionResponse, MatchingSearchInput, SearchOrchestrationInput } from "@contatocerto/shared";
 import type { LocationResolutionService } from "../location-resolution/location-resolution.types.js";
 import type { MatchingRepository, SearchExecutionContext } from "../matching/matching.types.js";
 import type { ServiceResolutionRepository } from "../service-resolution/service-resolution.types.js";
@@ -26,11 +26,35 @@ export class DeterministicSearchOrchestrator implements SearchOrchestrationServi
       };
     }
 
-    const locationResolution = await this.locationResolutionService.resolve({
-      query: input.location_text,
-      country_code: input.country_code,
-      limit: 5,
-    });
+    let locationResolution: LocationResolutionResponse;
+    if (input.coordinates) {
+      const candidate = {
+        label: input.location_text || (input.coordinates.city ? `${input.coordinates.city}${input.coordinates.state ? ` - ${input.coordinates.state}` : ""}` : "localização enviada"),
+        latitude: input.coordinates.latitude,
+        longitude: input.coordinates.longitude,
+        city: input.coordinates.city ?? null,
+        state: input.coordinates.state ?? null,
+        country_code: (input.country_code ?? "BR").toUpperCase(),
+        neighborhood: input.coordinates.neighborhood ?? null,
+        confidence: 1.0,
+        layer: input.coordinates.source ?? "native_pin",
+      };
+      locationResolution = {
+        status: "resolved",
+        query: input.location_text,
+        country_code: (input.country_code ?? "BR").toUpperCase(),
+        match: candidate,
+        candidates: [candidate],
+        provider: input.coordinates.source ?? "native_pin",
+      };
+    } else {
+      locationResolution = await this.locationResolutionService.resolve({
+        query: input.location_text,
+        country_code: input.country_code,
+        limit: 5,
+      });
+    }
+
     if (locationResolution.status !== "resolved" || !locationResolution.match) {
       return {
         kind: "response",

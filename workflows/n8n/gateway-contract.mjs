@@ -82,6 +82,33 @@ export function extractEvolutionInteractiveReply(message) {
   return null;
 }
 
+export function extractLocation(message) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) return null;
+
+  // Primary: message.locationMessage = { degreesLatitude, degreesLongitude, name, address }
+  // Defensive: message.location = { latitude, longitude, name, address }
+  const loc = message.locationMessage ?? message.location;
+  if (!loc || typeof loc !== "object" || Array.isArray(loc)) return null;
+
+  const lat = loc.degreesLatitude ?? loc.latitude;
+  const lng = loc.degreesLongitude ?? loc.longitude;
+
+  if (typeof lat !== "number" || !Number.isFinite(lat) || lat < -90 || lat > 90) return { error: "invalid" };
+  if (typeof lng !== "number" || !Number.isFinite(lng) || lng < -180 || lng > 180) return { error: "invalid" };
+
+  const name = typeof loc.name === "string" && loc.name.trim() ? loc.name.trim().slice(0, 200) : undefined;
+  const address = typeof loc.address === "string" && loc.address.trim() ? loc.address.trim().slice(0, 500) : undefined;
+
+  return {
+    location: {
+      latitude: lat,
+      longitude: lng,
+      ...(name ? { name } : {}),
+      ...(address ? { address } : {}),
+    },
+  };
+}
+
 // Embedded verbatim in Code nodes. jwtPayload is supplied by the native Webhook
 // AFTER jwtAuth verification; it must never be taken from request.body.
 export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now() / 1000)) {
@@ -213,6 +240,21 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
     // Interactive event detected without an authoritative action ID (e.g. dropped by provider)
     // NEVER convert label into actionId and NEVER pass it to text command route.
     return ignore("unsupported_interactive_reply");
+  }
+
+  const locationResult = extractLocation(message);
+  if (locationResult) {
+    if (locationResult.error) return reject("webhook_location_invalid");
+    const text = message.conversation ?? message.extendedTextMessage?.text;
+    const raw_text = (typeof text === "string" && text.trim() && text.trim().length <= 500) ? text.trim() : undefined;
+    return {
+      action: "inbox",
+      inbound: {
+        ...inbound,
+        location: locationResult.location,
+        ...(raw_text ? { raw_text } : {}),
+      },
+    };
   }
 
   const text = message.conversation ?? message.extendedTextMessage?.text;

@@ -93,4 +93,35 @@ export class OpenRouteServiceGeocodingProvider implements GeocodingProvider {
     if (!parsed.success) throw new GeocodingProviderError("provider_error");
     return deduplicate(parsed.data.features.map((feature) => mapFeature(feature, input.country_code)).filter((candidate): candidate is LocationResolutionCandidate => candidate !== null));
   }
+
+  async reverseGeocode(input: { latitude: number; longitude: number; country_code?: string }): Promise<LocationResolutionCandidate | null> {
+    const countryCode = input.country_code ?? "BR";
+    const url = new URL("reverse", `${this.config.baseUrl.replace(/\/$/u, "")}/`);
+    url.search = new URLSearchParams({
+      "point.lat": String(input.latitude),
+      "point.lon": String(input.longitude),
+      "boundary.country": countryCode,
+      size: "1",
+    }).toString();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GEOCODING_TIMEOUT_MS);
+    let upstream: Response;
+    try {
+      upstream = await this.fetchImplementation(url, { headers: { Authorization: this.config.apiKey! }, signal: controller.signal });
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!upstream.ok) return null;
+    let payload: unknown;
+    try {
+      payload = await upstream.json();
+    } catch {
+      return null;
+    }
+    const parsed = featureCollectionSchema.safeParse(payload);
+    if (!parsed.success || parsed.data.features.length === 0) return null;
+    return mapFeature(parsed.data.features[0]!, countryCode);
+  }
 }

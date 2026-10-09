@@ -7,6 +7,8 @@ import {
   searchOrchestrationNoMatchesResponseSchema,
 } from "./search-orchestration.js";
 
+import { channelLocationInputSchema } from "./channel-location.js";
+
 export const startSearchConversationRequestSchema = messageSearchRequestSchema;
 
 export const continueSearchConversationParamsSchema = z.object({
@@ -14,7 +16,25 @@ export const continueSearchConversationParamsSchema = z.object({
 }).strict();
 
 export const continueSearchConversationRequestSchema = z.object({
-  raw_text: z.string().trim().min(2).max(500),
+  raw_text: z.string().trim().min(1).max(500).optional(),
+  location: channelLocationInputSchema.optional(),
+}).strict().refine((data) => data.raw_text !== undefined || data.location !== undefined, {
+  message: "Either raw_text or location must be provided",
+});
+
+export const locationConfirmationResultSchema = z.object({
+  status: z.literal("needs_location_confirmation"),
+  service_text: z.string(),
+  location_text: z.string(),
+  prompt: z.string(),
+}).strict();
+
+export const nativeLocationNeedsServiceResultSchema = z.object({
+  status: z.literal("needs_service"),
+  location_text: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  prompt: z.string().optional(),
 }).strict();
 
 const pendingInterpretationResultSchema = messageSearchResponseSchema.refine(
@@ -46,7 +66,7 @@ const activeStartSearchConversationResponseSchema = z.discriminatedUnion("pendin
     conversation_id: z.string().uuid(),
     conversation_status: z.literal("active"),
     pending_slot: z.literal("service"),
-    result: pendingServiceResultSchema,
+    result: z.union([pendingServiceResultSchema, nativeLocationNeedsServiceResultSchema]),
   }).strict(),
   z.object({
     conversation_id: z.string().uuid(),
@@ -59,6 +79,12 @@ const activeStartSearchConversationResponseSchema = z.discriminatedUnion("pendin
     conversation_status: z.literal("active"),
     pending_slot: z.literal("location"),
     result: pendingInterpretationResultSchema,
+  }).strict(),
+  z.object({
+    conversation_id: z.string().uuid(),
+    conversation_status: z.literal("active"),
+    pending_slot: z.literal("location_confirmation"),
+    result: locationConfirmationResultSchema,
   }).strict(),
 ]);
 
@@ -98,6 +124,12 @@ const activeContinueSearchConversationResponseSchema = z.discriminatedUnion("pen
       searchOrchestrationNeedsLocationResponseSchema,
       messageSearchResponseSchema.refine((value) => value.status === "needs_location"),
     ]),
+  }).strict(),
+  z.object({
+    conversation_id: z.string().uuid(),
+    conversation_status: z.literal("active"),
+    pending_slot: z.literal("location_confirmation"),
+    result: locationConfirmationResultSchema,
   }).strict(),
 ]);
 

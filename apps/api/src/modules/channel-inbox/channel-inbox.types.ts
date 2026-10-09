@@ -12,7 +12,7 @@ export type ChannelInboundMessageRecord = {
   provider: string;
   providerMessageId: string;
   phoneE164: string;
-  rawText: string;
+  rawText: string | null;
   interactiveActionId?: string | null;
   countryCode: string;
   limitValue: number;
@@ -28,6 +28,10 @@ export type ChannelInboundMessageRecord = {
   contextualQueue?: boolean;
   attemptCount?: number;
   contextFingerprint?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  locationName?: string | null;
+  locationAddress?: string | null;
 };
 
 export type MarkProcessedInboundMessage = {

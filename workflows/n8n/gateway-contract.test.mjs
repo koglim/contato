@@ -7,6 +7,7 @@ import { Buffer } from "node:buffer";
 import { URL } from "node:url";
 import {
   normalizeGatewayEvent,
+  extractLocation,
   transcriptionDecision,
   inboxDecision,
   mediaClaimDecision,
@@ -832,5 +833,118 @@ test("gateway export preserves stable canonical webhook identity and webhookId",
   assert.equal(wh.parameters?.authentication, "jwtAuth");
   assert.equal(wh.parameters?.responseMode, "responseNode");
   assert.equal(wh.credentials?.jwtAuth?.name, "ContatoCerto Evolution Webhook JWT");
+});
+
+test("gateway extracts native Evolution locationMessage and defensive location envelopes", () => {
+  // 1. Primary Evolution locationMessage
+  const locInput = event({
+    locationMessage: {
+      degreesLatitude: -11.8548,
+      degreesLongitude: -55.5089,
+      name: "Sinop Centro",
+      address: "Av. das Embaúbas, 100",
+    },
+  });
+  const res1 = normalize(locInput);
+  assert.equal(res1.action, "inbox");
+  assert.deepEqual(extractLocation(locInput.body.data.message), {
+    location: {
+      latitude: -11.8548,
+      longitude: -55.5089,
+      name: "Sinop Centro",
+      address: "Av. das Embaúbas, 100",
+    },
+  });
+  assert.deepEqual(res1.inbound.location, {
+    latitude: -11.8548,
+    longitude: -55.5089,
+    name: "Sinop Centro",
+    address: "Av. das Embaúbas, 100",
+  });
+  assert.equal(res1.inbound.raw_text, undefined);
+
+  // 2. Defensive location envelope without name/address
+  const defInput = event({
+    location: {
+      latitude: -11.8601,
+      longitude: -55.5123,
+    },
+  });
+  const res2 = normalize(defInput);
+  assert.equal(res2.action, "inbox");
+  assert.deepEqual(res2.inbound.location, {
+    latitude: -11.8601,
+    longitude: -55.5123,
+  });
+  assert.equal(res2.inbound.raw_text, undefined);
+
+  // 3. Location message with accompanying text/caption
+  const withTextInput = event({
+    locationMessage: {
+      degreesLatitude: -11.8548,
+      degreesLongitude: -55.5089,
+    },
+    conversation: "aqui em frente à praça",
+  });
+  const res3 = normalize(withTextInput);
+  assert.equal(res3.action, "inbox");
+  assert.deepEqual(res3.inbound.location, {
+    latitude: -11.8548,
+    longitude: -55.5089,
+  });
+  assert.equal(res3.inbound.raw_text, "aqui em frente à praça");
+});
+
+test("gateway rejects malformed or out-of-range location coordinates", () => {
+  const invalidLocations = [
+    { degreesLatitude: 91, degreesLongitude: -55.5 }, // lat > 90
+    { degreesLatitude: -91, degreesLongitude: -55.5 }, // lat < -90
+    { degreesLatitude: -11.8, degreesLongitude: 181 }, // lng > 180
+    { degreesLatitude: -11.8, degreesLongitude: -181 }, // lng < -180
+    { degreesLatitude: "not-a-number", degreesLongitude: -55.5 },
+    { degreesLatitude: -11.8, degreesLongitude: null },
+    { degreesLatitude: NaN, degreesLongitude: -55.5 },
+    { degreesLatitude: Infinity, degreesLongitude: -55.5 },
+  ];
+
+  for (const loc of invalidLocations) {
+    const badInput = event({ locationMessage: loc });
+    const res = normalize(badInput);
+    assert.equal(res.action, "reject");
+    assert.equal(res.reason, "webhook_location_invalid");
+    assert.equal(res.http_status, 422);
+  }
+});
+
+test("generated Validate event Code node runtime parity for native location messages", () => {
+  const workflow = JSON.parse(readFileSync(new URL("gateway.json", import.meta.url), "utf8"));
+  const gate = workflow.nodes.find(n => n.name === "Validate event").parameters.jsCode;
+
+  const locInput = event({
+    locationMessage: {
+      degreesLatitude: -11.8548,
+      degreesLongitude: -55.5089,
+      name: "Sinop",
+    },
+  });
+
+  const vmResult = runInNewContext(`(() => { ${gate} })()`, {
+    $json: locInput,
+    $env: {
+      EVOLUTION_INSTANCE: config.instance,
+      EVOLUTION_PROVIDER: config.provider,
+      EVOLUTION_WEBHOOK_ORIGIN: config.origin,
+    },
+    Buffer,
+    Date: class extends Date { static now() { return now * 1000; } },
+  });
+
+  assert.equal(vmResult.json.action, "inbox");
+  assert.deepEqual(JSON.parse(JSON.stringify(vmResult.json.inbound.location)), {
+    latitude: -11.8548,
+    longitude: -55.5089,
+    name: "Sinop",
+  });
+  assert.equal(vmResult.json.inbound.raw_text, undefined);
 });
 

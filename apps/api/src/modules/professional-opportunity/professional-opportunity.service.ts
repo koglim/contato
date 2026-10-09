@@ -28,6 +28,8 @@ export class ProfessionalOpportunityService {
   constructor(private readonly transaction: Transaction = withTransaction) {}
 
   async handle(record: ChannelInboundMessageRecord): Promise<ChannelInboundMessageResponse | null> {
+    if (!record.rawText) return null;
+    const rawText = record.rawText;
     return this.transaction(async (db) => {
       const inbound = (await db.query<{ status: string; processing_token: string | null; result: unknown; response_outbound_id: string | null }>(
         "SELECT status, processing_token, result, response_outbound_id FROM channel_inbound_messages WHERE id = $1 FOR UPDATE", [record.id])).rows[0];
@@ -40,8 +42,8 @@ export class ProfessionalOpportunityService {
       if (!live.rows.length) throw new InboxFenceError();
       const fingerprint=(await db.query<{fingerprint:string}>(`SELECT COALESCE(${inboxContextSql},'none') AS fingerprint`,[record.phoneE164])).rows[0]?.fingerprint;
       if(record.contextFingerprint && fingerprint!==record.contextFingerprint) throw new InboxContextChangedError();
-      if (parseGlobalConversationCommand(record.rawText)) return null;
-      const parsed = parseOpportunityMessage(record.rawText);
+      if (parseGlobalConversationCommand(rawText)) return null;
+      const parsed = parseOpportunityMessage(rawText);
       const aliases = getPhoneIdentityAliases(record.phoneE164);
       const customerRows = (await db.query<{ id: string }>("SELECT id FROM customers WHERE phone_e164 = ANY($1)", [aliases as string[]])).rows;
       if (customerRows.length > 1) {
@@ -72,10 +74,10 @@ export class ProfessionalOpportunityService {
         )).rows.map((r) => r.contact_id)
       ) : new Set<string>();
       const pending = owned.filter((contact) => (contact.status === "shared" && !unavailabilities.has(contact.id)) || contact.status === "requested");
-      if (customer && parsed.resume === null && /\b(?:retomar|voltar)\b/u.test(normalizeOpportunityCommand(record.rawText)) && record.rawText.includes("?")) {
+      if (customer && parsed.resume === null && /\b(?:retomar|voltar)\b/u.test(normalizeOpportunityCommand(rawText)) && rawText.includes("?")) {
         return this.finish(db, record, "clarification", "Quer retomar uma busca anterior? Envie ‘retomar’ com o serviço ou o código. Sua busca atual permanece como está.");
       }
-      if (active && pending.length && /^(?:talvez|nao sei|onde fica|quanto e|e se eu aceitar|posso responder depois)\??$/u.test(normalizeOpportunityCommand(record.rawText))) {
+      if (active && pending.length && /^(?:talvez|nao sei|onde fica|quanto e|e se eu aceitar|posso responder depois)\??$/u.test(normalizeOpportunityCommand(rawText))) {
         return this.finish(db, record, "clarification", "Você quer falar da oportunidade recebida ou continuar sua busca atual? Para responder à oportunidade, envie a decisão com o código.");
       }
       // A short repeat is safe only when there is one owned opportunity and no
@@ -84,7 +86,7 @@ export class ProfessionalOpportunityService {
         return this.decide(db, record, owned[0], parsed.decision);
       }
       if (parsed.decision && pending.length === 1) {
-        if (active && ["sim consigo"].includes(normalizeOpportunityCommand(record.rawText))) {
+        if (active && ["sim consigo"].includes(normalizeOpportunityCommand(rawText))) {
           return this.finish(db, record, "clarification", `Você quer responder à oportunidade ${pending[0].public_code} ou continuar sua busca? Para a oportunidade, envie sua decisão com o código.`);
         }
         return this.decide(db, record, pending[0], parsed.decision);
@@ -231,7 +233,7 @@ export class ProfessionalOpportunityService {
   private async finish(db: DatabaseClient, record: ChannelInboundMessageRecord, kind: Result["result"]["kind"], text: string,
     code?: string, reuseId?: string, eventId?: string, unavailabilityEventId?: string) {
     const result = opportunityMessageSchema.parse({ route: "opportunity", result: { kind, text, ...(code ? { public_code: code } : {}) } });
-    const command = parseOpportunityMessage(record.rawText);
+    const command = parseOpportunityMessage(record.rawText ?? "");
     const purpose = command.resume !== null || command.keep ? "customer_reply" : "professional_reply";
     const businessKey = unavailabilityEventId
       ? `unavailability:${unavailabilityEventId}:professional`

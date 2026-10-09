@@ -2,12 +2,19 @@ import type { LocationResolutionCandidate, LocationResolutionInput, LocationReso
 
 export const GEOCODING_TIMEOUT_MS = 5_000;
 export type GeocodingProviderInput = Pick<LocationResolutionInput, "query" | "country_code" | "limit">;
+export type ReverseGeocodingInput = {
+  latitude: number;
+  longitude: number;
+  country_code?: string;
+};
 export type GeocodingProvider = {
   readonly name: string;
   geocode(input: GeocodingProviderInput): Promise<LocationResolutionCandidate[]>;
+  reverseGeocode?(input: ReverseGeocodingInput): Promise<LocationResolutionCandidate | null>;
 };
 export type LocationResolutionService = {
   resolve(input: LocationResolutionInput): Promise<LocationResolutionResponse>;
+  reverseGeocode(input: ReverseGeocodingInput): Promise<LocationResolutionCandidate | null>;
 };
 export type LocationResolutionDiagnostic = {
   status: LocationResolutionResponse["status"];
