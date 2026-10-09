@@ -972,7 +972,7 @@ test("14. TEST 1 — TEXT OVERRIDE / MATCHED / SINGLE RESOLUTION", async () => {
     assert.equal(staleCoordsFound, 0, "TEXT_OVERRIDE_STALE_COORDINATES must be 0");
 
     const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
-      "SELECT latitude, longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      "SELECT ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
       [customerId],
     )).rows[0];
     assert.ok(searchReq);
@@ -1070,7 +1070,7 @@ test("15. TEST 2 — TEXT OVERRIDE / NO_MATCHES: completed conversation has coor
     assert.equal(oldCoordsFound, 0, "OLD coords A must be absent from completed conversation");
 
     const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
-      "SELECT latitude, longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      "SELECT ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
       [customerId],
     )).rows[0];
     assert.ok(searchReq);
@@ -1173,7 +1173,7 @@ test("16. TEST 3 — NEW NATIVE PIN / NO_MATCHES: completed conversation has exa
     assert.equal(oldAFound, 0, "Zero old A remains");
 
     const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
-      "SELECT latitude, longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      "SELECT ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
       [customerId],
     )).rows[0];
     assert.ok(searchReq);
@@ -1269,7 +1269,7 @@ test("17. TEST 4 — MEMORY CONFIRM YES / NO_MATCHES: completed conversation has
     assert.equal(convRow.location_state, "MT");
 
     const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
-      "SELECT latitude, longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      "SELECT ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
       [customerId],
     )).rows[0];
     assert.ok(searchReq);
@@ -1353,7 +1353,7 @@ test("18. TEST 5 — PIN-FIRST -> SERVICE -> NO_MATCHES: completed conversation 
     assert.equal(Number(convRow.pin_longitude), exactLon);
 
     const searchReq = (await query<{ latitude: number; longitude: number }>(
-      "SELECT latitude, longitude FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      "SELECT ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
       [customerId],
     )).rows[0];
     assert.ok(searchReq);
