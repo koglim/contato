@@ -78,7 +78,9 @@ exports.up = (pgm) => {
       ADD COLUMN pin_latitude DOUBLE PRECISION NULL,
       ADD COLUMN pin_longitude DOUBLE PRECISION NULL,
       ADD COLUMN pin_name VARCHAR(200) NULL,
-      ADD COLUMN location_source VARCHAR(30) NULL;
+      ADD COLUMN location_source VARCHAR(30) NULL,
+      ADD COLUMN location_city VARCHAR(120) NULL,
+      ADD COLUMN location_state VARCHAR(2) NULL;
 
     ALTER TABLE search_conversations
       ADD CONSTRAINT search_conversations_pin_coords_chk CHECK (
@@ -162,7 +164,9 @@ exports.down = (pgm) => {
       DROP COLUMN IF EXISTS pin_latitude,
       DROP COLUMN IF EXISTS pin_longitude,
       DROP COLUMN IF EXISTS pin_name,
-      DROP COLUMN IF EXISTS location_source;
+      DROP COLUMN IF EXISTS location_source,
+      DROP COLUMN IF EXISTS location_city,
+      DROP COLUMN IF EXISTS location_state;
 
     ALTER TYPE search_conversation_pending_slot RENAME TO search_conversation_pending_slot_old;
     CREATE TYPE search_conversation_pending_slot AS ENUM ('location', 'service', 'selection');

@@ -7,6 +7,7 @@ import type {
 
 export type SearchConversationStatus = "active" | "completed" | "cancelled" | "expired";
 export type SearchConversationPendingSlot = "location" | "service" | "selection" | "location_confirmation";
+export type SearchConversationLocationSource = "whatsapp_native" | "text_resolved" | "memory_reuse";
 
 export type SearchConversationRecord = {
   id: string;
@@ -28,7 +29,9 @@ export type SearchConversationRecord = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  locationSource?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type CreatePendingConversation = {
@@ -43,7 +46,9 @@ export type CreatePendingConversation = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  locationSource?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type CreateAwaitingSelectionConversation = {
@@ -58,7 +63,9 @@ export type CreateAwaitingSelectionConversation = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  locationSource?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type UpdatePendingConversation = {
@@ -72,7 +79,9 @@ export type UpdatePendingConversation = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  locationSource?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type MoveToAwaitingSelectionConversation = {
@@ -86,7 +95,9 @@ export type MoveToAwaitingSelectionConversation = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  locationSource?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type CompleteSearchConversation = {

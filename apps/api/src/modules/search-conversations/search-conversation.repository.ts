@@ -6,6 +6,7 @@ import type {
   CreatePendingConversation,
   HistoricallyShownCandidate,
   MoveToAwaitingSelectionConversation,
+  SearchConversationLocationSource,
   SearchConversationRecord,
   SearchConversationRepository,
   SearchConversationPendingSlot,
@@ -33,7 +34,9 @@ type SearchConversationRow = {
   pin_latitude: number | string | null;
   pin_longitude: number | string | null;
   pin_name: string | null;
-  location_source: string | null;
+  location_source: SearchConversationLocationSource | null;
+  location_city: string | null;
+  location_state: string | null;
 };
 
 export type SearchConversationQuery = <T extends QueryResultRow>(
@@ -45,7 +48,7 @@ const conversationColumns = `
   id, customer_id, status, pending_slot, original_raw_text, service_text, location_text, country_code,
   limit_value, last_message_text, search_request_id, expires_at, created_at, updated_at,
   completed_at, (expires_at <= NOW()) AS is_expired,
-  pin_latitude, pin_longitude, pin_name, location_source
+  pin_latitude, pin_longitude, pin_name, location_source, location_city, location_state
 `;
 
 function toRecord(row: SearchConversationRow): SearchConversationRecord {
@@ -70,6 +73,8 @@ function toRecord(row: SearchConversationRow): SearchConversationRecord {
     pinLongitude: row.pin_longitude !== null && row.pin_longitude !== undefined ? Number(row.pin_longitude) : null,
     pinName: row.pin_name ?? null,
     locationSource: row.location_source ?? null,
+    locationCity: row.location_city ?? null,
+    locationState: row.location_state ?? null,
   };
 }
 
@@ -82,9 +87,9 @@ export class PostgresSearchConversationRepository implements SearchConversationR
        INSERT INTO search_conversations (
          customer_id, status, pending_slot, original_raw_text, service_text, location_text, country_code,
          limit_value, last_message_text, expires_at,
-         pin_latitude, pin_longitude, pin_name, location_source
+         pin_latitude, pin_longitude, pin_name, location_source, location_city, location_state
        ) SELECT $1, 'active', $2, $3, $4, $5, $6, $7, $3, NOW() + ($8 * INTERVAL '1 minute'),
-                $9, $10, $11, $12 FROM (SELECT count(*) FROM owner_lock) locked
+                $9, $10, $11, $12, $13, $14 FROM (SELECT count(*) FROM owner_lock) locked
        RETURNING ${conversationColumns}`,
       [
         input.customerId ?? null,
@@ -99,6 +104,8 @@ export class PostgresSearchConversationRepository implements SearchConversationR
         input.pinLongitude ?? null,
         input.pinName ?? null,
         input.locationSource ?? null,
+        input.locationCity ?? null,
+        input.locationState ?? null,
       ],
     );
     return toRecord(result.rows[0]);
@@ -111,10 +118,10 @@ export class PostgresSearchConversationRepository implements SearchConversationR
          customer_id, status, pending_slot, original_raw_text, service_text, location_text, country_code,
          limit_value, last_message_text, search_request_id, processing_token, processing_started_at,
          completed_at, expires_at,
-         pin_latitude, pin_longitude, pin_name, location_source
+         pin_latitude, pin_longitude, pin_name, location_source, location_city, location_state
        ) SELECT $1, 'active', 'selection', $2, $3, $4, $5, $6, $2, $7, NULL, NULL, NULL,
          NOW() + ($8 * INTERVAL '1 minute'),
-         $9, $10, $11, $12 FROM (SELECT count(*) FROM owner_lock) locked
+         $9, $10, $11, $12, $13, $14 FROM (SELECT count(*) FROM owner_lock) locked
        RETURNING ${conversationColumns}`,
       [
         input.customerId ?? null,
@@ -129,6 +136,8 @@ export class PostgresSearchConversationRepository implements SearchConversationR
         input.pinLongitude ?? null,
         input.pinName ?? null,
         input.locationSource ?? null,
+        input.locationCity ?? null,
+        input.locationState ?? null,
       ],
     );
     return toRecord(result.rows[0]);
@@ -238,7 +247,9 @@ export class PostgresSearchConversationRepository implements SearchConversationR
            pin_latitude = $8,
            pin_longitude = $9,
            pin_name = $10,
-           location_source = $11
+           location_source = $11,
+           location_city = $12,
+           location_state = $13
        WHERE id = $1 AND status = 'active' AND processing_token = $2
        RETURNING id`,
       [
@@ -253,6 +264,8 @@ export class PostgresSearchConversationRepository implements SearchConversationR
         input.pinLongitude ?? null,
         input.pinName ?? null,
         input.locationSource ?? null,
+        input.locationCity ?? null,
+        input.locationState ?? null,
       ],
     );
     return result.rows.length === 1;
@@ -270,10 +283,12 @@ export class PostgresSearchConversationRepository implements SearchConversationR
            processing_token = NULL,
            processing_started_at = NULL,
            completed_at = NULL,
-           pin_latitude = COALESCE($8, pin_latitude),
-           pin_longitude = COALESCE($9, pin_longitude),
-           pin_name = COALESCE($10, pin_name),
-           location_source = COALESCE($11, location_source)
+           pin_latitude = $8,
+           pin_longitude = $9,
+           pin_name = $10,
+           location_source = $11,
+           location_city = $12,
+           location_state = $13
        WHERE id = $1
          AND status = 'active'
          AND processing_token = $2
@@ -291,6 +306,8 @@ export class PostgresSearchConversationRepository implements SearchConversationR
         input.pinLongitude ?? null,
         input.pinName ?? null,
         input.locationSource ?? null,
+        input.locationCity ?? null,
+        input.locationState ?? null,
       ],
     );
     return result.rows.length === 1;

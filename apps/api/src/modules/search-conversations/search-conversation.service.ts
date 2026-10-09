@@ -79,6 +79,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
     }
 
     if (search.response.status === "matched" && hasUsableLocation(search.response.interpretation.location_text)) {
+      const matchLoc = search.response.orchestration.matching.location;
       const conversation = await this.repository.createAwaitingSelection({
         ...(context.customerId ? { customerId: context.customerId } : {}),
         originalRawText: input.raw_text,
@@ -88,6 +89,11 @@ export class DefaultSearchConversationService implements SearchConversationServi
         limitValue: input.limit,
         searchRequestId: search.response.orchestration.matching.search_request_id,
         ttlMinutes: this.config.ttlMinutes,
+        pinLatitude: matchLoc?.latitude ?? null,
+        pinLongitude: matchLoc?.longitude ?? null,
+        locationSource: "text_resolved",
+        locationCity: matchLoc?.city ?? null,
+        locationState: matchLoc?.state ?? null,
       });
       return {
         kind: "response",
@@ -142,13 +148,15 @@ export class DefaultSearchConversationService implements SearchConversationServi
       ? {
           latitude: input.location.latitude,
           longitude: input.location.longitude,
-          source: "whatsapp_native",
+          source: "whatsapp_native" as const,
         }
       : conversation.pinLatitude !== null && conversation.pinLatitude !== undefined && conversation.pinLongitude !== null && conversation.pinLongitude !== undefined
       ? {
           latitude: conversation.pinLatitude,
           longitude: conversation.pinLongitude,
-          source: conversation.locationSource ?? "whatsapp_native",
+          source: conversation.locationSource ?? ("whatsapp_native" as const),
+          city: conversation.locationCity ?? undefined,
+          state: conversation.locationState ?? undefined,
         }
       : undefined;
 
@@ -183,6 +191,8 @@ export class DefaultSearchConversationService implements SearchConversationServi
         locationText,
         lastMessageText: lastMessage,
         ttlMinutes: this.config.ttlMinutes,
+        locationCity: conversation.locationCity ?? null,
+        locationState: conversation.locationState ?? null,
         ...(coordinates ? {
           pinLatitude: coordinates.latitude,
           pinLongitude: coordinates.longitude,
@@ -210,6 +220,8 @@ export class DefaultSearchConversationService implements SearchConversationServi
         locationText,
         lastMessageText: lastMessage,
         ttlMinutes: this.config.ttlMinutes,
+        locationCity: conversation.locationCity ?? null,
+        locationState: conversation.locationState ?? null,
         ...(coordinates ? {
           pinLatitude: coordinates.latitude,
           pinLongitude: coordinates.longitude,
@@ -229,6 +241,8 @@ export class DefaultSearchConversationService implements SearchConversationServi
     }
 
     if (orchestration.response.status === "matched") {
+      const resolution = orchestration.response.location_resolution?.match;
+      const matchingLoc = orchestration.response.matching?.location;
       const moved = await this.repository.moveToAwaitingSelection({
         id: conversationId,
         processingToken,
@@ -237,11 +251,11 @@ export class DefaultSearchConversationService implements SearchConversationServi
         lastMessageText: lastMessage,
         searchRequestId: orchestration.response.matching.search_request_id,
         ttlMinutes: this.config.ttlMinutes,
-        ...(coordinates ? {
-          pinLatitude: coordinates.latitude,
-          pinLongitude: coordinates.longitude,
-          locationSource: coordinates.source,
-        } : {}),
+        pinLatitude: coordinates?.latitude ?? matchingLoc?.latitude ?? resolution?.latitude ?? null,
+        pinLongitude: coordinates?.longitude ?? matchingLoc?.longitude ?? resolution?.longitude ?? null,
+        locationSource: coordinates?.source ?? (conversation.locationSource ?? "text_resolved"),
+        locationCity: coordinates?.city ?? matchingLoc?.city ?? resolution?.city ?? conversation.locationCity ?? null,
+        locationState: coordinates?.state ?? matchingLoc?.state ?? resolution?.state ?? conversation.locationState ?? null,
       });
       if (!moved) return { kind: "conversation_not_active" };
       return {

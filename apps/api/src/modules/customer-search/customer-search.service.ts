@@ -166,20 +166,21 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
       if (outcome.kind === "conversation_processing" || outcome.kind === "service_unavailable") return outcome;
       if (outcome.kind !== "response") return { kind: "customer_conversation_conflict" };
 
-      // Update memory on matched or no_matches search from text resolution
+      // Update memory on matched or no_matches search from text resolution or previous pin
       if (this.customerLastLocations) {
         const res = outcome.response.result;
         const matching = "matching" in res && res.matching ? res.matching : ("orchestration" in res && res.orchestration?.matching ? res.orchestration.matching : null);
         if (matching?.location && Number.isFinite(matching.location.latitude) && Number.isFinite(matching.location.longitude)) {
+          const memorySource = activeConversation.locationSource ?? "text_resolved";
           await this.customerLastLocations.upsert({
             customerId: customer.id,
             latitude: matching.location.latitude,
             longitude: matching.location.longitude,
-            city: matching.location.city ?? null,
-            state: matching.location.state ?? null,
+            city: matching.location.city ?? activeConversation.locationCity ?? null,
+            state: matching.location.state ?? activeConversation.locationState ?? null,
             countryCode: activeConversation.countryCode,
-            label: matching.location.city ? (matching.location.state ? `${matching.location.city} - ${matching.location.state}` : matching.location.city) : "localização enviada",
-            source: "text_resolved",
+            label: matching.location.city ? (matching.location.state ? `${matching.location.city} - ${matching.location.state}` : matching.location.city) : (activeConversation.locationText ?? "localização enviada"),
+            source: memorySource,
           });
         }
       }
@@ -309,6 +310,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
       pinLongitude: location.longitude,
       pinName: location.name ?? null,
       locationSource: "whatsapp_native",
+      locationCity: city,
+      locationState: state,
     });
 
     return {
@@ -354,6 +357,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
       pinLatitude: rememberedLocation.latitude,
       pinLongitude: rememberedLocation.longitude,
       locationSource: "memory_reuse",
+      locationCity: rememberedLocation.city ?? null,
+      locationState: rememberedLocation.state ?? null,
     });
 
     return {
@@ -457,6 +462,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
           pinLatitude: location.latitude,
           pinLongitude: location.longitude,
           locationSource: "whatsapp_native",
+          locationCity: city,
+          locationState: state,
         });
         const response: CustomerSearchMessageResponse = {
           customer_id: customerId,
@@ -541,6 +548,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
               latitude: activeConversation.pinLatitude,
               longitude: activeConversation.pinLongitude,
               source: "memory_reuse",
+              city: activeConversation.locationCity ?? undefined,
+              state: activeConversation.locationState ?? undefined,
             }
           : undefined;
 
@@ -563,6 +572,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
             customerId,
             latitude: coordinates.latitude,
             longitude: coordinates.longitude,
+            city: activeConversation.locationCity ?? null,
+            state: activeConversation.locationState ?? null,
             label: activeConversation.locationText ?? "localização enviada",
             source: "memory_reuse",
             countryCode: activeConversation.countryCode,
@@ -581,6 +592,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
             pinLatitude: coordinates?.latitude,
             pinLongitude: coordinates?.longitude,
             locationSource: "memory_reuse",
+            locationCity: activeConversation.locationCity ?? null,
+            locationState: activeConversation.locationState ?? null,
           });
           const response: CustomerSearchMessageResponse = {
             customer_id: customerId,
@@ -652,6 +665,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
         pinLongitude: null,
         pinName: null,
         locationSource: null,
+        locationCity: null,
+        locationState: null,
       });
 
       const response: CustomerSearchMessageResponse = {
@@ -741,9 +756,11 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
               lastMessageText: rawText,
               searchRequestId: orchestration.response.matching.search_request_id,
               ttlMinutes: this.config.ttlMinutes,
-              pinLatitude: null,
-              pinLongitude: null,
+              pinLatitude: locationRes.match.latitude,
+              pinLongitude: locationRes.match.longitude,
               locationSource: "text_resolved",
+              locationCity: locationRes.match.city ?? null,
+              locationState: locationRes.match.state ?? null,
             });
             const response: CustomerSearchMessageResponse = {
               customer_id: customerId,

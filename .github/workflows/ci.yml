@@ -341,6 +341,7 @@ jobs:
               OR to_regclass('customer_last_locations') IS NULL
               OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_inbound_messages' AND column_name='latitude')
               OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='search_conversations' AND column_name='pin_latitude')
+              OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='search_conversations' AND column_name='location_city')
             THEN RAISE EXCEPTION 'migration 029 incomplete'; END IF;
           END $$;
           SQL
@@ -376,6 +377,7 @@ jobs:
             IF to_regclass('customer_last_locations') IS NOT NULL
               OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_inbound_messages' AND column_name='latitude')
               OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='search_conversations' AND column_name='pin_latitude')
+              OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='search_conversations' AND column_name='location_city')
               OR EXISTS (SELECT 1 FROM pgmigrations WHERE name='029_add_location_v2_foundation')
             THEN RAISE EXCEPTION 'migration 029 remained after compatible rollback'; END IF;
           END $$;

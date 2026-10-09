@@ -67,6 +67,8 @@ test("search conversation repository creates and maps either pending slot with d
     null,
     null,
     null,
+    null,
+    null,
   ]);
 
   const serviceContext = fakeDatabase([[row({ pending_slot: "service", location_text: "Sinop" })]]);
@@ -90,6 +92,8 @@ test("search conversation repository creates and maps either pending slot with d
     "BR",
     4,
     30,
+    null,
+    null,
     null,
     null,
     null,
@@ -136,6 +140,8 @@ test("search conversation repository creates an active selection with an optiona
     5,
     searchRequestId,
     30,
+    null,
+    null,
     null,
     null,
     null,
@@ -258,6 +264,8 @@ test("search conversation repository transitions, completes and releases with th
     null,
     null,
     null,
+    null,
+    null,
   ]);
   assert.match(context.calls[1]!.text, /status = 'completed'/u);
   assert.match(context.calls[1]!.text, /processing_token = \$2/u);
@@ -301,6 +309,8 @@ test("search conversation repository atomically moves claimed location and servi
     "Sinop",
     searchRequestId,
     30,
+    null,
+    null,
     null,
     null,
     null,

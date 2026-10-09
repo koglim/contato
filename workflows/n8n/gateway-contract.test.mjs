@@ -852,15 +852,15 @@ test("gateway extracts native Evolution locationMessage and defensive location e
       latitude: -11.8548,
       longitude: -55.5089,
       name: "Sinop Centro",
-      address: "Av. das Embaúbas, 100",
     },
   });
   assert.deepEqual(res1.inbound.location, {
     latitude: -11.8548,
     longitude: -55.5089,
     name: "Sinop Centro",
-    address: "Av. das Embaúbas, 100",
   });
+  assert.equal(res1.inbound.location.address, undefined);
+  assert.equal("address" in res1.inbound.location, false);
   assert.equal(res1.inbound.raw_text, undefined);
 
   // 2. Defensive location envelope without name/address

@@ -97,14 +97,12 @@ export function extractLocation(message) {
   if (typeof lng !== "number" || !Number.isFinite(lng) || lng < -180 || lng > 180) return { error: "invalid" };
 
   const name = typeof loc.name === "string" && loc.name.trim() ? loc.name.trim().slice(0, 200) : undefined;
-  const address = typeof loc.address === "string" && loc.address.trim() ? loc.address.trim().slice(0, 500) : undefined;
 
   return {
     location: {
       latitude: lat,
       longitude: lng,
       ...(name ? { name } : {}),
-      ...(address ? { address } : {}),
     },
   };
 }

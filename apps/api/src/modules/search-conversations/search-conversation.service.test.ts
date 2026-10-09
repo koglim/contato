@@ -408,6 +408,11 @@ test("start with matched creates an awaiting-selection conversation with custome
     limitValue: 3,
     searchRequestId,
     ttlMinutes: 30,
+    pinLatitude: -11.86,
+    pinLongitude: -55.5,
+    locationSource: "text_resolved",
+    locationCity: "Sinop",
+    locationState: "MT",
   });
   assert.equal(current.repository.created, undefined);
   assert.equal(outcome.kind, "response");
@@ -487,6 +492,11 @@ test("pending location moves matched to selection and completes no_matches", asy
         lastMessageText: "Sinop",
         searchRequestId,
         ttlMinutes: 30,
+        pinLatitude: -11.86,
+        pinLongitude: -55.5,
+        locationSource: "text_resolved",
+        locationCity: "Sinop",
+        locationState: "MT",
       });
       assert.equal(current.repository.completed, undefined);
     } else {
