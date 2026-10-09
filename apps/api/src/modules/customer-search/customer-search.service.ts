@@ -741,8 +741,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
               lastMessageText: rawText,
               searchRequestId: orchestration.response.matching.search_request_id,
               ttlMinutes: this.config.ttlMinutes,
-              pinLatitude: locationRes.match.latitude,
-              pinLongitude: locationRes.match.longitude,
+              pinLatitude: null,
+              pinLongitude: null,
               locationSource: "text_resolved",
             });
             const response: CustomerSearchMessageResponse = {

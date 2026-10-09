@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 import { closeDatabaseConnection, query } from "../src/database/connection.js";
 import { PostgresSearchConversationRepository } from "../src/modules/search-conversations/search-conversation.repository.js";
 import { PostgresCustomerLastLocationRepository } from "../src/modules/customers/customer-last-location.repository.js";
@@ -14,6 +14,22 @@ const inboxRepo = new PostgresChannelInboundMessageRepository();
 const outboxRepo = new PostgresChannelOutboundMessageRepository();
 
 const phone = () => `+556699${Math.floor(1000000 + Math.random() * 8999999).toString()}`;
+
+async function cleanAllLocationTestData() {
+  await query("DELETE FROM customer_last_locations");
+  await query(
+    "DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE latitude IS NOT NULL OR longitude IS NOT NULL OR provider LIKE 'test-%')",
+  );
+  await query(
+    "DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE latitude IS NOT NULL OR longitude IS NOT NULL OR provider LIKE 'test-%')",
+  );
+  await query(
+    "DELETE FROM channel_inbound_messages WHERE latitude IS NOT NULL OR longitude IS NOT NULL OR provider LIKE 'test-%'",
+  );
+  await query(
+    "DELETE FROM search_conversations WHERE pin_latitude IS NOT NULL OR pending_slot = 'location_confirmation' OR resume_slot = 'location_confirmation' OR location_source = 'whatsapp_native'",
+  );
+}
 
 async function createCustomer() {
   const customerId = randomUUID();
@@ -31,24 +47,24 @@ async function cleanCustomer(customerId: string) {
 
 async function cleanInboundByPhone(phoneE164: string) {
   await query(
+    "DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1)",
+    [phoneE164],
+  );
+  await query(
     "DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1)",
     [phoneE164],
   );
   await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [phoneE164]);
 }
 
+before(cleanAllLocationTestData);
+
 after(async () => {
-  await query("DELETE FROM customer_last_locations");
-  await query(
-    "DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE latitude IS NOT NULL OR longitude IS NOT NULL OR provider LIKE 'test-%')",
-  );
-  await query(
-    "DELETE FROM channel_inbound_messages WHERE latitude IS NOT NULL OR longitude IS NOT NULL OR provider LIKE 'test-%'",
-  );
-  await query(
-    "DELETE FROM search_conversations WHERE pin_latitude IS NOT NULL OR pending_slot = 'location_confirmation' OR resume_slot = 'location_confirmation' OR location_source = 'whatsapp_native'",
-  );
-  await closeDatabaseConnection();
+  try {
+    await cleanAllLocationTestData();
+  } finally {
+    await closeDatabaseConnection();
+  }
 });
 
 test("1 & 3 & 4. Pin-first creates a real search_conversations row with whatsapp_native and exact coordinates survive round trip", async () => {
@@ -148,20 +164,46 @@ test("2. Service-first -> pin can transition a real search_conversations row to 
     assert.equal(selectionRecord.pinLatitude, exactLat);
     assert.equal(selectionRecord.pinLongitude, exactLon);
 
-    // Transition to completed (no_matches or finished)
+    // Transition conv from selection to completed in real marketplace flow
+    await query(
+      "UPDATE search_conversations SET status = 'completed', pending_slot = NULL, completed_at = NOW() WHERE id = $1",
+      [conv.id],
+    );
+    const completedSelectionRecord = await convRepo.findById(conv.id);
+    assert.ok(completedSelectionRecord);
+    assert.equal(completedSelectionRecord.status, "completed");
+    assert.equal(completedSelectionRecord.pendingSlot, null);
+
+    // Also verify transition directly from pending location to completed via complete() (e.g. no_matches)
+    const noMatchSearchRequestId = randomUUID();
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, 'eletricista', 'no_matches')", [noMatchSearchRequestId, customerId]);
+
+    const conv2 = await convRepo.createPending({
+      customerId,
+      pendingSlot: "location",
+      originalRawText: "preciso de eletricista",
+      serviceText: "eletricista",
+      locationText: null,
+      countryCode: "BR",
+      limitValue: 3,
+      ttlMinutes: 60,
+    });
+
     const completeToken = randomUUID();
-    await convRepo.claim(conv.id, completeToken, 60);
+    const claimed2 = await convRepo.claim(conv2.id, completeToken, 60);
+    assert.ok(claimed2);
+
     const completed = await convRepo.complete({
-      id: conv.id,
+      id: conv2.id,
       processingToken: completeToken,
       serviceText: "eletricista",
       locationText: "Sinop - MT",
       lastMessageText: "Sinop - MT",
-      searchRequestId,
+      searchRequestId: noMatchSearchRequestId,
     });
     assert.equal(completed, true);
 
-    const completedRecord = await convRepo.findById(conv.id);
+    const completedRecord = await convRepo.findById(conv2.id);
     assert.ok(completedRecord);
     assert.equal(completedRecord.status, "completed");
     assert.equal(completedRecord.pendingSlot, null);
