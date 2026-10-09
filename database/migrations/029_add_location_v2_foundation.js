@@ -7,8 +7,7 @@ exports.up = (pgm) => {
     ALTER TABLE channel_inbound_messages
       ADD COLUMN latitude DOUBLE PRECISION NULL,
       ADD COLUMN longitude DOUBLE PRECISION NULL,
-      ADD COLUMN location_name VARCHAR(200) NULL,
-      ADD COLUMN location_address VARCHAR(500) NULL;
+      ADD COLUMN location_name VARCHAR(200) NULL;
 
     ALTER TABLE channel_inbound_messages
       ADD CONSTRAINT channel_inbound_messages_payload_presence_chk
@@ -21,7 +20,12 @@ exports.up = (pgm) => {
       ADD CONSTRAINT channel_inbound_messages_coords_chk
       CHECK (
         (latitude IS NULL AND longitude IS NULL)
-        OR (latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180)
+        OR (
+          latitude IS NOT NULL
+          AND longitude IS NOT NULL
+          AND latitude BETWEEN -90 AND 90
+          AND longitude BETWEEN -180 AND 180
+        )
       );
 
     -- 2. Update search_conversations pending_slot enum and constraints for location_confirmation
@@ -74,13 +78,17 @@ exports.up = (pgm) => {
       ADD COLUMN pin_latitude DOUBLE PRECISION NULL,
       ADD COLUMN pin_longitude DOUBLE PRECISION NULL,
       ADD COLUMN pin_name VARCHAR(200) NULL,
-      ADD COLUMN pin_address VARCHAR(500) NULL,
       ADD COLUMN location_source VARCHAR(30) NULL;
 
     ALTER TABLE search_conversations
       ADD CONSTRAINT search_conversations_pin_coords_chk CHECK (
         (pin_latitude IS NULL AND pin_longitude IS NULL)
-        OR (pin_latitude BETWEEN -90 AND 90 AND pin_longitude BETWEEN -180 AND 180)
+        OR (
+          pin_latitude IS NOT NULL
+          AND pin_longitude IS NOT NULL
+          AND pin_latitude BETWEEN -90 AND 90
+          AND pin_longitude BETWEEN -180 AND 180
+        )
       );
 
     ALTER TABLE search_conversations
@@ -154,7 +162,6 @@ exports.down = (pgm) => {
       DROP COLUMN IF EXISTS pin_latitude,
       DROP COLUMN IF EXISTS pin_longitude,
       DROP COLUMN IF EXISTS pin_name,
-      DROP COLUMN IF EXISTS pin_address,
       DROP COLUMN IF EXISTS location_source;
 
     ALTER TYPE search_conversation_pending_slot RENAME TO search_conversation_pending_slot_old;
@@ -189,8 +196,7 @@ exports.down = (pgm) => {
     ALTER TABLE channel_inbound_messages
       DROP COLUMN IF EXISTS latitude,
       DROP COLUMN IF EXISTS longitude,
-      DROP COLUMN IF EXISTS location_name,
-      DROP COLUMN IF EXISTS location_address;
+      DROP COLUMN IF EXISTS location_name;
 
     ALTER TABLE channel_inbound_messages
       ALTER COLUMN raw_text SET NOT NULL;

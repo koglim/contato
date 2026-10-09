@@ -8,20 +8,20 @@ export function parseLocationConfirmation(raw: string): LocationConfirmationDeci
   const text = raw.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()
     .trim().replace(/[.!]+$/u, "").replace(/\s+/gu, " ").trim();
 
-  const affirmative = [
-    "sim", "s", "isso", "isso mesmo", "pode ser", "com certeza", "confirmo",
+  const affirmative = new Set([
+    "sim", "s", "isso", "isso mesmo", "mesmo lugar", "pode ser", "com certeza", "confirmo",
     "correto", "exato", "pode", "sim por favor", "e", "eh", "positivo",
-    "isso ai", "isso ai!", "claro", "pode sim", "sim pode", "confirma",
-  ];
-  if (affirmative.includes(text)) {
+    "isso ai", "claro", "pode sim", "sim pode", "confirma",
+  ]);
+  if (affirmative.has(text)) {
     return { kind: "confirm" };
   }
 
-  const negative = [
-    "nao", "n", "outra", "outro lugar", "mudar", "trocar", "nao e",
-    "errado", "outra cidade", "nao quero", "outro", "nem pensar", "troca",
-  ];
-  if (negative.includes(text)) {
+  const negative = new Set([
+    "nao", "n", "outra", "outro lugar", "mudar", "mudar localizacao", "mudar lugar",
+    "trocar", "nao e", "errado", "outra cidade", "nao quero", "outro", "nem pensar", "troca",
+  ]);
+  if (negative.has(text)) {
     return { kind: "decline" };
   }
 

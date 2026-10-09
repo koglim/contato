@@ -3,15 +3,23 @@ import test from "node:test";
 import { parseLocationConfirmation } from "./location-confirmation.parser.js";
 
 test("parseLocationConfirmation handles affirmative keywords", () => {
-  for (const text of ["sim", "Sim", "SIM!", "s", "isso", "isso mesmo", "pode ser", "com certeza", "confirmo", "correto", "pode", "pode sim", "sim pode"]) {
+  const affirmative = ["sim", "s", "isso", "isso mesmo", "mesmo lugar", "pode ser", "Sim", "SIM!", "com certeza", "confirmo", "correto", "pode", "pode sim", "sim pode"];
+  for (const text of affirmative) {
     assert.deepEqual(parseLocationConfirmation(text), { kind: "confirm" }, `Failed for: ${text}`);
   }
 });
 
 test("parseLocationConfirmation handles negative keywords", () => {
-  for (const text of ["não", "nao", "NÃO", "n", "outra", "outro lugar", "mudar", "trocar", "outra cidade", "nao quero"]) {
+  const negative = ["não", "nao", "n", "outra", "outro lugar", "mudar", "mudar localização", "mudar localizacao", "NÃO", "trocar", "outra cidade", "nao quero"];
+  for (const text of negative) {
     assert.deepEqual(parseLocationConfirmation(text), { kind: "decline" }, `Failed for: ${text}`);
   }
+});
+
+test("parseLocationConfirmation specific required assertions", () => {
+  assert.deepEqual(parseLocationConfirmation("mesmo lugar"), { kind: "confirm" });
+  assert.deepEqual(parseLocationConfirmation("mudar localização"), { kind: "decline" });
+  assert.deepEqual(parseLocationConfirmation("mudar localizacao"), { kind: "decline" });
 });
 
 test("parseLocationConfirmation marks questions and arbitrary text as ambiguous", () => {

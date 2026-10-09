@@ -37,7 +37,7 @@ export class DeterministicSearchOrchestrator implements SearchOrchestrationServi
         country_code: (input.country_code ?? "BR").toUpperCase(),
         neighborhood: input.coordinates.neighborhood ?? null,
         confidence: 1.0,
-        layer: input.coordinates.source ?? "native_pin",
+        layer: input.coordinates.source ?? "whatsapp_native",
       };
       locationResolution = {
         status: "resolved",
@@ -45,7 +45,7 @@ export class DeterministicSearchOrchestrator implements SearchOrchestrationServi
         country_code: (input.country_code ?? "BR").toUpperCase(),
         match: candidate,
         candidates: [candidate],
-        provider: input.coordinates.source ?? "native_pin",
+        provider: input.coordinates.source ?? "whatsapp_native",
       };
     } else {
       locationResolution = await this.locationResolutionService.resolve({

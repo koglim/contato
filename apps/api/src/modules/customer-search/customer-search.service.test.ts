@@ -62,7 +62,6 @@ class FakeConversations implements SearchConversationRepository {
       pinLatitude: input.pinLatitude,
       pinLongitude: input.pinLongitude,
       pinName: input.pinName,
-      pinAddress: input.pinAddress,
       locationSource: input.locationSource,
     };
     this.active = conv;
@@ -423,7 +422,7 @@ test("Case A: Active in location sends pin -> reverse geocodes label, runs searc
     assert.equal(outcome.response.conversation.conversation_status, "active");
     assert.equal(outcome.response.conversation.pending_slot, "selection");
   }
-  assert.equal(conversations.movedToSelection?.locationSource, "native_pin");
+  assert.equal(conversations.movedToSelection?.locationSource, "whatsapp_native");
   assert.equal(lastLocations.upserted?.source, "whatsapp_native");
   assert.equal(lastLocations.upserted?.latitude, -11.8642);
   assert.equal(lastLocations.upserted?.longitude, -55.5089);
@@ -463,7 +462,10 @@ test("Case B: No active conversation sends pin -> creates pending conversation i
   assert.equal(conversations.createdPending?.pendingSlot, "service");
   assert.equal(conversations.createdPending?.pinLatitude, -11.8642);
   assert.equal(conversations.createdPending?.pinLongitude, -55.5089);
-  assert.equal(conversations.createdPending?.locationSource, "native_pin");
+  assert.equal(conversations.createdPending?.locationSource, "whatsapp_native");
+  assert.equal(lastLocations.upserted?.source, "whatsapp_native");
+  assert.equal(lastLocations.upserted?.latitude, -11.8642);
+  assert.equal(lastLocations.upserted?.longitude, -55.5089);
 });
 
 test("Case C: Customer with remembered location sends service without location -> creates conversation in location_confirmation slot", async () => {
@@ -818,4 +820,91 @@ test("Case F: Customer active in selection sends pin -> returns not_command with
   }
   assert.equal(selection.calls, 0);
   assert.equal(conversations.movedToSelection, null);
+});
+
+test("Text search with no_matches still updates customer last location memory", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  conversations.active = null;
+  const search = new FakeSearchConversationService();
+  search.startResponse = {
+    conversation_id: null,
+    conversation_status: "completed",
+    result: {
+        status: "no_matches",
+        stage: "matching",
+        reason: null,
+        interpretation: {} as never,
+        orchestration: {
+          status: "no_matches",
+          reason: null,
+          service_resolution: {} as never,
+          location_resolution: {} as never,
+          matching: {
+            search_request_id: "sr-no-match",
+            matches: [],
+            location: {
+              latitude: -11.86,
+              longitude: -55.50,
+              city: "Sinop",
+              state: "MT",
+              country: "BR",
+            },
+          } as never,
+        },
+      },
+    };
+  const lastLocations = new FakeCustomerLastLocations();
+  const locationResolution = new FakeLocationResolutionService();
+  const serviceResolution = new FakeServiceResolutionRepository();
+  const orchestrator = new FakeSearchOrchestrator();
+
+  const router = new DefaultCustomerSearchRouter(
+    customers, conversations, search, selectionService() as never, globalService() as never,
+    lastLocations, locationResolution, serviceResolution, orchestrator,
+  );
+
+  const outcome = await router.route({
+    phone_e164: input.phone_e164,
+    raw_text: "Eletricista em Sinop",
+    country_code: "BR",
+    limit: 3,
+  });
+
+  assert.equal(outcome.kind, "response");
+  assert.equal(lastLocations.upserted?.source, "text_resolved");
+  assert.equal(lastLocations.upserted?.latitude, -11.86);
+  assert.equal(lastLocations.upserted?.longitude, -55.50);
+  assert.equal(lastLocations.upserted?.city, "Sinop");
+});
+
+test("Zero coordinates (latitude = 0) are valid and preserved in memory", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  conversations.active = null;
+  const search = new FakeSearchConversationService();
+  const lastLocations = new FakeCustomerLastLocations();
+  const locationResolution = new FakeLocationResolutionService();
+  const serviceResolution = new FakeServiceResolutionRepository();
+  const orchestrator = new FakeSearchOrchestrator();
+
+  const router = new DefaultCustomerSearchRouter(
+    customers, conversations, search, selectionService() as never, globalService() as never,
+    lastLocations, locationResolution, serviceResolution, orchestrator,
+  );
+
+  // Pin on equator (Macapá area / 0 lat)
+  const outcome = await router.route({
+    phone_e164: input.phone_e164,
+    country_code: "BR",
+    limit: 3,
+    location: { latitude: 0, longitude: -51.05 },
+  });
+
+  assert.equal(outcome.kind, "response");
+  assert.equal(lastLocations.upserted?.source, "whatsapp_native");
+  assert.equal(lastLocations.upserted?.latitude, 0);
+  assert.equal(lastLocations.upserted?.longitude, -51.05);
+  assert.equal(conversations.createdPending?.pinLatitude, 0);
+  assert.equal(conversations.createdPending?.pinLongitude, -51.05);
 });

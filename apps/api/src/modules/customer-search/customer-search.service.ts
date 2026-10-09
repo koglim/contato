@@ -166,17 +166,17 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
       if (outcome.kind === "conversation_processing" || outcome.kind === "service_unavailable") return outcome;
       if (outcome.kind !== "response") return { kind: "customer_conversation_conflict" };
 
-      // Update memory on matched search from text resolution
-      if (outcome.response.conversation_status === "active" && outcome.response.pending_slot === "selection" && this.customerLastLocations) {
+      // Update memory on matched or no_matches search from text resolution
+      if (this.customerLastLocations) {
         const res = outcome.response.result;
-        const matching = "matching" in res ? res.matching : res.orchestration.matching;
-        if (matching.location.latitude && matching.location.longitude) {
+        const matching = "matching" in res && res.matching ? res.matching : ("orchestration" in res && res.orchestration?.matching ? res.orchestration.matching : null);
+        if (matching?.location && Number.isFinite(matching.location.latitude) && Number.isFinite(matching.location.longitude)) {
           await this.customerLastLocations.upsert({
             customerId: customer.id,
             latitude: matching.location.latitude,
             longitude: matching.location.longitude,
-            city: matching.location.city,
-            state: matching.location.state,
+            city: matching.location.city ?? null,
+            state: matching.location.state ?? null,
             countryCode: activeConversation.countryCode,
             label: matching.location.city ? (matching.location.state ? `${matching.location.city} - ${matching.location.state}` : matching.location.city) : "localização enviada",
             source: "text_resolved",
@@ -224,17 +224,20 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
       }, { customerId: customer.id });
       if (outcome.kind === "service_unavailable") return outcome;
 
-      // Update memory on matched search from text resolution (Case D)
-      if (outcome.response.conversation_status === "active" && outcome.response.pending_slot === "selection" && this.customerLastLocations) {
-        const res = outcome.response.result;
-        const matching = res.orchestration.matching;
-        if (matching.location.latitude && matching.location.longitude) {
+      // Update memory on matched or no_matches search from text resolution (Case D)
+      if (this.customerLastLocations) {
+        const res = outcome.response.result as {
+          orchestration?: { matching?: { location?: { latitude: number; longitude: number; city?: string | null; state?: string | null } | null } | null } | null;
+          matching?: { location?: { latitude: number; longitude: number; city?: string | null; state?: string | null } | null } | null;
+        };
+        const matching = res.orchestration?.matching ?? res.matching;
+        if (matching?.location && Number.isFinite(matching.location.latitude) && Number.isFinite(matching.location.longitude)) {
           await this.customerLastLocations.upsert({
             customerId: customer.id,
             latitude: matching.location.latitude,
             longitude: matching.location.longitude,
-            city: matching.location.city,
-            state: matching.location.state,
+            city: matching.location.city ?? null,
+            state: matching.location.state ?? null,
             countryCode: input.country_code,
             label: matching.location.city ? (matching.location.state ? `${matching.location.city} - ${matching.location.state}` : matching.location.city) : "localização enviada",
             source: "text_resolved",
@@ -262,6 +265,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
     input: CustomerSearchRouteInput,
   ): Promise<CustomerSearchRouteOutcome> {
     let label = "localização enviada";
+    let city: string | null = null;
+    let state: string | null = null;
     if (this.locationResolutionService) {
       try {
         const rev = await this.locationResolutionService.reverseGeocode({
@@ -269,11 +274,26 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
           longitude: location.longitude,
         });
         if (rev?.city) {
+          city = rev.city;
+          state = rev.state;
           label = rev.state ? `${rev.city} - ${rev.state}` : rev.city;
         }
       } catch {
         // Fallback to default label
       }
+    }
+
+    if (this.customerLastLocations) {
+      await this.customerLastLocations.upsert({
+        customerId,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        city,
+        state,
+        countryCode: input.country_code,
+        label,
+        source: "whatsapp_native",
+      });
     }
 
     const created = await this.conversations.createPending({
@@ -288,8 +308,7 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
       pinLatitude: location.latitude,
       pinLongitude: location.longitude,
       pinName: location.name ?? null,
-      pinAddress: location.address ?? null,
-      locationSource: "native_pin",
+      locationSource: "whatsapp_native",
     });
 
     return {
@@ -417,7 +436,7 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
           longitude: location.longitude,
           city: city ?? undefined,
           state: state ?? undefined,
-          source: "native_pin",
+          source: "whatsapp_native",
         },
       }, { customerId });
 
@@ -437,7 +456,7 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
           ttlMinutes: this.config.ttlMinutes,
           pinLatitude: location.latitude,
           pinLongitude: location.longitude,
-          locationSource: "native_pin",
+          locationSource: "whatsapp_native",
         });
         const response: CustomerSearchMessageResponse = {
           customer_id: customerId,
@@ -632,7 +651,6 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
         pinLatitude: null,
         pinLongitude: null,
         pinName: null,
-        pinAddress: null,
         locationSource: null,
       });
 

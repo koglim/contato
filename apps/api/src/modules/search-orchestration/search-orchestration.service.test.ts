@@ -124,7 +124,7 @@ test("search orchestration uses direct coordinates when provided without queryin
       longitude: -55.51,
       city: "Sinop",
       state: "MT",
-      source: "native_pin",
+      source: "whatsapp_native",
     },
   });
 
@@ -144,7 +144,7 @@ test("search orchestration uses direct coordinates when provided without queryin
   if (result.kind === "response") {
     assert.equal(result.response.location_resolution?.match?.latitude, -11.85);
     assert.equal(result.response.location_resolution?.match?.longitude, -55.51);
-    assert.equal(result.response.location_resolution?.match?.layer, "native_pin");
+    assert.equal(result.response.location_resolution?.match?.layer, "whatsapp_native");
   }
 });
 

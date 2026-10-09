@@ -31,7 +31,6 @@ export type ChannelInboundMessageRecord = {
   latitude?: number | null;
   longitude?: number | null;
   locationName?: string | null;
-  locationAddress?: string | null;
 };
 
 export type MarkProcessedInboundMessage = {

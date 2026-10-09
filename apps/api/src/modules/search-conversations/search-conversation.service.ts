@@ -142,13 +142,13 @@ export class DefaultSearchConversationService implements SearchConversationServi
       ? {
           latitude: input.location.latitude,
           longitude: input.location.longitude,
-          source: "native_pin",
+          source: "whatsapp_native",
         }
       : conversation.pinLatitude !== null && conversation.pinLatitude !== undefined && conversation.pinLongitude !== null && conversation.pinLongitude !== undefined
       ? {
           latitude: conversation.pinLatitude,
           longitude: conversation.pinLongitude,
-          source: conversation.locationSource ?? "native_pin",
+          source: conversation.locationSource ?? "whatsapp_native",
         }
       : undefined;
 

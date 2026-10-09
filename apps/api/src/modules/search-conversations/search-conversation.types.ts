@@ -28,7 +28,6 @@ export type SearchConversationRecord = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  pinAddress?: string | null;
   locationSource?: string | null;
 };
 
@@ -44,7 +43,6 @@ export type CreatePendingConversation = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  pinAddress?: string | null;
   locationSource?: string | null;
 };
 
@@ -60,7 +58,6 @@ export type CreateAwaitingSelectionConversation = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  pinAddress?: string | null;
   locationSource?: string | null;
 };
 
@@ -75,7 +72,6 @@ export type UpdatePendingConversation = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  pinAddress?: string | null;
   locationSource?: string | null;
 };
 
@@ -90,7 +86,6 @@ export type MoveToAwaitingSelectionConversation = {
   pinLatitude?: number | null;
   pinLongitude?: number | null;
   pinName?: string | null;
-  pinAddress?: string | null;
   locationSource?: string | null;
 };
 

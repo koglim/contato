@@ -179,7 +179,6 @@ export class DefaultChannelInboxService implements ChannelInboxService {
             latitude: Number(claimed.latitude),
             longitude: Number(claimed.longitude),
             ...(claimed.locationName ? { name: claimed.locationName } : {}),
-            ...(claimed.locationAddress ? { address: claimed.locationAddress } : {}),
           },
         } : {}),
       });

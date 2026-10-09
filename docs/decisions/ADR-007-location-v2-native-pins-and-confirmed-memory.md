@@ -1,14 +1,14 @@
 # ADR-007: Localização v2 — Pinos Nativos de WhatsApp, Coordenadas Exatas e Memória Confirmada de Localização
 
-* **Status:** IMPLEMENTED
+* **Status:** ACCEPTED / IMPLEMENTED IN PR #45 (Awaiting independent review and merge)
 * **Data:** 2026-10-09
 * **Decisores:** Produto e Arquitetura ContatoCerto
 
 ---
 
 > [!NOTE]
-> **Fundação de Entrada de Localização v2:**
-> Este documento formaliza a arquitetura e as regras de domínio para a ingestão nativa de pinos de localização do WhatsApp, preservação de coordenadas geográficas exatas no matching espacial, geocodificação reversa para enriquecimento contextual e a memória durável de última localização com confirmação explícita obrigatória antes do reuso.
+> **Fundação de Entrada de Localização v2 (Implementação no PR #45):**
+> Este documento formaliza a arquitetura e as regras de domínio para a ingestão nativa de pinos de localização do WhatsApp, preservação de coordenadas geográficas exatas no matching espacial, geocodificação reversa para enriquecimento contextual e a memória durável de última localização com confirmação explícita obrigatória antes do reuso. Implementado no **PR #45** (`feat/location-v2-foundation`, Migration 029), aguardando aprovação de revisão independente e merge.
 
 ---
 
@@ -32,7 +32,8 @@ Esse modelo apresentava limitações fundamentais de produto e precisão:
    * Mensagens com coordenadas inválidas ou fora dos limites geográficos são descartadas de forma segura.
 
 2. **Dutos Estruturados e Preservação de Coordenadas:**
-   * O payload transita pelo Gateway até o Inbox durável (`channel_inbound_messages`) com campos colunares próprios: `latitude`, `longitude`, `location_name` e `location_address`.
+   * O payload transita pelo Gateway até o Inbox durável (`channel_inbound_messages`) com campos colunares próprios: `latitude`, `longitude` e `location_name` (opcional).
+   * **Privacidade Estrita:** Endereços completos de rua (`location_address` / `pin_address`) e payloads brutos de provedor **não são persistidos** no banco de dados. A localização durável limita-se a latitude, longitude, nome seguro opcional e metadados canônicos de cidade/UF/país/rótulo derivados pelo domínio.
    * Mensagens de pino puro (sem texto acompanhante) são admitidas com `raw_text = null`, flexibilizando os schemas compartilhados (`@contatocerto/shared`) com validação mútua de presença (`raw_text !== undefined || location !== undefined`).
 
 3. **Autoridade Estrita das Coordenadas Exatas no Matching:**
@@ -44,6 +45,7 @@ Esse modelo apresentava limitações fundamentais de produto e precisão:
 4. **Memória Durável de Última Localização (`customer_last_locations`):**
    * Persiste exclusivamente o último ponto de atendimento do cliente em tabela dedicada com constraint única por cliente (`customer_id`).
    * Apenas dados consolidados são salvos: latitude, longitude, cidade, estado, país, rótulo formatado e origem (`whatsapp_native`, `text_resolved`, `memory_reuse`).
+   * Toda localização válida e utilizável é elegível para memória independente de encontrar profissionais (`no_matches` ou `matched`), tanto em buscas por pino nativo quanto por texto resolvido.
    * Payloads brutos de provedores e endereços sensíveis de logradouro residencial **não são armazenados**, garantindo a conformidade com privacidade e LGPD.
 
 5. **Confirmação Explícita Obrigatória (Zero Reuso Silencioso):**
@@ -52,8 +54,8 @@ Esse modelo apresentava limitações fundamentais de produto e precisão:
    * A mensagem de confirmação pergunta de forma clara:
      > *"É para {label} novamente? Responda sim ou não. Se preferir, envie outra cidade ou sua localização pelo WhatsApp."*
    * Comportamento das respostas:
-     * **Afirmativa ("sim", "isso", "pode ser"):** busca executada com as coordenadas salvas, atualizando a memória com origem `memory_reuse`, avançando para seleção de profissionais.
-     * **Negativa ("não", "outra", "mudar"):** coordenadas limpas, conversa move-se para `pending_slot: 'location'`, solicitando a nova cidade ou pino.
+     * **Afirmativa ("sim", "s", "isso", "isso mesmo", "mesmo lugar", "pode ser"):** busca executada com as coordenadas salvas, atualizando a memória com origem `memory_reuse`, avançando para seleção de profissionais.
+     * **Negativa ("não", "nao", "n", "outra", "outro lugar", "mudar", "mudar localização", "mudar localizacao"):** coordenadas limpas, conversa move-se para `pending_slot: 'location'`, solicitando a nova cidade ou pino.
      * **Substituição direta (nova cidade ou novo pino):** resolve imediatamente a nova localização e executa a busca, atualizando a memória.
      * **Amígua / Não compreendida:** reapresenta o prompt de confirmação de forma segura sem mutar dados ou quebrar o fluxo.
 
