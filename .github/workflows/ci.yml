@@ -458,7 +458,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_027_v2_protected'
           v2_protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_027_v2_protected'
           DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
-          # Roll back migration 028 first so the protected test targets 027
+          # Roll back migrations 029 and 028 first so the protected test targets 027
+          DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           psql -v ON_ERROR_STOP=1 "$v2_protected_url" <<'SQL'
           INSERT INTO customers (id, phone_e164) VALUES ('00000000-0000-0000-0027-000000000010', '+5566900000030');
