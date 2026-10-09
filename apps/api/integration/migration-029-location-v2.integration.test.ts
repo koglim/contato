@@ -40,6 +40,9 @@ async function cleanAllLocationTestData() {
   await query(
     "DELETE FROM search_conversations WHERE pin_latitude IS NOT NULL OR pending_slot = 'location_confirmation' OR resume_slot = 'location_confirmation' OR location_source = 'whatsapp_native'",
   );
+  await query("DELETE FROM professional_services WHERE service_id IN (SELECT id FROM services WHERE slug = 'encanador')");
+  await query("DELETE FROM search_requests WHERE service_id IN (SELECT id FROM services WHERE slug = 'encanador')");
+  await query("DELETE FROM services WHERE slug = 'encanador'");
 }
 
 async function createCustomer() {
@@ -549,9 +552,11 @@ test("11. No full street address columns exist anywhere in schema", async () => 
 });
 
 let verticalGeocoderCalls = 0;
+let verticalResolveCalls = 0;
 const verticalLocationResolutionService: LocationResolutionService = {
   async resolve(input) {
     verticalGeocoderCalls += 1;
+    verticalResolveCalls += 1;
     if (input.query?.toLowerCase().includes("sorriso")) {
       return {
         status: "resolved",
@@ -593,6 +598,13 @@ const verticalLocationResolutionService: LocationResolutionService = {
   },
   async reverseGeocode(coords) {
     verticalGeocoderCalls += 1;
+    if (Math.abs(coords.latitude - (-15.601411)) < 0.01) {
+      return {
+        city: "Cuiabá",
+        state: "MT",
+        country: "BR",
+      };
+    }
     if (Math.abs(coords.latitude - (-12.543210)) < 0.01) {
       return {
         city: "Sorriso",
@@ -607,6 +619,35 @@ const verticalLocationResolutionService: LocationResolutionService = {
     };
   },
 };
+
+async function setupNoMatchService() {
+  const cat = await query<{ id: string }>("SELECT id FROM service_categories LIMIT 1");
+  let catId = cat.rows[0]?.id;
+  if (!catId) {
+    catId = randomUUID();
+    await query("INSERT INTO service_categories (id, name, slug) VALUES ($1, 'Serviços Gerais', 'servicos-gerais')", [catId]);
+  }
+  const existingService = await query<{ id: string }>("SELECT id FROM services WHERE slug = 'encanador'");
+  let serviceId: string;
+  if (existingService.rows[0]) {
+    serviceId = existingService.rows[0].id;
+    await query("UPDATE services SET is_active = TRUE WHERE id = $1", [serviceId]);
+  } else {
+    serviceId = randomUUID();
+    await query(
+      "INSERT INTO services (id, category_id, name, slug, is_active) VALUES ($1, $2, 'Encanador', 'encanador', TRUE)",
+      [serviceId, catId],
+    );
+  }
+  return {
+    serviceId,
+    cleanup: async () => {
+      await query("DELETE FROM professional_services WHERE service_id = $1", [serviceId]);
+      await query("DELETE FROM search_requests WHERE service_id = $1", [serviceId]);
+      await query("DELETE FROM services WHERE id = $1", [serviceId]);
+    },
+  };
+}
 
 async function setupCatalogAndProfessional() {
   const cat = await query<{ id: string }>("SELECT id FROM service_categories LIMIT 1");
@@ -852,7 +893,7 @@ test("13. Vertical Test B: Customer with remembered location -> service text -> 
   }
 });
 
-test("14. Vertical Test C: Customer at location_confirmation with coords A replies 'Sorriso' -> coords B replace A (TEXT_OVERRIDE_STALE_COORDINATES = 0)", async () => {
+test("14. TEST 1 — TEXT OVERRIDE / MATCHED / SINGLE RESOLUTION", async () => {
   const { customerId, phoneE164 } = await createCustomer();
   const catalog = await setupCatalogAndProfessional();
   const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
@@ -892,6 +933,9 @@ test("14. Vertical Test C: Customer at location_confirmation with coords A repli
     });
     assert.equal(serviceRes.statusCode, 200);
 
+    // Reset resolution counter before override
+    verticalResolveCalls = 0;
+
     // Step 2: Customer replies with "Sorriso" (text override)
     const overrideRes = await app.inject({
       method: "POST",
@@ -908,22 +952,34 @@ test("14. Vertical Test C: Customer at location_confirmation with coords A repli
     });
     assert.equal(overrideRes.statusCode, 200);
 
-    // Direct DB assertions: verify NO field still contains coords A!
+    // Assert: location resolver calls for override = 1
+    assert.equal(verticalResolveCalls, 1, "TEXT_OVERRIDE_LOCATION_RESOLUTION_CALLS must be 1");
+
+    // Direct DB assertions: verify coords B in all three stores
     const convRow = (await query<{ location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string; pending_slot: string }>(
       "SELECT location_source, pin_latitude, pin_longitude, location_city, location_state, pending_slot FROM search_conversations WHERE customer_id = $1",
       [customerId],
     )).rows[0];
     assert.ok(convRow);
     assert.equal(convRow.pending_slot, "selection");
-
-    const staleCoordsFound = (Number(convRow.pin_latitude) === coordsALat || Number(convRow.pin_longitude) === coordsALon) ? 1 : 0;
-    assert.equal(staleCoordsFound, 0, "TEXT_OVERRIDE_STALE_COORDINATES must be 0");
-
     assert.equal(convRow.location_source, "text_resolved");
     assert.equal(convRow.location_city, "Sorriso");
     assert.equal(convRow.location_state, "MT");
     assert.equal(Number(convRow.pin_latitude), coordsBLat);
     assert.equal(Number(convRow.pin_longitude), coordsBLon);
+
+    const staleCoordsFound = (Number(convRow.pin_latitude) === coordsALat || Number(convRow.pin_longitude) === coordsALon) ? 1 : 0;
+    assert.equal(staleCoordsFound, 0, "TEXT_OVERRIDE_STALE_COORDINATES must be 0");
+
+    const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
+      "SELECT latitude, longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [customerId],
+    )).rows[0];
+    assert.ok(searchReq);
+    assert.equal(Number(searchReq.latitude), coordsBLat);
+    assert.equal(Number(searchReq.longitude), coordsBLon);
+    assert.equal(searchReq.city, "Sorriso");
+    assert.equal(searchReq.state, "MT");
 
     const lastLoc = await lastLocRepo.findByCustomerId(customerId);
     assert.ok(lastLoc);
@@ -935,6 +991,384 @@ test("14. Vertical Test C: Customer at location_confirmation with coords A repli
   } finally {
     await cleanCustomer(customerId);
     await cleanInboundByPhone(phoneE164);
+    await catalog.cleanup();
+  }
+});
+
+test("15. TEST 2 — TEXT OVERRIDE / NO_MATCHES: completed conversation has coords B, source text_resolved, city Sorriso, zero old coords", async () => {
+  const { customerId, phoneE164 } = await createCustomer();
+  const catalog = await setupCatalogAndProfessional();
+  const noMatchService = await setupNoMatchService();
+  const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
+  const headers = { "x-internal-key": "test-internal-key" };
+
+  try {
+    const coordsALat = -11.854812;
+    const coordsALon = -55.508934;
+    const coordsBLat = -12.543210;
+    const coordsBLon = -55.712340;
+
+    // Seed customer with remembered Sinop coords A
+    await lastLocRepo.upsert({
+      customerId,
+      latitude: coordsALat,
+      longitude: coordsALon,
+      city: "Sinop",
+      state: "MT",
+      label: "Sinop - MT",
+      source: "whatsapp_native",
+      countryCode: "BR",
+    });
+
+    // Step 1: Customer sends "encanador" -> prompts for location_confirmation
+    const serviceRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "encanador",
+        country_code: "BR",
+        limit: 3,
+      },
+    });
+    assert.equal(serviceRes.statusCode, 200);
+
+    // Step 2: Customer replies with "Sorriso" (text override)
+    const overrideRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "Sorriso",
+        country_code: "BR",
+        limit: 3,
+      },
+    });
+    assert.equal(overrideRes.statusCode, 200);
+
+    // Read the COMPLETED search_conversations row
+    const convRow = (await query<{ status: string; pending_slot: string | null; location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string; location_text: string }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude, location_city, location_state, location_text FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(convRow);
+    assert.equal(convRow.status, "completed");
+    assert.equal(convRow.pending_slot, null);
+    assert.equal(convRow.location_source, "text_resolved");
+    assert.equal(convRow.location_city, "Sorriso");
+    assert.equal(convRow.location_state, "MT");
+    assert.equal(Number(convRow.pin_latitude), coordsBLat);
+    assert.equal(Number(convRow.pin_longitude), coordsBLon);
+
+    const oldCoordsFound = (Number(convRow.pin_latitude) === coordsALat || Number(convRow.pin_longitude) === coordsALon) ? 1 : 0;
+    assert.equal(oldCoordsFound, 0, "OLD coords A must be absent from completed conversation");
+
+    const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
+      "SELECT latitude, longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [customerId],
+    )).rows[0];
+    assert.ok(searchReq);
+    assert.equal(Number(searchReq.latitude), coordsBLat);
+    assert.equal(Number(searchReq.longitude), coordsBLon);
+    assert.equal(searchReq.city, "Sorriso");
+    assert.equal(searchReq.state, "MT");
+
+    const lastLoc = await lastLocRepo.findByCustomerId(customerId);
+    assert.ok(lastLoc);
+    assert.equal(lastLoc.city, "Sorriso");
+    assert.equal(lastLoc.state, "MT");
+    assert.equal(lastLoc.source, "text_resolved");
+    assert.equal(lastLoc.latitude, coordsBLat);
+    assert.equal(lastLoc.longitude, coordsBLon);
+  } finally {
+    await cleanCustomer(customerId);
+    await cleanInboundByPhone(phoneE164);
+    await noMatchService.cleanup();
+    await catalog.cleanup();
+  }
+});
+
+test("16. TEST 3 — NEW NATIVE PIN / NO_MATCHES: completed conversation has exact coords C, source whatsapp_native, zero A remains", async () => {
+  const { customerId, phoneE164 } = await createCustomer();
+  const catalog = await setupCatalogAndProfessional();
+  const noMatchService = await setupNoMatchService();
+  const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
+  const headers = { "x-internal-key": "test-internal-key" };
+
+  try {
+    const coordsALat = -11.854812;
+    const coordsALon = -55.508934;
+    const coordsCLat = -15.601411;
+    const coordsCLon = -56.097892;
+
+    // Seed customer with remembered Sinop coords A
+    await lastLocRepo.upsert({
+      customerId,
+      latitude: coordsALat,
+      longitude: coordsALon,
+      city: "Sinop",
+      state: "MT",
+      label: "Sinop - MT",
+      source: "whatsapp_native",
+      countryCode: "BR",
+    });
+
+    // Step 1: Customer sends "encanador" -> prompts for location_confirmation
+    const serviceRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "encanador",
+        country_code: "BR",
+        limit: 3,
+      },
+    });
+    assert.equal(serviceRes.statusCode, 200);
+
+    // Step 2: Customer sends new native pin C
+    const pinRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: coordsCLat,
+          longitude: coordsCLon,
+          name: "Cuiabá Centro",
+        },
+      },
+    });
+    assert.equal(pinRes.statusCode, 200);
+
+    // Assert completed conversation
+    const convRow = (await query<{ status: string; pending_slot: string | null; location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude, location_city, location_state FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(convRow);
+    assert.equal(convRow.status, "completed");
+    assert.equal(convRow.pending_slot, null);
+    assert.equal(convRow.location_source, "whatsapp_native");
+    assert.equal(Number(convRow.pin_latitude), coordsCLat);
+    assert.equal(Number(convRow.pin_longitude), coordsCLon);
+    assert.equal(convRow.location_city, "Cuiabá");
+    assert.equal(convRow.location_state, "MT");
+
+    const oldAFound = (Number(convRow.pin_latitude) === coordsALat || Number(convRow.pin_longitude) === coordsALon) ? 1 : 0;
+    assert.equal(oldAFound, 0, "Zero old A remains");
+
+    const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
+      "SELECT latitude, longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [customerId],
+    )).rows[0];
+    assert.ok(searchReq);
+    assert.equal(Number(searchReq.latitude), coordsCLat);
+    assert.equal(Number(searchReq.longitude), coordsCLon);
+
+    const lastLoc = await lastLocRepo.findByCustomerId(customerId);
+    assert.ok(lastLoc);
+    assert.equal(lastLoc.source, "whatsapp_native");
+    assert.equal(lastLoc.latitude, coordsCLat);
+    assert.equal(lastLoc.longitude, coordsCLon);
+  } finally {
+    await cleanCustomer(customerId);
+    await cleanInboundByPhone(phoneE164);
+    await noMatchService.cleanup();
+    await catalog.cleanup();
+  }
+});
+
+test("17. TEST 4 — MEMORY CONFIRM YES / NO_MATCHES: completed conversation has coords A, source memory_reuse, city Sinop, 0 geocoder calls", async () => {
+  const { customerId, phoneE164 } = await createCustomer();
+  const catalog = await setupCatalogAndProfessional();
+  const noMatchService = await setupNoMatchService();
+  const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
+  const headers = { "x-internal-key": "test-internal-key" };
+
+  try {
+    const coordsALat = -11.854812;
+    const coordsALon = -55.508934;
+
+    // Seed customer with remembered Sinop coords A
+    await lastLocRepo.upsert({
+      customerId,
+      latitude: coordsALat,
+      longitude: coordsALon,
+      city: "Sinop",
+      state: "MT",
+      label: "Sinop - MT",
+      source: "whatsapp_native",
+      countryCode: "BR",
+    });
+
+    // Step 1: Customer sends "encanador" -> prompts for location_confirmation
+    const serviceRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "encanador",
+        country_code: "BR",
+        limit: 3,
+      },
+    });
+    assert.equal(serviceRes.statusCode, 200);
+
+    // Reset geocoder calls counter
+    verticalGeocoderCalls = 0;
+
+    // Step 2: Customer confirms with "sim"
+    const confirmRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "sim",
+        country_code: "BR",
+        limit: 3,
+      },
+    });
+    assert.equal(confirmRes.statusCode, 200);
+
+    // Assert 0 geocoder calls during confirmation
+    assert.equal(verticalGeocoderCalls, 0, "Zero geocoder calls made during memory confirmation");
+
+    // Assert completed conversation
+    const convRow = (await query<{ status: string; pending_slot: string | null; location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude, location_city, location_state FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(convRow);
+    assert.equal(convRow.status, "completed");
+    assert.equal(convRow.pending_slot, null);
+    assert.equal(convRow.location_source, "memory_reuse");
+    assert.equal(Number(convRow.pin_latitude), coordsALat);
+    assert.equal(Number(convRow.pin_longitude), coordsALon);
+    assert.equal(convRow.location_city, "Sinop");
+    assert.equal(convRow.location_state, "MT");
+
+    const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
+      "SELECT latitude, longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [customerId],
+    )).rows[0];
+    assert.ok(searchReq);
+    assert.equal(Number(searchReq.latitude), coordsALat);
+    assert.equal(Number(searchReq.longitude), coordsALon);
+    assert.equal(searchReq.city, "Sinop");
+    assert.equal(searchReq.state, "MT");
+
+    const lastLoc = await lastLocRepo.findByCustomerId(customerId);
+    assert.ok(lastLoc);
+    assert.equal(lastLoc.source, "memory_reuse");
+    assert.equal(lastLoc.city, "Sinop");
+    assert.equal(lastLoc.state, "MT");
+    assert.equal(lastLoc.latitude, coordsALat);
+    assert.equal(lastLoc.longitude, coordsALon);
+  } finally {
+    await cleanCustomer(customerId);
+    await cleanInboundByPhone(phoneE164);
+    await noMatchService.cleanup();
+    await catalog.cleanup();
+  }
+});
+
+test("18. TEST 5 — PIN-FIRST -> SERVICE -> NO_MATCHES: completed conversation has coords P, source whatsapp_native, memory coords P, search_request coords P", async () => {
+  const { customerId, phoneE164 } = await createCustomer();
+  const catalog = await setupCatalogAndProfessional();
+  const noMatchService = await setupNoMatchService();
+  const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
+  const headers = { "x-internal-key": "test-internal-key" };
+
+  try {
+    const exactLat = -11.854812;
+    const exactLon = -55.508934;
+
+    // Step 1: Customer sends native WhatsApp location pin
+    const pinRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLat,
+          longitude: exactLon,
+          name: "Sinop Centro",
+        },
+      },
+    });
+    assert.equal(pinRes.statusCode, 200);
+
+    // Step 2: Customer sends service text "encanador" (no matching professionals)
+    const serviceRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "encanador",
+        country_code: "BR",
+        limit: 3,
+      },
+    });
+    assert.equal(serviceRes.statusCode, 200);
+
+    // Assert completed conversation
+    const convRow = (await query<{ status: string; pending_slot: string | null; location_source: string; pin_latitude: number; pin_longitude: number }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(convRow);
+    assert.equal(convRow.status, "completed");
+    assert.equal(convRow.pending_slot, null);
+    assert.equal(convRow.location_source, "whatsapp_native");
+    assert.equal(Number(convRow.pin_latitude), exactLat);
+    assert.equal(Number(convRow.pin_longitude), exactLon);
+
+    const searchReq = (await query<{ latitude: number; longitude: number }>(
+      "SELECT latitude, longitude FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [customerId],
+    )).rows[0];
+    assert.ok(searchReq);
+    assert.equal(Number(searchReq.latitude), exactLat);
+    assert.equal(Number(searchReq.longitude), exactLon);
+
+    const lastLoc = await lastLocRepo.findByCustomerId(customerId);
+    assert.ok(lastLoc);
+    assert.equal(lastLoc.source, "whatsapp_native");
+    assert.equal(lastLoc.latitude, exactLat);
+    assert.equal(lastLoc.longitude, exactLon);
+  } finally {
+    await cleanCustomer(customerId);
+    await cleanInboundByPhone(phoneE164);
+    await noMatchService.cleanup();
     await catalog.cleanup();
   }
 });

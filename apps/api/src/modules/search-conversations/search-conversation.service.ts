@@ -5,6 +5,7 @@ import type { MessageSearchService } from "../message-search/message-search.type
 import type { SearchOrchestrationService } from "../search-orchestration/search-orchestration.types.js";
 import type {
   ContinueSearchConversationOutcome,
+  SearchConversationLocationSource,
   SearchConversationRecord,
   SearchConversationRepository,
   SearchConversationService,
@@ -269,6 +270,17 @@ export class DefaultSearchConversationService implements SearchConversationServi
       };
     }
 
+    const resolution = orchestration.response.location_resolution?.match;
+    const matchingLoc = orchestration.response.matching?.location;
+    const finalLat = coordinates?.latitude ?? matchingLoc?.latitude ?? resolution?.latitude ?? null;
+    const finalLon = coordinates?.longitude ?? matchingLoc?.longitude ?? resolution?.longitude ?? null;
+    const finalSource: SearchConversationLocationSource | null = finalLat !== null
+      ? (coordinates?.source ?? (conversation.locationSource ?? "text_resolved"))
+      : null;
+    const finalCity = coordinates?.city ?? matchingLoc?.city ?? resolution?.city ?? (finalLat !== null ? (conversation.locationCity ?? null) : null);
+    const finalState = coordinates?.state ?? matchingLoc?.state ?? resolution?.state ?? (finalLat !== null ? (conversation.locationState ?? null) : null);
+    const finalName = input.location?.name ?? (finalLat !== null ? (conversation.pinName ?? null) : null);
+
     const completed = await this.repository.complete({
       id: conversationId,
       processingToken,
@@ -276,6 +288,14 @@ export class DefaultSearchConversationService implements SearchConversationServi
       locationText,
       lastMessageText: lastMessage,
       searchRequestId: orchestration.response.matching.search_request_id,
+      locationSnapshot: {
+        latitude: finalLat,
+        longitude: finalLon,
+        source: finalSource,
+        city: finalCity,
+        state: finalState,
+        name: finalName,
+      },
     });
     if (!completed) return { kind: "conversation_not_active" };
 

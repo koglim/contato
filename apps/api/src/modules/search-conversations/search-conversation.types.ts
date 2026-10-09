@@ -100,6 +100,15 @@ export type MoveToAwaitingSelectionConversation = {
   locationState?: string | null;
 };
 
+export type CompleteSearchConversationLocationSnapshot = {
+  latitude: number | null;
+  longitude: number | null;
+  name?: string | null;
+  source: SearchConversationLocationSource | null;
+  city?: string | null;
+  state?: string | null;
+};
+
 export type CompleteSearchConversation = {
   id: string;
   processingToken: string;
@@ -107,6 +116,7 @@ export type CompleteSearchConversation = {
   locationText: string;
   lastMessageText: string;
   searchRequestId: string;
+  locationSnapshot?: CompleteSearchConversationLocationSnapshot;
 };
 
 export type HistoricallyShownCandidate = {

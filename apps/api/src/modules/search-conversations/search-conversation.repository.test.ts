@@ -280,6 +280,49 @@ test("search conversation repository transitions, completes and releases with th
   assert.match(context.calls[2]!.text, /processing_token = NULL/u);
 });
 
+test("search conversation repository complete with locationSnapshot updates structured location columns", async () => {
+  const token = randomUUID();
+  const searchRequestId = randomUUID();
+  const context = fakeDatabase([[{ id: conversationId }]]);
+
+  assert.equal(await context.repository.complete({
+    id: conversationId,
+    processingToken: token,
+    serviceText: "eletricista",
+    locationText: "Sorriso - MT",
+    lastMessageText: "Sorriso",
+    searchRequestId,
+    locationSnapshot: {
+      latitude: -12.543210,
+      longitude: -55.712340,
+      name: null,
+      source: "text_resolved",
+      city: "Sorriso",
+      state: "MT",
+    },
+  }), true);
+
+  assert.match(context.calls[0]!.text, /status = 'completed'/u);
+  assert.match(context.calls[0]!.text, /pin_latitude = \$7/u);
+  assert.match(context.calls[0]!.text, /location_source = \$10/u);
+  assert.match(context.calls[0]!.text, /location_city = \$11/u);
+  assert.match(context.calls[0]!.text, /location_state = \$12/u);
+  assert.deepEqual(context.calls[0]!.values, [
+    conversationId,
+    token,
+    "eletricista",
+    "Sorriso - MT",
+    "Sorriso",
+    searchRequestId,
+    -12.543210,
+    -55.712340,
+    null,
+    "text_resolved",
+    "Sorriso",
+    "MT",
+  ]);
+});
+
 test("search conversation repository atomically moves claimed location and service conversations to selection", async () => {
   const token = randomUUID();
   const searchRequestId = randomUUID();

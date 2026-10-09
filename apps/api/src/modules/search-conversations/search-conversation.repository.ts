@@ -314,6 +314,44 @@ export class PostgresSearchConversationRepository implements SearchConversationR
   }
 
   async complete(input: CompleteSearchConversation) {
+    if (input.locationSnapshot !== undefined) {
+      const result = await this.execute<{ id: string }>(
+        `UPDATE search_conversations
+         SET status = 'completed',
+             pending_slot = NULL,
+             service_text = $3,
+             location_text = $4,
+             last_message_text = $5,
+             search_request_id = $6,
+             processing_token = NULL,
+             processing_started_at = NULL,
+             completed_at = NOW(),
+             pin_latitude = $7,
+             pin_longitude = $8,
+             pin_name = $9,
+             location_source = $10,
+             location_city = $11,
+             location_state = $12
+         WHERE id = $1 AND status = 'active' AND processing_token = $2
+         RETURNING id`,
+        [
+          input.id,
+          input.processingToken,
+          input.serviceText,
+          input.locationText,
+          input.lastMessageText,
+          input.searchRequestId,
+          input.locationSnapshot.latitude,
+          input.locationSnapshot.longitude,
+          input.locationSnapshot.name ?? null,
+          input.locationSnapshot.source,
+          input.locationSnapshot.city ?? null,
+          input.locationSnapshot.state ?? null,
+        ],
+      );
+      return result.rows.length === 1;
+    }
+
     const result = await this.execute<{ id: string }>(
       `UPDATE search_conversations
        SET status = 'completed',

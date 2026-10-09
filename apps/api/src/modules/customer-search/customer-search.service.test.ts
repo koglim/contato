@@ -13,6 +13,7 @@ import type { LocationResolutionService } from "../location-resolution/location-
 import type { ServiceResolutionOutcome, ServiceResolutionRepository } from "../service-resolution/service-resolution.types.js";
 import type { SearchOrchestrationService } from "../search-orchestration/search-orchestration.types.js";
 import type {
+  CompleteSearchConversation,
   CreatePendingConversation,
   MoveToAwaitingSelectionConversation,
   SearchConversationRecord,
@@ -100,11 +101,19 @@ class FakeConversations implements SearchConversationRepository {
     }
     return true;
   }
-  async complete(input: unknown) {
+  async complete(input: CompleteSearchConversation) {
     this.completed = input;
     if (this.active) {
       this.active.status = "completed";
       this.active.pendingSlot = null;
+      if (input.locationSnapshot) {
+        this.active.pinLatitude = input.locationSnapshot.latitude;
+        this.active.pinLongitude = input.locationSnapshot.longitude;
+        this.active.pinName = input.locationSnapshot.name ?? null;
+        this.active.locationSource = input.locationSnapshot.source;
+        this.active.locationCity = input.locationSnapshot.city ?? null;
+        this.active.locationState = input.locationSnapshot.state ?? null;
+      }
     }
     return true;
   }

@@ -492,6 +492,14 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
           locationText: label,
           lastMessageText: label,
           searchRequestId: orchestration.response.matching.search_request_id,
+          locationSnapshot: {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            name: location.name ?? null,
+            source: "whatsapp_native",
+            city: city ?? null,
+            state: state ?? null,
+          },
         });
 
         const response: CustomerSearchMessageResponse = {
@@ -620,6 +628,14 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
             locationText: activeConversation.locationText ?? "localização enviada",
             lastMessageText: rawText,
             searchRequestId: orchestration.response.matching.search_request_id,
+            locationSnapshot: {
+              latitude: activeConversation.pinLatitude ?? null,
+              longitude: activeConversation.pinLongitude ?? null,
+              name: activeConversation.pinName ?? null,
+              source: "memory_reuse",
+              city: activeConversation.locationCity ?? null,
+              state: activeConversation.locationState ?? null,
+            },
           });
           const response: CustomerSearchMessageResponse = {
             customer_id: customerId,
@@ -721,12 +737,22 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
             throw new Error("searchOrchestrationService is required");
           }
 
+          const overrideCoordinates = {
+            latitude: locationRes.match.latitude,
+            longitude: locationRes.match.longitude,
+            city: locationRes.match.city ?? undefined,
+            state: locationRes.match.state ?? undefined,
+            neighborhood: locationRes.match.neighborhood ?? undefined,
+            source: "text_resolved" as const,
+          };
+
           const orchestration = await this.searchOrchestrationService.orchestrate({
             raw_text: activeConversation.originalRawText,
             service_text: activeConversation.serviceText,
             location_text: locationRes.match.label,
             country_code: activeConversation.countryCode,
             limit: activeConversation.limitValue,
+            coordinates: overrideCoordinates,
           }, { customerId });
 
           if (orchestration.kind === "service_unavailable") {
@@ -739,8 +765,8 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
               customerId,
               latitude: locationRes.match.latitude,
               longitude: locationRes.match.longitude,
-              city: locationRes.match.city,
-              state: locationRes.match.state,
+              city: locationRes.match.city ?? null,
+              state: locationRes.match.state ?? null,
               label: locationRes.match.label,
               source: "text_resolved",
               countryCode: activeConversation.countryCode,
@@ -787,6 +813,14 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
               locationText: locationRes.match.label,
               lastMessageText: rawText,
               searchRequestId: orchestration.response.matching.search_request_id,
+              locationSnapshot: {
+                latitude: locationRes.match.latitude,
+                longitude: locationRes.match.longitude,
+                name: null,
+                source: "text_resolved",
+                city: locationRes.match.city ?? null,
+                state: locationRes.match.state ?? null,
+              },
             });
             const response: CustomerSearchMessageResponse = {
               customer_id: customerId,
