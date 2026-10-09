@@ -24,7 +24,7 @@ export const continueSearchConversationRequestSchema = z.object({
 
 export const locationConfirmationResultSchema = z.object({
   status: z.literal("needs_location_confirmation"),
-  service_text: z.string(),
+  service_name: z.string().optional(),
   location_text: z.string(),
   prompt: z.string(),
 }).strict();

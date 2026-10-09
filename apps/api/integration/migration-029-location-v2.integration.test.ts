@@ -20,6 +20,13 @@ const phone = () => `+556699${Math.floor(1000000 + Math.random() * 8999999).toSt
 async function cleanAllLocationTestData() {
   await query("DELETE FROM customer_last_locations");
   await query(
+    `DELETE FROM channel_outbound_message_matches WHERE match_id IN (
+       SELECT id FROM matches WHERE search_request_id IN (
+         SELECT id FROM search_conversations WHERE pin_latitude IS NOT NULL OR pending_slot = 'location_confirmation' OR resume_slot = 'location_confirmation' OR location_source = 'whatsapp_native'
+       )
+     )`,
+  );
+  await query(
     "DELETE FROM channel_inbound_recovery_events WHERE inbound_id IN (SELECT id FROM channel_inbound_messages WHERE latitude IS NOT NULL OR longitude IS NOT NULL OR provider LIKE 'test-%')",
   );
   await query(
@@ -44,6 +51,14 @@ async function createCustomer() {
 
 async function cleanCustomer(customerId: string) {
   await query("DELETE FROM customer_last_locations WHERE customer_id = $1", [customerId]);
+  await query(
+    `DELETE FROM channel_outbound_message_matches WHERE match_id IN (
+       SELECT id FROM matches WHERE search_request_id IN (
+         SELECT id FROM search_requests WHERE customer_id = $1
+       )
+     )`,
+    [customerId],
+  );
   await query("DELETE FROM contacts WHERE search_request_id IN (SELECT id FROM search_requests WHERE customer_id = $1)", [customerId]);
   await query("DELETE FROM matches WHERE search_request_id IN (SELECT id FROM search_requests WHERE customer_id = $1)", [customerId]);
   await query("DELETE FROM search_conversations WHERE customer_id = $1", [customerId]);
@@ -57,7 +72,14 @@ async function cleanInboundByPhone(phoneE164: string) {
     [phoneE164],
   );
   await query(
-    "DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1)",
+    `DELETE FROM channel_outbound_message_matches WHERE channel_outbound_message_id IN (
+       SELECT id FROM channel_outbound_messages WHERE recipient_phone_e164 = $1
+       OR channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1)
+     )`,
+    [phoneE164],
+  );
+  await query(
+    "DELETE FROM channel_outbound_messages WHERE channel_inbound_message_id IN (SELECT id FROM channel_inbound_messages WHERE phone_e164 = $1) OR recipient_phone_e164 = $1",
     [phoneE164],
   );
   await query("DELETE FROM channel_inbound_messages WHERE phone_e164 = $1", [phoneE164]);

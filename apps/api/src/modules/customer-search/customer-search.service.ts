@@ -372,7 +372,7 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
           pending_slot: "location_confirmation",
           result: {
             status: "needs_location_confirmation",
-            service_text: serviceName,
+            service_name: serviceName,
             location_text: rememberedLocation.label,
             prompt,
           },
@@ -829,7 +829,7 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
           pending_slot: "location_confirmation",
           result: {
             status: "needs_location_confirmation",
-            service_text: activeConversation.serviceText,
+            service_name: activeConversation.serviceText ?? undefined,
             location_text: activeConversation.locationText ?? "",
             prompt,
           },
