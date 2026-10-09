@@ -32,7 +32,7 @@ Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 
 1. **Launch Readiness / Homologação Residual:**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
-   * **Homologação em Produção Real (2026-10-01 a 2026-10-08):** Happy path Golden E2E #2, subfluxos de indisponibilidade profissional, contestação bilateral (T34), seleção expirada (T18) e ciclo completo de notificação via template e conclusão bilateral de atendimento por botões rápidos (WP6.9 / Gate B) comprovados em produção real. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
+   * **Homologação em Produção Real (2026-10-01 a 2026-10-09):** Happy path Golden E2E #2, subfluxos de indisponibilidade profissional, contestação bilateral (T34), seleção expirada (T18), ciclo completo de notificação via template e conclusão bilateral de atendimento por botões rápidos (WP6.9 / Gate B — [`docs/launch-readiness/01-wp6-9-gate-b-closeout.md`](launch-readiness/01-wp6-9-gate-b-closeout.md)) e preservação/retomada de busca com outra busca ativa (T29 — [`docs/launch-readiness/02-t29-real-e2e-closeout.md`](launch-readiness/02-t29-real-e2e-closeout.md)) comprovados em produção real. **T29 — REAL PRODUCTION HOMOLOGATION COMPLETE / PASS** (`LAUNCH_READINESS_T29_RESIDUAL = CLOSED`).
 2. **Localização v2 (Fundação de Entrada):**
    * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
 3. **Reconciliação n8n / Evolution / Workflows Versionados:**

@@ -322,7 +322,7 @@ Em 2026-10-01, após a homologação do happy path no Golden E2E #2, foram execu
   * Inbound de seleção do cliente na mesma busca: `1a4dd56b-ab7a-4b1a-94f2-eb2db1072a31`.
   * Segundo contato estabelecido diretamente como `shared` na mesma busca (`5f95b215-2e79-4bd9-9217-12f38af8f7f7`).
   * Resposta de seleção ao cliente (Evolution ID `3EB0F257061714E96418E6`) e notificação inicial à profissional (Evolution ID `3EB015831CCA09F6E1CF1C`) observadas com status=sent no transporte e zero holds.
-  * Estado final: `same_search_request=true`, `different_professionals=true`, `farol_contact_still_shared=true`, `farol_unavailability_preserved=true`, `julia_second_contact_shared=true`, `transport_holds=0`, `search_final_status=selected`, `conversation_final_status=completed`. O ramo de T29 que trata de preservação/retomada com outra busca ativa permanece pendente de ensaio real.
+  * Estado final: `same_search_request=true`, `different_professionals=true`, `farol_contact_still_shared=true`, `farol_unavailability_preserved=true`, `julia_second_contact_shared=true`, `transport_holds=0`, `search_final_status=selected`, `conversation_final_status=completed`. O ramo de T29 que trata de preservação/retomada com outra busca ativa foi homologado em produção real em 2026-10-09 (ver Edge Flow #3 abaixo e [`docs/launch-readiness/02-t29-real-e2e-closeout.md`](launch-readiness/02-t29-real-e2e-closeout.md)).
 
 ### 2. Edge Flow #2: Contestação Bilateral de Conclusão (T34)
 
@@ -336,9 +336,24 @@ Em 2026-10-01, após a homologação do happy path no Golden E2E #2, foram execu
   * Resposta de contestação ao cliente: Outbound `e71bb54b-aac3-498d-9332-332feb5b1f32` (Evolution ID `3EB0DE3F82BED016915D03`, `status=sent`).
 * **Estado Final Comprovado:** `completion.state=contested`, `declared_by=professional`, `confirmed_at=null`, `contested_at` preenchido, `contact.status=shared`, 1 evento de declaração profissional, 1 evento de contestação de cliente, 0 eventos de confirmação, todos os inbounds processados sem erro e 0 transport holds.
 
-### 3. Tabela Consolidada de Transporte dos Edge Flows
+### 3. Edge Flow #3: Preservação e Retomada de Busca com Outra Busca Ativa (T29 Completo — 2026-10-09)
 
-| Etapa | Inbound / Gatilho | Outbound ID / Finalidade | Evolution Provider Msg ID | Status Transporte |
+* **Contexto de Buscas Concorrentes:** Busca A (`450ba090-ffc0-4e16-903c-e81dae33bbfc`, código `CC-3SXZCVE8`, contato `a6cc997d-89e2-462a-b7de-eec2dfc24e9c` compartilhado com Richard) e Busca B (`2da79047-f0cd-4c5a-b1f6-51b6c392e2bd`, ativa em `pending_slot=location`).
+* **Recusa do Profissional (Richard):**
+  * Inbound do profissional via botão Quick Reply: `68712ecc-c3c6-481f-9cfa-fc136e209ecd` (`"Não consigo atender"`).
+  * Token interativo consumido: `d5bf1e85-8940-415c-8143-5851628c65c1` (`declare_unavailability`).
+  * Evento de indisponibilidade imutável criado: `0584c353-94af-4269-a0c8-4463bfb5daa5`.
+  * Busca B preservada como ativa (`pending_slot=location`). Busca A suspensa associada ao código `CC-3SXZCVE8`.
+  * Notificação ao cliente (Outbound `418678be-0adf-484c-b6a5-70e1c8c654be`, `status=sent`, `wamid.HBgMNTU5OTg0MTE5MDcwFQIAERgSRjM5Rjg4RTQzNEYwNzY5NUE3AA==`), informando continuidade da Busca B e instruindo `"retomar CC-3SXZCVE8"`. Zero transport holds.
+* **Retomada e Troca de Contexto pelo Cliente:**
+  * Inbound do cliente via WhatsApp: `c3ba57e6-63b8-42a7-ba30-bda98dc757b8` (`"retomar CC-3SXZCVE8"`, `status=processed`, `route=opportunity`, `kind=resumed`).
+  * Troca atômica de contexto: Busca B salva/suspensa (`status=completed`, `resume_slot=location`, `resume_code=CC-N6BXRNT8`); Busca A reativada (`status=active`, `pending_slot=selection`).
+  * Confirmação ao cliente (Outbound `9c6507a6-dbe1-4894-a02b-689030e92177`, `status=sent`, `wamid.HBgMNTU5OTg0MTE5MDcwFQIAERgSMjNFRDBFMTk0QTcxMjhFMjU1AA==`), entregue com sucesso no WhatsApp.
+* **Estado Final:** `ACTIVE_CONVERSATION_COUNT = 1`, zero duplicações, zero holds e `T29_REAL_E2E_RESULT = PASS` (evidências completas em [`docs/launch-readiness/02-t29-real-e2e-closeout.md`](launch-readiness/02-t29-real-e2e-closeout.md)).
+
+### 4. Tabela Consolidada de Transporte dos Edge Flows
+
+| Etapa | Inbound / Gatilho | Outbound ID / Finalidade | Evolution / Meta Provider Msg ID | Status Transporte |
 | :--- | :--- | :---: | :---: | :---: |
 | **Indisponibilidade (Farol) — Notificação Cliente** | Inbound recusa Farol (`233fa962-b22c-4eb5-9e78-342607454363`) | Outbound (`customer_contact_update`) | `3EB0FD05F2E627D1ADF900` | `sent` |
 | **Indisponibilidade (Farol) — Resposta Profissional** | Inbound recusa Farol (`233fa962-b22c-4eb5-9e78-342607454363`) | Outbound (`professional_reply`) | `3EB06B006337332801CBF1` | `sent` |
@@ -348,6 +363,8 @@ Em 2026-10-01, após a homologação do happy path no Golden E2E #2, foram execu
 | **Conclusão — Resposta Profissional** | Inbound declaração Julia | `74f7f047-008d-4342-8a5e-dd30ed240a66` (`professional_reply`) | `3EB04DB9CAE74E1FB85A02` | `sent` |
 | **Contestação — Notificação Profissional** | Inbound contestação cliente | `77188dbf-40de-4ab6-9aa4-660b78f1425d` (`professional_contact_notification`) | `3EB0DB236CAC0299155F86` | `sent` |
 | **Contestação — Resposta Cliente** | Inbound contestação cliente | `e71bb54b-aac3-498d-9332-332feb5b1f32` (`customer_reply`) | `3EB0DE3F82BED016915D03` | `sent` |
+| **T29 Completo — Notificação Recusa Richard** | Inbound recusa Richard botão (`68712ecc-c3c6-481f-9cfa-fc136e209ecd`) | `418678be-0adf-484c-b6a5-70e1c8c654be` (`customer_contact_update`) | `wamid.HBgMNTU5OTg0MTE5MDcwFQIAERgSRjM5Rjg4RTQzNEYwNzY5NUE3AA==` | `sent` |
+| **T29 Completo — Confirmação Retomada Cliente** | Inbound retomada cliente (`c3ba57e6-63b8-42a7-ba30-bda98dc757b8`) | `9c6507a6-dbe1-4894-a02b-689030e92177` (`customer_reply`) | `wamid.HBgMNTU5OTg0MTE5MDcwFQIAERgSMjNFRDBFMTk0QTcxMjhFMjU1AA==` | `sent` |
 
 ---
 
