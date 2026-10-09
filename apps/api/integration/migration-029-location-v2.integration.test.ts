@@ -176,7 +176,7 @@ test("2. Service-first -> pin can transition a real search_conversations row to 
 
     // Also verify transition directly from pending location to completed via complete() (e.g. no_matches)
     const noMatchSearchRequestId = randomUUID();
-    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, 'eletricista', 'no_matches')", [noMatchSearchRequestId, customerId]);
+    await query("INSERT INTO search_requests (id, customer_id, raw_text, status) VALUES ($1, $2, 'eletricista', 'matched')", [noMatchSearchRequestId, customerId]);
 
     const conv2 = await convRepo.createPending({
       customerId,
