@@ -686,8 +686,9 @@ async function setupCatalogAndProfessional() {
     `INSERT INTO professional_service_areas (id, professional_id, city, state, country_code, center, radius_meters)
      VALUES
      ($1, $2, 'Sinop', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.508934, -11.854812), 4326)::geography, 50000),
-     ($3, $2, 'Sorriso', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.712340, -12.543210), 4326)::geography, 50000)`,
-    [randomUUID(), proId, randomUUID()],
+     ($3, $2, 'Sorriso', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-55.712340, -12.543210), 4326)::geography, 50000),
+     ($4, $2, 'Cuiabá', 'MT', 'BR', ST_SetSRID(ST_MakePoint(-56.097892, -15.601411), 4326)::geography, 50000)`,
+    [randomUUID(), proId, randomUUID(), randomUUID()],
   );
 
   return {
@@ -1369,6 +1370,436 @@ test("18. TEST 5 — PIN-FIRST -> SERVICE -> NO_MATCHES: completed conversation 
     await cleanCustomer(customerId);
     await cleanInboundByPhone(phoneE164);
     await noMatchService.cleanup();
+    await catalog.cleanup();
+  }
+});
+
+test("19. TEST A — SECOND PIN REPLACES FIRST WHILE WAITING SERVICE", async () => {
+  const { customerId, phoneE164 } = await createCustomer();
+  const catalog = await setupCatalogAndProfessional();
+  const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
+  const headers = { "x-internal-key": "test-internal-key" };
+
+  try {
+    const exactLatA = -11.854812;
+    const exactLonA = -55.508934;
+    const exactLatB = -15.601411;
+    const exactLonB = -56.097892;
+
+    // Step 1: Customer sends first native pin P1 (Sinop)
+    const pin1Res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLatA,
+          longitude: exactLonA,
+          name: "Sinop Centro",
+        },
+      },
+    });
+    assert.equal(pin1Res.statusCode, 200);
+
+    const conv1 = (await query<{ status: string; pending_slot: string; location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string; location_text: string; pin_name: string }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude, location_city, location_state, location_text, pin_name FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(conv1);
+    assert.equal(conv1.status, "active");
+    assert.equal(conv1.pending_slot, "service");
+    assert.equal(Number(conv1.pin_latitude), exactLatA);
+    assert.equal(conv1.location_city, "Sinop");
+
+    // Step 2: Before sending service, customer sends second native pin P2 (Cuiabá)
+    const pin2Res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLatB,
+          longitude: exactLonB,
+          name: "Cuiabá Centro",
+        },
+      },
+    });
+    assert.equal(pin2Res.statusCode, 200);
+
+    // Direct DB assertions before any service is sent
+    const convRow = (await query<{ status: string; pending_slot: string; location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string; location_text: string; pin_name: string }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude, location_city, location_state, location_text, pin_name FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(convRow);
+    assert.equal(convRow.status, "active");
+    assert.equal(convRow.pending_slot, "service");
+    assert.equal(Number(convRow.pin_latitude), exactLatB);
+    assert.equal(Number(convRow.pin_longitude), exactLonB);
+    assert.equal(convRow.location_source, "whatsapp_native");
+    assert.equal(convRow.location_city, "Cuiabá");
+    assert.equal(convRow.location_state, "MT");
+    assert.equal(convRow.location_text, "Cuiabá - MT");
+    assert.equal(convRow.pin_name, "Cuiabá Centro");
+
+    const lastLoc = await lastLocRepo.findByCustomerId(customerId);
+    assert.ok(lastLoc);
+    assert.equal(lastLoc.latitude, exactLatB);
+    assert.equal(lastLoc.longitude, exactLonB);
+    assert.equal(lastLoc.city, "Cuiabá");
+    assert.equal(lastLoc.state, "MT");
+    assert.equal(lastLoc.source, "whatsapp_native");
+
+    const oldCoordsARemain = (Number(convRow.pin_latitude) === exactLatA || Number(convRow.pin_longitude) === exactLonA || lastLoc.latitude === exactLatA || lastLoc.longitude === exactLonA) ? 1 : 0;
+    assert.equal(oldCoordsARemain, 0, "OLD_COORDS_A_REMAIN must be 0");
+
+    const oldMetadataARemain = (convRow.location_city === "Sinop" || lastLoc.city === "Sinop" || convRow.location_text === "Sinop - MT" || convRow.pin_name === "Sinop Centro") ? 1 : 0;
+    assert.equal(oldMetadataARemain, 0, "OLD_METADATA_A_REMAIN must be 0");
+  } finally {
+    await cleanCustomer(customerId);
+    await cleanInboundByPhone(phoneE164);
+    await catalog.cleanup();
+  }
+});
+
+test("20. TEST B — SECOND PIN -> SERVICE -> MATCHED", async () => {
+  const { customerId, phoneE164 } = await createCustomer();
+  const catalog = await setupCatalogAndProfessional();
+  const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
+  const headers = { "x-internal-key": "test-internal-key" };
+
+  try {
+    const exactLatA = -11.854812;
+    const exactLonA = -55.508934;
+    const exactLatB = -15.601411;
+    const exactLonB = -56.097892;
+
+    // Step 1: P1 (Sinop)
+    const pin1Res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLatA,
+          longitude: exactLonA,
+          name: "Sinop Centro",
+        },
+      },
+    });
+    assert.equal(pin1Res.statusCode, 200);
+
+    // Step 2: P2 (Cuiabá)
+    const pin2Res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLatB,
+          longitude: exactLonB,
+          name: "Cuiabá Centro",
+        },
+      },
+    });
+    assert.equal(pin2Res.statusCode, 200);
+
+    // Step 3: Customer sends "eletricista"
+    const serviceRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "eletricista",
+        country_code: "BR",
+        limit: 3,
+      },
+    });
+    assert.equal(serviceRes.statusCode, 200);
+
+    // Direct DB assertions
+    const convRow = (await query<{ status: string; pending_slot: string; location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string; location_text: string }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude, location_city, location_state, location_text FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(convRow);
+    assert.equal(convRow.status, "active");
+    assert.equal(convRow.pending_slot, "selection");
+    assert.equal(convRow.location_source, "whatsapp_native");
+    assert.equal(Number(convRow.pin_latitude), exactLatB);
+    assert.equal(Number(convRow.pin_longitude), exactLonB);
+    assert.equal(convRow.location_city, "Cuiabá");
+    assert.equal(convRow.location_state, "MT");
+
+    const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
+      "SELECT ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [customerId],
+    )).rows[0];
+    assert.ok(searchReq);
+    assert.equal(Number(searchReq.latitude), exactLatB);
+    assert.equal(Number(searchReq.longitude), exactLonB);
+    assert.equal(searchReq.city, "Cuiabá");
+    assert.equal(searchReq.state, "MT");
+
+    const lastLoc = await lastLocRepo.findByCustomerId(customerId);
+    assert.ok(lastLoc);
+    assert.equal(lastLoc.latitude, exactLatB);
+    assert.equal(lastLoc.longitude, exactLonB);
+    assert.equal(lastLoc.city, "Cuiabá");
+    assert.equal(lastLoc.state, "MT");
+    assert.equal(lastLoc.source, "whatsapp_native");
+
+    // All three stores identical
+    assert.equal(Number(convRow.pin_latitude), Number(searchReq.latitude));
+    assert.equal(Number(convRow.pin_longitude), Number(searchReq.longitude));
+    assert.equal(Number(lastLoc.latitude), Number(searchReq.latitude));
+    assert.equal(Number(lastLoc.longitude), Number(searchReq.longitude));
+    assert.equal(convRow.location_city, searchReq.city);
+    assert.equal(convRow.location_state, searchReq.state);
+    assert.equal(lastLoc.city, searchReq.city);
+    assert.equal(lastLoc.state, searchReq.state);
+
+    const oldCoordsARemain = (Number(convRow.pin_latitude) === exactLatA || Number(searchReq.latitude) === exactLatA || lastLoc.latitude === exactLatA) ? 1 : 0;
+    assert.equal(oldCoordsARemain, 0, "OLD_COORDS_A_REMAIN must be 0");
+  } finally {
+    await cleanCustomer(customerId);
+    await cleanInboundByPhone(phoneE164);
+    await catalog.cleanup();
+  }
+});
+
+test("21. TEST C — SECOND PIN -> SERVICE -> NO_MATCHES", async () => {
+  const { customerId, phoneE164 } = await createCustomer();
+  const catalog = await setupCatalogAndProfessional();
+  const noMatchService = await setupNoMatchService();
+  const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
+  const headers = { "x-internal-key": "test-internal-key" };
+
+  try {
+    const exactLatA = -11.854812;
+    const exactLonA = -55.508934;
+    const exactLatB = -15.601411;
+    const exactLonB = -56.097892;
+
+    // Step 1: P1 (Sinop)
+    const pin1Res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLatA,
+          longitude: exactLonA,
+          name: "Sinop Centro",
+        },
+      },
+    });
+    assert.equal(pin1Res.statusCode, 200);
+
+    // Step 2: P2 (Cuiabá)
+    const pin2Res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLatB,
+          longitude: exactLonB,
+          name: "Cuiabá Centro",
+        },
+      },
+    });
+    assert.equal(pin2Res.statusCode, 200);
+
+    // Step 3: Customer sends "encanador" (no matching professionals)
+    const serviceRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "encanador",
+        country_code: "BR",
+        limit: 3,
+      },
+    });
+    assert.equal(serviceRes.statusCode, 200);
+
+    // Assert completed conversation
+    const convRow = (await query<{ status: string; pending_slot: string | null; location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string; location_text: string; pin_name: string }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude, location_city, location_state, location_text, pin_name FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(convRow);
+    assert.equal(convRow.status, "completed");
+    assert.equal(convRow.pending_slot, null);
+    assert.equal(convRow.location_source, "whatsapp_native");
+    assert.equal(Number(convRow.pin_latitude), exactLatB);
+    assert.equal(Number(convRow.pin_longitude), exactLonB);
+    assert.equal(convRow.location_city, "Cuiabá");
+    assert.equal(convRow.location_state, "MT");
+    assert.equal(convRow.location_text, "Cuiabá - MT");
+    assert.equal(convRow.pin_name, "Cuiabá Centro");
+
+    const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
+      "SELECT ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [customerId],
+    )).rows[0];
+    assert.ok(searchReq);
+    assert.equal(Number(searchReq.latitude), exactLatB);
+    assert.equal(Number(searchReq.longitude), exactLonB);
+    assert.equal(searchReq.city, "Cuiabá");
+    assert.equal(searchReq.state, "MT");
+
+    const lastLoc = await lastLocRepo.findByCustomerId(customerId);
+    assert.ok(lastLoc);
+    assert.equal(lastLoc.latitude, exactLatB);
+    assert.equal(lastLoc.longitude, exactLonB);
+    assert.equal(lastLoc.city, "Cuiabá");
+    assert.equal(lastLoc.state, "MT");
+    assert.equal(lastLoc.source, "whatsapp_native");
+
+    const oldCoordsARemain = (Number(convRow.pin_latitude) === exactLatA || Number(searchReq.latitude) === exactLatA || lastLoc.latitude === exactLatA) ? 1 : 0;
+    assert.equal(oldCoordsARemain, 0, "OLD_COORDS_A_REMAIN must be 0");
+
+    const oldMetadataARemain = (convRow.location_city === "Sinop" || searchReq.city === "Sinop" || lastLoc.city === "Sinop") ? 1 : 0;
+    assert.equal(oldMetadataARemain, 0, "OLD_METADATA_A_REMAIN must be 0");
+  } finally {
+    await cleanCustomer(customerId);
+    await cleanInboundByPhone(phoneE164);
+    await noMatchService.cleanup();
+    await catalog.cleanup();
+  }
+});
+
+test("22. TEST D — LOCATION + RAW_TEXT WHILE PENDING SERVICE", async () => {
+  const { customerId, phoneE164 } = await createCustomer();
+  const catalog = await setupCatalogAndProfessional();
+  const app = buildApp({ internalApiKey: "test-internal-key", locationResolutionService: verticalLocationResolutionService });
+  const headers = { "x-internal-key": "test-internal-key" };
+
+  try {
+    const exactLatA = -11.854812;
+    const exactLonA = -55.508934;
+    const exactLatB = -15.601411;
+    const exactLonB = -56.097892;
+
+    // Step 1: P1 (Sinop) -> pending service
+    const pin1Res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLatA,
+          longitude: exactLonA,
+          name: "Sinop Centro",
+        },
+      },
+    });
+    assert.equal(pin1Res.statusCode, 200);
+
+    // Step 2: Inbound containing BOTH location=P2 and raw_text="eletricista"
+    const comboRes = await app.inject({
+      method: "POST",
+      url: "/internal/channel/inbound/messages",
+      headers,
+      payload: {
+        provider: "test-v2",
+        provider_message_id: randomUUID(),
+        phone_e164: phoneE164,
+        raw_text: "eletricista",
+        country_code: "BR",
+        limit: 3,
+        location: {
+          latitude: exactLatB,
+          longitude: exactLonB,
+          name: "Cuiabá Centro",
+        },
+      },
+    });
+    assert.equal(comboRes.statusCode, 200);
+
+    // Direct DB assertions: search executed in that turn uses P2 exclusively
+    const convRow = (await query<{ status: string; pending_slot: string; location_source: string; pin_latitude: number; pin_longitude: number; location_city: string; location_state: string }>(
+      "SELECT status, pending_slot, location_source, pin_latitude, pin_longitude, location_city, location_state FROM search_conversations WHERE customer_id = $1",
+      [customerId],
+    )).rows[0];
+    assert.ok(convRow);
+    assert.equal(convRow.status, "active");
+    assert.equal(convRow.pending_slot, "selection");
+    assert.equal(convRow.location_source, "whatsapp_native");
+    assert.equal(Number(convRow.pin_latitude), exactLatB);
+    assert.equal(Number(convRow.pin_longitude), exactLonB);
+    assert.equal(convRow.location_city, "Cuiabá");
+    assert.equal(convRow.location_state, "MT");
+
+    const searchReq = (await query<{ latitude: number; longitude: number; city: string; state: string }>(
+      "SELECT ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude, city, state FROM search_requests WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [customerId],
+    )).rows[0];
+    assert.ok(searchReq);
+    assert.equal(Number(searchReq.latitude), exactLatB);
+    assert.equal(Number(searchReq.longitude), exactLonB);
+    assert.equal(searchReq.city, "Cuiabá");
+    assert.equal(searchReq.state, "MT");
+
+    const lastLoc = await lastLocRepo.findByCustomerId(customerId);
+    assert.ok(lastLoc);
+    assert.equal(lastLoc.latitude, exactLatB);
+    assert.equal(lastLoc.longitude, exactLonB);
+    assert.equal(lastLoc.city, "Cuiabá");
+    assert.equal(lastLoc.state, "MT");
+    assert.equal(lastLoc.source, "whatsapp_native");
+
+    const oldCoordsARemain = (Number(convRow.pin_latitude) === exactLatA || Number(searchReq.latitude) === exactLatA || lastLoc.latitude === exactLatA) ? 1 : 0;
+    assert.equal(oldCoordsARemain, 0, "OLD_COORDS_A_REMAIN must be 0");
+
+    const oldMetadataARemain = (convRow.location_city === "Sinop" || searchReq.city === "Sinop" || lastLoc.city === "Sinop") ? 1 : 0;
+    assert.equal(oldMetadataARemain, 0, "OLD_METADATA_A_REMAIN must be 0");
+  } finally {
+    await cleanCustomer(customerId);
+    await cleanInboundByPhone(phoneE164);
     await catalog.cleanup();
   }
 });

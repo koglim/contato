@@ -158,6 +158,11 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
         return await this.handleLocationPinForActive(customer.id, activeConversation, input.location);
       }
 
+      // Case B: Active in service, received pin (Second pin replacement)
+      if (activeConversation.pendingSlot === "service" && input.location) {
+        return await this.handleLocationPinWhileAwaitingService(customer.id, activeConversation, input.location, input);
+      }
+
       // Standard continuation
       const outcome = await this.searchConversationService.continueConversation(activeConversation.id, {
         raw_text: input.raw_text,
@@ -525,6 +530,233 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
       return { kind: "service_unavailable" };
     } catch (error) {
       await this.conversations.releaseClaim(activeConversation.id, processingToken);
+      throw error;
+    }
+  }
+
+  private async handleLocationPinWhileAwaitingService(
+    customerId: string,
+    activeConversation: SearchConversationRecord,
+    location: ChannelLocationInput,
+    input: CustomerSearchRouteInput,
+  ): Promise<CustomerSearchRouteOutcome> {
+    const processingToken = randomUUID();
+    const claimed = await this.conversations.claim(activeConversation.id, processingToken, this.config.processingLeaseSeconds);
+    if (!claimed) return { kind: "conversation_processing" };
+
+    try {
+      let label = "localização enviada";
+      let city: string | null = null;
+      let state: string | null = null;
+      if (this.locationResolutionService) {
+        try {
+          const rev = await this.locationResolutionService.reverseGeocode({
+            latitude: location.latitude,
+            longitude: location.longitude,
+          });
+          if (rev?.city) {
+            city = rev.city;
+            state = rev.state;
+            label = rev.state ? `${rev.city} - ${rev.state}` : rev.city;
+          }
+        } catch {
+          // Fallback safely
+        }
+      }
+
+      if (this.customerLastLocations) {
+        await this.customerLastLocations.upsert({
+          customerId,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          city,
+          state,
+          countryCode: activeConversation.countryCode,
+          label,
+          source: "whatsapp_native",
+        });
+      }
+
+      const rawText = input.raw_text?.trim();
+
+      if (!rawText) {
+        const updated = await this.conversations.updatePending({
+          id: activeConversation.id,
+          processingToken,
+          pendingSlot: "service",
+          serviceText: activeConversation.serviceText,
+          locationText: label,
+          lastMessageText: location.name ?? label,
+          ttlMinutes: this.config.ttlMinutes,
+          pinLatitude: location.latitude,
+          pinLongitude: location.longitude,
+          pinName: location.name ?? null,
+          locationSource: "whatsapp_native",
+          locationCity: city,
+          locationState: state,
+        });
+        if (!updated) return { kind: "customer_conversation_conflict" };
+
+        const response: CustomerSearchMessageResponse = {
+          customer_id: customerId,
+          route: "continued",
+          conversation: {
+            conversation_id: activeConversation.id,
+            conversation_status: "active",
+            pending_slot: "service",
+            result: {
+              status: "needs_service",
+              location_text: label,
+              latitude: location.latitude,
+              longitude: location.longitude,
+              prompt: "Recebemos sua localização. Qual serviço você precisa?",
+            },
+          },
+        };
+        return {
+          kind: "response",
+          response,
+          conversationId: activeConversation.id,
+          searchRequestId: null,
+          presentedMatchIds: [],
+        };
+      }
+
+      if (!this.searchOrchestrationService) {
+        throw new Error("searchOrchestrationService is required to process search");
+      }
+
+      const orchestration = await this.searchOrchestrationService.orchestrate({
+        raw_text: rawText,
+        service_text: rawText,
+        location_text: label,
+        country_code: activeConversation.countryCode,
+        limit: activeConversation.limitValue,
+        coordinates: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          city: city ?? undefined,
+          state: state ?? undefined,
+          source: "whatsapp_native",
+        },
+      }, { customerId });
+
+      if (orchestration.kind === "service_unavailable") {
+        await this.conversations.releaseClaim(activeConversation.id, processingToken);
+        return orchestration;
+      }
+
+      if (orchestration.response.status === "needs_service") {
+        await this.conversations.updatePending({
+          id: activeConversation.id,
+          processingToken,
+          pendingSlot: "service",
+          serviceText: "",
+          locationText: label,
+          lastMessageText: rawText,
+          ttlMinutes: this.config.ttlMinutes,
+          pinLatitude: location.latitude,
+          pinLongitude: location.longitude,
+          pinName: location.name ?? null,
+          locationSource: "whatsapp_native",
+          locationCity: city,
+          locationState: state,
+        });
+        const response: CustomerSearchMessageResponse = {
+          customer_id: customerId,
+          route: "continued",
+          conversation: {
+            conversation_id: activeConversation.id,
+            conversation_status: "active",
+            pending_slot: "service",
+            result: orchestration.response,
+          },
+        };
+        return {
+          kind: "response",
+          response,
+          conversationId: activeConversation.id,
+          searchRequestId: null,
+          presentedMatchIds: [],
+        };
+      }
+
+      if (orchestration.response.status === "matched") {
+        await this.conversations.moveToAwaitingSelection({
+          id: activeConversation.id,
+          processingToken,
+          serviceText: orchestration.response.service_resolution.match?.service.name ?? rawText,
+          locationText: label,
+          lastMessageText: rawText,
+          searchRequestId: orchestration.response.matching.search_request_id,
+          ttlMinutes: this.config.ttlMinutes,
+          pinLatitude: location.latitude,
+          pinLongitude: location.longitude,
+          pinName: location.name ?? null,
+          locationSource: "whatsapp_native",
+          locationCity: city,
+          locationState: state,
+        });
+        const response: CustomerSearchMessageResponse = {
+          customer_id: customerId,
+          route: "continued",
+          conversation: {
+            conversation_id: activeConversation.id,
+            conversation_status: "active",
+            pending_slot: "selection",
+            result: orchestration.response,
+          },
+        };
+        return {
+          kind: "response",
+          response,
+          conversationId: activeConversation.id,
+          searchRequestId: searchRequestIdFrom(response),
+          presentedMatchIds: presentedMatchIdsFrom(response),
+        };
+      }
+
+      if (orchestration.response.status === "no_matches" && orchestration.response.matching) {
+        await this.conversations.complete({
+          id: activeConversation.id,
+          processingToken,
+          serviceText: orchestration.response.service_resolution.match?.service.name ?? rawText,
+          locationText: label,
+          lastMessageText: rawText,
+          searchRequestId: orchestration.response.matching.search_request_id,
+          locationSnapshot: {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            name: location.name ?? null,
+            source: "whatsapp_native",
+            city: city ?? null,
+            state: state ?? null,
+          },
+        });
+
+        const response: CustomerSearchMessageResponse = {
+          customer_id: customerId,
+          route: "continued",
+          conversation: {
+            conversation_id: activeConversation.id,
+            conversation_status: "completed",
+            pending_slot: null,
+            result: orchestration.response,
+          },
+        };
+        return {
+          kind: "response",
+          response,
+          conversationId: activeConversation.id,
+          searchRequestId: searchRequestIdFrom(response),
+          presentedMatchIds: presentedMatchIdsFrom(response),
+        };
+      }
+
+      await this.conversations.releaseClaim(activeConversation.id, processingToken);
+      return { kind: "service_unavailable" };
+    } catch (error) {
+      await this.conversations.releaseClaim(activeConversation.id, processingToken).catch(() => {});
       throw error;
     }
   }

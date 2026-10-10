@@ -254,6 +254,7 @@ export class DefaultSearchConversationService implements SearchConversationServi
         ttlMinutes: this.config.ttlMinutes,
         pinLatitude: coordinates?.latitude ?? matchingLoc?.latitude ?? resolution?.latitude ?? null,
         pinLongitude: coordinates?.longitude ?? matchingLoc?.longitude ?? resolution?.longitude ?? null,
+        ...(input.location?.name || conversation.pinName ? { pinName: input.location?.name ?? (coordinates ? (conversation.pinName ?? null) : null) } : {}),
         locationSource: coordinates?.source ?? (conversation.locationSource ?? "text_resolved"),
         locationCity: coordinates?.city ?? matchingLoc?.city ?? resolution?.city ?? conversation.locationCity ?? null,
         locationState: coordinates?.state ?? matchingLoc?.state ?? resolution?.state ?? conversation.locationState ?? null,

@@ -104,6 +104,7 @@ const activeContinueSearchConversationResponseSchema = z.discriminatedUnion("pen
     pending_slot: z.literal("service"),
     result: z.union([
       searchOrchestrationNeedsServiceResponseSchema,
+      nativeLocationNeedsServiceResultSchema,
       messageSearchResponseSchema.refine((value) => value.status === "needs_service"),
     ]),
   }).strict(),

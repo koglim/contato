@@ -917,3 +917,137 @@ test("Zero coordinates (latitude = 0) are valid and preserved in memory", async 
   assert.equal(conversations.createdPending?.pinLatitude, 0);
   assert.equal(conversations.createdPending?.pinLongitude, -51.05);
 });
+
+test("Second native pin while pending_slot='service' replaces location snapshot and memory without executing search", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  const now = new Date();
+  conversations.active = {
+    id: conversationId,
+    customerId,
+    status: "active",
+    pendingSlot: "service",
+    originalRawText: "Sinop - MT",
+    serviceText: "",
+    locationText: "Sinop - MT",
+    countryCode: "BR",
+    limitValue: 3,
+    lastMessageText: "Sinop - MT",
+    searchRequestId: null,
+    expiresAt: new Date(now.getTime() + 60_000),
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    isExpired: false,
+    pinLatitude: -11.854812,
+    pinLongitude: -55.508934,
+    pinName: "Sinop Centro",
+    locationSource: "whatsapp_native",
+    locationCity: "Sinop",
+    locationState: "MT",
+  };
+  const search = new FakeSearchConversationService();
+  const lastLocations = new FakeCustomerLastLocations();
+  const locationResolution = new FakeLocationResolutionService();
+  locationResolution.reverseResult = { city: "Cuiabá", state: "MT", countryCode: "BR" };
+  const serviceResolution = new FakeServiceResolutionRepository();
+  const orchestrator = new FakeSearchOrchestrator();
+
+  const router = new DefaultCustomerSearchRouter(
+    customers, conversations, search, selectionService() as never, globalService() as never,
+    lastLocations, locationResolution, serviceResolution, orchestrator,
+  );
+
+  const outcome = await router.route({
+    phone_e164: input.phone_e164,
+    country_code: "BR",
+    limit: 3,
+    location: { latitude: -15.601411, longitude: -56.097892, name: "Cuiabá Centro" },
+  });
+
+  assert.equal(outcome.kind, "response");
+  assert.equal(conversations.updatedPending?.pendingSlot, "service");
+  assert.equal(conversations.updatedPending?.pinLatitude, -15.601411);
+  assert.equal(conversations.updatedPending?.pinLongitude, -56.097892);
+  assert.equal(conversations.updatedPending?.pinName, "Cuiabá Centro");
+  assert.equal(conversations.updatedPending?.locationCity, "Cuiabá");
+  assert.equal(conversations.updatedPending?.locationState, "MT");
+  assert.equal(conversations.updatedPending?.locationText, "Cuiabá - MT");
+  assert.equal(conversations.updatedPending?.locationSource, "whatsapp_native");
+
+  assert.equal(lastLocations.upserted?.latitude, -15.601411);
+  assert.equal(lastLocations.upserted?.longitude, -56.097892);
+  assert.equal(lastLocations.upserted?.city, "Cuiabá");
+  assert.equal(lastLocations.upserted?.state, "MT");
+  assert.equal(lastLocations.upserted?.source, "whatsapp_native");
+});
+
+test("Second native pin + raw_text while pending_slot='service' executes search with new pin as authority", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  const now = new Date();
+  conversations.active = {
+    id: conversationId,
+    customerId,
+    status: "active",
+    pendingSlot: "service",
+    originalRawText: "Sinop - MT",
+    serviceText: "",
+    locationText: "Sinop - MT",
+    countryCode: "BR",
+    limitValue: 3,
+    lastMessageText: "Sinop - MT",
+    searchRequestId: null,
+    expiresAt: new Date(now.getTime() + 60_000),
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    isExpired: false,
+    pinLatitude: -11.854812,
+    pinLongitude: -55.508934,
+    pinName: "Sinop Centro",
+    locationSource: "whatsapp_native",
+    locationCity: "Sinop",
+    locationState: "MT",
+  };
+  const search = new FakeSearchConversationService();
+  const lastLocations = new FakeCustomerLastLocations();
+  const locationResolution = new FakeLocationResolutionService();
+  locationResolution.reverseResult = { city: "Cuiabá", state: "MT", countryCode: "BR" };
+  const serviceResolution = new FakeServiceResolutionRepository();
+  const orchestrator = new FakeSearchOrchestrator();
+  orchestrator.orchestrateOutcome = {
+    kind: "response",
+    response: {
+      status: "matched",
+      reason: null,
+      service_resolution: { status: "resolved", query: "eletricista", match: { service: { id: "s1", name: "Eletricista", slug: "eletricista" }, confidence: 1 }, candidates: [] },
+      location_resolution: { status: "resolved", query: "Cuiabá - MT", country_code: "BR", match: { label: "Cuiabá - MT", latitude: -15.601411, longitude: -56.097892, city: "Cuiabá", state: "MT", country_code: "BR", neighborhood: null, confidence: 1, layer: "whatsapp_native" }, candidates: [], provider: "whatsapp_native" },
+      matching: { search_request_id: "sr-123", matches: [{ id: "m1", match_id: "m1", professional_id: "p1", display_name: "Richard", rank_position: 1 }] as never },
+    },
+  };
+
+  const router = new DefaultCustomerSearchRouter(
+    customers, conversations, search, selectionService() as never, globalService() as never,
+    lastLocations, locationResolution, serviceResolution, orchestrator,
+  );
+
+  const outcome = await router.route({
+    phone_e164: input.phone_e164,
+    raw_text: "eletricista",
+    country_code: "BR",
+    limit: 3,
+    location: { latitude: -15.601411, longitude: -56.097892, name: "Cuiabá Centro" },
+  });
+
+  assert.equal(outcome.kind, "response");
+  assert.equal(conversations.movedToSelection?.pinLatitude, -15.601411);
+  assert.equal(conversations.movedToSelection?.pinLongitude, -56.097892);
+  assert.equal(conversations.movedToSelection?.locationCity, "Cuiabá");
+  assert.equal(conversations.movedToSelection?.locationState, "MT");
+  assert.equal(conversations.movedToSelection?.locationSource, "whatsapp_native");
+  assert.equal(orchestrator.lastInput?.coordinates?.latitude, -15.601411);
+  assert.equal(orchestrator.lastInput?.coordinates?.city, "Cuiabá");
+  assert.equal(lastLocations.upserted?.latitude, -15.601411);
+  assert.equal(lastLocations.upserted?.city, "Cuiabá");
+});
