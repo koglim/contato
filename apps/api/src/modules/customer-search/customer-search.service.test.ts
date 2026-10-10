@@ -29,7 +29,9 @@ const input = { phone_e164: "+5566999999999", raw_text: "preciso de eletricista 
 
 class FakeCustomers implements CustomerRepository {
   calls: string[] = [];
+  customer: { id: string } | null = { id: customerId };
   async findOrCreateByPhoneE164(phone: string) { this.calls.push(phone); return { id: customerId }; }
+  async findByPhoneE164(phone: string) { this.calls.push(phone); return this.customer; }
 }
 
 class FakeConversations implements SearchConversationRepository {

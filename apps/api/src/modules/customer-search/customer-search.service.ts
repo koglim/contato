@@ -87,12 +87,17 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
 
     let customer;
     try {
-      customer = await this.customers.findOrCreateByPhoneE164(input.phone_e164);
+      customer = this.customers.findByPhoneE164
+        ? await this.customers.findByPhoneE164(input.phone_e164)
+        : await this.customers.findOrCreateByPhoneE164(input.phone_e164);
     } catch {
       return false;
     }
 
-    await this.conversations.expireStaleForCustomer(customer.id);
+    if (!customer) {
+      return false;
+    }
+
     const activeConversation = await this.conversations.findActiveByCustomerId(customer.id);
 
     if (activeConversation) {
