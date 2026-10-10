@@ -19,7 +19,12 @@ import type { SearchOrchestrationService } from "../search-orchestration/search-
 import type { SearchConversationConfig } from "../../config/search-conversation.js";
 import { parseLocationConfirmation } from "../search-conversations/location-confirmation.parser.js";
 import { extractExplicitLocation } from "../message-interpretation/message-interpretation.location.js";
-import type { CustomerSearchRouteInput, CustomerSearchRouteOutcome, CustomerSearchRouter } from "./customer-search.types.js";
+import type {
+  CustomerSearchRouteInput,
+  CustomerSearchRouteOutcome,
+  CustomerSearchRouter,
+  CustomerSearchTurnOwnershipInput,
+} from "./customer-search.types.js";
 
 function isActiveConversationConflict(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error
@@ -66,6 +71,67 @@ export class DefaultCustomerSearchRouter implements CustomerSearchRouter {
     private readonly searchOrchestrationService?: SearchOrchestrationService,
     private readonly config: SearchConversationConfig = { ttlMinutes: 30, resumeTtlMinutes: 1440, processingLeaseSeconds: 60 },
   ) {}
+
+  async shouldOwnTurn(input: CustomerSearchTurnOwnershipInput): Promise<boolean> {
+    // Condition A: Current inbound has structured coordinates
+    if (
+      input.location !== undefined &&
+      input.location !== null &&
+      input.location.latitude !== undefined &&
+      input.location.latitude !== null &&
+      input.location.longitude !== undefined &&
+      input.location.longitude !== null
+    ) {
+      return true;
+    }
+
+    let customer;
+    try {
+      customer = await this.customers.findOrCreateByPhoneE164(input.phone_e164);
+    } catch {
+      return false;
+    }
+
+    await this.conversations.expireStaleForCustomer(customer.id);
+    const activeConversation = await this.conversations.findActiveByCustomerId(customer.id);
+
+    if (activeConversation) {
+      // Condition B: Active conversation pending_slot='service' and already has authoritative stored pin coordinates
+      if (
+        activeConversation.pendingSlot === "service" &&
+        activeConversation.pinLatitude !== null &&
+        activeConversation.pinLatitude !== undefined &&
+        activeConversation.pinLongitude !== null &&
+        activeConversation.pinLongitude !== undefined
+      ) {
+        return true;
+      }
+
+      // Condition C: Active conversation pending_slot='location_confirmation'
+      if (activeConversation.pendingSlot === "location_confirmation") {
+        return true;
+      }
+
+      return false;
+    }
+
+    // Condition D: No active conversation + customer_last_locations exists + incoming text resolves to a service + no explicit new location
+    const rawText = input.raw_text?.trim() ?? "";
+    if (rawText.length > 0 && this.customerLastLocations && this.serviceResolutionRepository) {
+      const rememberedLocation = await this.customerLastLocations.findByCustomerId(customer.id);
+      if (rememberedLocation) {
+        const serviceRes = await this.serviceResolutionRepository.resolve({ text: rawText });
+        if (serviceRes.status === "resolved" && serviceRes.match) {
+          const hasExplicitLocation = Boolean(extractExplicitLocation(rawText));
+          if (!hasExplicitLocation) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
 
   async route(input: CustomerSearchRouteInput): Promise<CustomerSearchRouteOutcome> {
     let customer;

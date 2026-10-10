@@ -1051,3 +1051,189 @@ test("Second native pin + raw_text while pending_slot='service' executes search 
   assert.equal(lastLocations.upserted?.latitude, -15.601411);
   assert.equal(lastLocations.upserted?.city, "Cuiabá");
 });
+
+test("shouldOwnTurn: Condition A - returns true when structured coordinates are present", async () => {
+  const router = new DefaultCustomerSearchRouter(
+    new FakeCustomers(),
+    new FakeConversations(),
+    new FakeSearchConversationService(),
+    selectionService() as never,
+    globalService() as never,
+  );
+  const result = await router.shouldOwnTurn({
+    phone_e164: "+5566999999999",
+    location: { latitude: -15.601, longitude: -56.097, name: "Praça da República" },
+  });
+  assert.equal(result, true);
+});
+
+test("shouldOwnTurn: Condition B - returns true when active conversation has pending_slot=service and pin coordinates", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  const now = new Date();
+  conversations.active = {
+    id: "conv-1",
+    customerId: "cust-1",
+    status: "active",
+    pendingSlot: "service",
+    originalRawText: "localização enviada",
+    serviceText: "",
+    locationText: "Cuiabá - MT",
+    countryCode: "BR",
+    limitValue: 3,
+    lastMessageText: null,
+    searchRequestId: null,
+    expiresAt: new Date(now.getTime() + 60_000),
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    isExpired: false,
+    pinLatitude: -15.601411,
+    pinLongitude: -56.097892,
+    pinName: "Cuiabá Centro",
+    locationSource: "whatsapp_native",
+    locationCity: "Cuiabá",
+    locationState: "MT",
+  };
+  const router = new DefaultCustomerSearchRouter(
+    customers,
+    conversations,
+    new FakeSearchConversationService(),
+    selectionService() as never,
+    globalService() as never,
+  );
+  const result = await router.shouldOwnTurn({
+    phone_e164: "+5566999999999",
+    raw_text: "eletricista",
+  });
+  assert.equal(result, true);
+});
+
+test("shouldOwnTurn: Condition C - returns true when active conversation has pending_slot=location_confirmation", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  const now = new Date();
+  conversations.active = {
+    id: "conv-1",
+    customerId: "cust-1",
+    status: "active",
+    pendingSlot: "location_confirmation",
+    originalRawText: "eletricista",
+    serviceText: "eletricista",
+    locationText: "Cuiabá - MT",
+    countryCode: "BR",
+    limitValue: 3,
+    lastMessageText: null,
+    searchRequestId: null,
+    expiresAt: new Date(now.getTime() + 60_000),
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    isExpired: false,
+    pinLatitude: -15.601411,
+    pinLongitude: -56.097892,
+    pinName: null,
+    locationSource: "memory_reuse",
+    locationCity: "Cuiabá",
+    locationState: "MT",
+  };
+  const router = new DefaultCustomerSearchRouter(
+    customers,
+    conversations,
+    new FakeSearchConversationService(),
+    selectionService() as never,
+    globalService() as never,
+  );
+  const result = await router.shouldOwnTurn({
+    phone_e164: "+5566999999999",
+    raw_text: "sim",
+  });
+  assert.equal(result, true);
+});
+
+test("shouldOwnTurn: Condition D - returns true when no active conversation, remembered location exists, and service text has no explicit location", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  conversations.active = null;
+  const lastLocations = new FakeCustomerLastLocations();
+  lastLocations.lastLocation = {
+    id: "loc-1",
+    customerId,
+    latitude: -15.601411,
+    longitude: -56.097892,
+    city: "Cuiabá",
+    state: "MT",
+    countryCode: "BR",
+    label: "Cuiabá - MT",
+    source: "whatsapp_native",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const serviceResolution = new FakeServiceResolutionRepository();
+  serviceResolution.resolvedService = {
+    status: "resolved",
+    normalized_text: "eletricista",
+    match: { service: { id: "s1", name: "Eletricista", slug: "eletricista" }, confidence: 1, method: "exact", matched_term: "eletricista" },
+    candidates: [],
+  };
+
+  const router = new DefaultCustomerSearchRouter(
+    customers,
+    conversations,
+    new FakeSearchConversationService(),
+    selectionService() as never,
+    globalService() as never,
+    lastLocations,
+    undefined,
+    serviceResolution,
+  );
+  const result = await router.shouldOwnTurn({
+    phone_e164: "+5566999999999",
+    raw_text: "eletricista",
+  });
+  assert.equal(result, true);
+});
+
+test("shouldOwnTurn: returns false when service text includes explicit new location (not remembered location reuse)", async () => {
+  const customers = new FakeCustomers();
+  const conversations = new FakeConversations();
+  conversations.active = null;
+  const lastLocations = new FakeCustomerLastLocations();
+  lastLocations.lastLocation = {
+    id: "loc-1",
+    customerId,
+    latitude: -15.601411,
+    longitude: -56.097892,
+    city: "Cuiabá",
+    state: "MT",
+    countryCode: "BR",
+    label: "Cuiabá - MT",
+    source: "whatsapp_native",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const serviceResolution = new FakeServiceResolutionRepository();
+  serviceResolution.resolvedService = {
+    status: "resolved",
+    normalized_text: "eletricista em sinop",
+    match: { service: { id: "s1", name: "Eletricista", slug: "eletricista" }, confidence: 1, method: "phrase", matched_term: "eletricista" },
+    candidates: [],
+  };
+
+  const router = new DefaultCustomerSearchRouter(
+    customers,
+    conversations,
+    new FakeSearchConversationService(),
+    selectionService() as never,
+    globalService() as never,
+    lastLocations,
+    undefined,
+    serviceResolution,
+  );
+  const result = await router.shouldOwnTurn({
+    phone_e164: "+5566999999999",
+    raw_text: "eletricista em Sinop",
+  });
+  assert.equal(result, false);
+});
+

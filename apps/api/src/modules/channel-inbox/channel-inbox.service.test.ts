@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChannelInboundMessageInput, CustomerSearchMessageResponse } from "@contatocerto/shared";
-import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
+import type { CustomerSearchRouter, CustomerSearchTurnOwnershipInput } from "../customer-search/customer-search.types.js";
 import { DefaultChannelInboxService } from "./channel-inbox.service.js";
 import { DefaultMessagePresenter } from "../message-presentation/message-presentation.service.js";
 import { MatchReservationConflictError } from "../channel-outbox/channel-outbox.repository.js";
@@ -145,7 +145,12 @@ class FakeRouter implements CustomerSearchRouter {
   outcome: Awaited<ReturnType<CustomerSearchRouter["route"]>> = { kind: "response", response: routerResponse() };
   started: (() => void) | undefined;
   pending: Promise<void> | undefined;
+  ownTurn = false;
   async route(inputValue: Parameters<CustomerSearchRouter["route"]>[0]) { this.calls += 1; this.received = inputValue; this.started?.(); await this.pending; return this.outcome; }
+  async shouldOwnTurn(input: CustomerSearchTurnOwnershipInput) {
+    if (input.location?.latitude != null && input.location?.longitude != null) return true;
+    return this.ownTurn;
+  }
 }
 
 function context(contextualHandler?: ContextualInboxHandler) {
@@ -486,3 +491,40 @@ test("CONTEXTUAL_ENABLED_TEXT_ONLY_STILL_USES_CONTEXTUAL: text-only message with
   assert.equal(contextual.calls, 1, "contextual handler must be called for text-only inbound");
   assert.equal(current.router.calls, 0, "customerSearchRouter must not be directly called when contextual handles text");
 });
+
+test("CONTEXTUAL_ENABLED_ROUTER_OWNS_TURN_TEXT_BYPASSES_CONTEXTUAL: text message where router claims ownership bypasses contextual handler", async () => {
+  class FakeContextual implements ContextualInboxHandler {
+    calls = 0;
+    async handle() {
+      this.calls += 1;
+      return { kind: "response", response: routerResponse() };
+    }
+  }
+  const contextual = new FakeContextual();
+  const current = context(contextual);
+  current.router.ownTurn = true; // Router claims domain ownership (e.g. pending_slot=service or location_confirmation)
+
+  const textInput: ChannelInboundMessageInput = {
+    provider: "test",
+    provider_message_id: "msg-service-continuation-001",
+    phone_e164: input.phone_e164,
+    raw_text: "eletricista",
+    country_code: "BR",
+    limit: 3,
+  };
+
+  current.repository.current = record({
+    providerMessageId: "msg-service-continuation-001",
+    rawText: "eletricista",
+    latitude: null,
+    longitude: null,
+    locationName: null,
+  });
+
+  const outcome = await current.service.receive(textInput);
+  assert.equal(outcome.kind, "response");
+  assert.equal(contextual.calls, 0, "contextual handler must NOT be called when router owns the turn");
+  assert.equal(current.router.calls, 1, "customerSearchRouter must be called exactly once");
+  assert.equal(current.router.received?.raw_text, "eletricista");
+});
+

@@ -7,6 +7,7 @@ import {
   contactCompletionMessageSchema,
   interactiveActionResultSchema,
   type ChannelInboundMessageInput,
+  type ChannelLocationInput,
 } from "@contatocerto/shared";
 import { InboxFenceError, InboxPermanentError, InboxContextChangedError } from "./inbox-recovery.policy.js";
 import { PostgresCustomerRepository, CustomerPhoneIdentityCollisionError } from "../customers/customer.repository.js";
@@ -15,7 +16,7 @@ import type { ProfessionalOpportunityService } from "../professional-opportunity
 import type { ContactCompletionService } from "../contact-completion/contact-completion.service.js";
 import type { InteractiveActionService } from "../interactive-action/interactive-action.service.js";
 import { GeocodingProviderError } from "../location-resolution/location-resolution.types.js";
-import type { CustomerSearchRouter } from "../customer-search/customer-search.types.js";
+import type { CustomerSearchRouter, CustomerSearchTurnOwnershipInput } from "../customer-search/customer-search.types.js";
 import type { ChannelInboxConfig } from "../../config/channel-inbox.js";
 import type { MessagePresenter } from "../message-presentation/message-presentation.types.js";
 import { presentSelectionMessage } from "../selection-message/selection-message.presenter.js";
@@ -105,6 +106,22 @@ class InboxOutcomeError extends Error {
   constructor(readonly outcome: Exclude<ChannelInboxOutcome, { kind: "response" }>) { super(outcome.kind); }
 }
 
+async function shouldRouterOwnTurn(
+  router: CustomerSearchRouter,
+  input: CustomerSearchTurnOwnershipInput,
+): Promise<boolean> {
+  if (router.shouldOwnTurn) {
+    return router.shouldOwnTurn(input);
+  }
+  return Boolean(
+    input.location &&
+    input.location.latitude !== undefined &&
+    input.location.latitude !== null &&
+    input.location.longitude !== undefined &&
+    input.location.longitude !== null,
+  );
+}
+
 export class DefaultChannelInboxService implements ChannelInboxService {
   constructor(
     private readonly repository: ChannelInboundMessageRepository,
@@ -119,16 +136,14 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
-    const hasStructuredLocation =
-      input.location !== undefined &&
-      input.location !== null &&
-      input.location.latitude !== undefined &&
-      input.location.latitude !== null &&
-      input.location.longitude !== undefined &&
-      input.location.longitude !== null;
+    const routerOwnsTurn = await shouldRouterOwnTurn(this.customerSearchRouter, {
+      phone_e164: input.phone_e164,
+      raw_text: input.raw_text,
+      location: input.location,
+    });
     const registered = await this.repository.createOrFind(
       input,
-      this.contextualConversation && !hasStructuredLocation ? { contextual: true } : undefined,
+      this.contextualConversation && !routerOwnsTurn ? { contextual: true } : undefined,
     );
     if (!sameInboundPayload(registered.record, input)) {
       await this.repository.recordPayloadConflict?.(registered.record.id, input);
@@ -172,12 +187,23 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       if (completion) return { kind: "response", response: completion };
       const opportunity = await this.professionalOpportunities?.handle(claimed);
       if (opportunity) return { kind: "response", response: opportunity };
-      const hasStructuredLocation =
-        claimed.latitude !== null &&
-        claimed.latitude !== undefined &&
-        claimed.longitude !== null &&
-        claimed.longitude !== undefined;
-      if (this.contextualConversation && !hasStructuredLocation) {
+      const locationInput: ChannelLocationInput | undefined =
+        claimed.latitude !== null && claimed.latitude !== undefined &&
+        claimed.longitude !== null && claimed.longitude !== undefined
+          ? {
+              latitude: Number(claimed.latitude),
+              longitude: Number(claimed.longitude),
+              ...(claimed.locationName ? { name: claimed.locationName } : {}),
+            }
+          : undefined;
+
+      const routerOwnsTurn = await shouldRouterOwnTurn(this.customerSearchRouter, {
+        phone_e164: claimed.phoneE164,
+        raw_text: claimed.rawText,
+        location: locationInput,
+      });
+
+      if (this.contextualConversation && !routerOwnsTurn) {
         const outcome = await this.contextualConversation.handle(claimed);
         if (outcome.kind !== "response") await this.failOrDefer(claimed.id, processingToken, outcome.kind);
         return outcome;
@@ -189,13 +215,7 @@ export class DefaultChannelInboxService implements ChannelInboxService {
         country_code: claimed.countryCode,
         limit: claimed.limitValue,
         selectionKey: claimed.id,
-        ...(claimed.latitude !== null && claimed.latitude !== undefined && claimed.longitude !== null && claimed.longitude !== undefined ? {
-          location: {
-            latitude: Number(claimed.latitude),
-            longitude: Number(claimed.longitude),
-            ...(claimed.locationName ? { name: claimed.locationName } : {}),
-          },
-        } : {}),
+        ...(locationInput ? { location: locationInput } : {}),
       });
       if (routed.kind !== "response") {
         throw new InboxOutcomeError(routed);

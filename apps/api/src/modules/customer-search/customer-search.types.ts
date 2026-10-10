@@ -1,4 +1,5 @@
 import type {
+  ChannelLocationInput,
   CustomerSearchMessageInput,
   CustomerSearchMessageResponse,
 } from "@contatocerto/shared";
@@ -14,6 +15,13 @@ export type CustomerSearchRouteOutcome =
 
 export type CustomerSearchRouteInput = CustomerSearchMessageInput & { selectionKey?: string };
 
+export type CustomerSearchTurnOwnershipInput = {
+  phone_e164: string;
+  raw_text?: string | null;
+  location?: ChannelLocationInput | null;
+};
+
 export interface CustomerSearchRouter {
   route(input: CustomerSearchRouteInput): Promise<CustomerSearchRouteOutcome>;
+  shouldOwnTurn?(input: CustomerSearchTurnOwnershipInput): Promise<boolean>;
 }
