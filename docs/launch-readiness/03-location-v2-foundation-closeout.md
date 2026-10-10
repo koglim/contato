@@ -27,7 +27,7 @@ A fundação de Localização v2 introduz no ContatoCerto a capacidade de ingest
 > A integração do código ao branch `main` com CI aprovado atesta que o software está pronto e verificado no repositório, mas **NÃO** significa que a capacidade foi implantada em produção.
 >
 > * A Migration 029 **não** foi executada no banco de dados de produção.
-> * A instância instalada do n8n do operador **não** foi atualizada com o novo nó de extração de localização do gateway.
+> * O workflow Gateway instalado no n8n do operador **não** foi atualizado/importado com o suporte versionado de Localização v2.
 > * Nenhum ensaio ponta a ponta com pino real de WhatsApp foi realizado no ambiente de produção.
 > * A ativação em produção exige procedimento operacional controlado e autorizado.
 
@@ -59,7 +59,7 @@ A fundação de Localização v2 introduz no ContatoCerto a capacidade de ingest
    * Parsing determinístico (ADR-002) sem LLM para respostas afirmativas, negativas, substituição por nova localidade ou esclarecimento.
 
 6. **Substituição de Segundo Pino Pendente Serviço:**
-   * Quando o cliente envia um primeiro pino (P1), entra no slot de espera de serviço (`pending_slot = 'service'`) e posteriormente envia um segundo pino (P2) antes do serviço, o manipulador `handleLocationPinWhileAwaitingService` substitui integral e atomicamente as coordenadas e metadados na conversa e na memória, sem deixar resíduos de P1.
+   * Quando o cliente envia um primeiro pino (P1), entra no slot de espera de serviço (`pending_slot = 'service'`) e posteriormente envia um segundo pino (P2) antes do serviço, o manipulador `handleLocationPinWhileAwaitingService` substitui deterministicamente e integralmente o snapshot canônico da localização nos fluxos validados, atualizando a conversa e a memória para o novo pino sem preservar resíduos de P1.
    * Suporte a pino combinado com texto (`location + raw_text`) no mesmo evento, utilizando P2 como autoridade máxima imediata.
 
 7. **Consistência Canônica em `matched` e `no_matches`:**
@@ -100,7 +100,7 @@ REAL_WHATSAPP_LOCATION_E2E=NOT_PERFORMED
 
 * **Deploy em Produção:** NENHUM contêiner ou serviço em produção foi reiniciado ou atualizado com a imagem contendo as alterações do PR #45.
 * **Banco de Dados de Produção:** A Migration 029 NÃO foi executada na instância remota do PostgreSQL.
-* **Instância n8n Instalada:** Os nós de extração de pino nativo e roteamento NÃO foram importados ou ativados no n8n em produção.
+* **Instância n8n Instalada:** O workflow Gateway instalado NÃO foi atualizado/importado com o suporte versionado de Localização v2 no n8n em produção.
 * **Provedores de Mensageria:** NENHUMA mutação foi realizada na Evolution API, Meta Cloud API ou instâncias de WhatsApp.
 
 ---
@@ -108,4 +108,4 @@ REAL_WHATSAPP_LOCATION_E2E=NOT_PERFORMED
 ## 5. Achado Opcional Não-Bloqueante (Parking Lot)
 
 * **Consistência Transacional em Localização + Texto Conjunto:**
-  No fluxo combinado em que o cliente envia pino de localização e texto de serviço em um único evento inbound, uma melhoria arquitetural futura poderá aprimorar a consistência atômica entre a gravação em `customer_last_locations` e a conversa ativa caso a orquestração subsequente retorne `service_unavailable` após a atualização da memória. Este item não bloqueia o fechamento da fundação e foi devidamente registrado no [ROADMAP.md](../ROADMAP.md) sob `# PARKING LOT`.
+  No fluxo combinado em que o cliente envia pino de localização e texto de serviço em um único evento inbound, uma melhoria arquitetural futura poderá aprimorar a consistência transacional entre a gravação em `customer_last_locations` e a conversa ativa caso a orquestração subsequente retorne `service_unavailable` após a atualização da memória. Este item não bloqueia o fechamento da fundação e foi devidamente registrado no [ROADMAP.md](../ROADMAP.md) sob `# PARKING LOT`.
