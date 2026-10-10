@@ -3,7 +3,7 @@ import {
   getPhoneIdentityAliases,
 } from "@contatocerto/shared";
 import type { QueryResultRow } from "pg";
-import { withTransaction, type SqlValue, type DatabaseClient } from "../../database/connection.js";
+import { withTransaction, query, type SqlValue, type DatabaseClient } from "../../database/connection.js";
 
 type CustomerRow = { id: string; phone_e164: string };
 
@@ -20,6 +20,29 @@ export type CustomerQuery = <T extends QueryResultRow>(
   text: string,
   values?: SqlValue[],
 ) => Promise<{ rows: T[] }>;
+
+export async function findCustomerByPhoneE164(
+  db: { query: CustomerQuery },
+  phoneE164: string,
+): Promise<Customer | null> {
+  const canonicalPhone = normalizeBrazilianMobilePhone(phoneE164);
+  const aliases = getPhoneIdentityAliases(canonicalPhone);
+
+  const existing = await db.query<CustomerRow>(
+    `SELECT id, phone_e164 FROM customers WHERE phone_e164 = ANY($1)`,
+    [aliases as string[]],
+  );
+
+  if (existing.rows.length > 1) {
+    throw new CustomerPhoneIdentityCollisionError(phoneE164);
+  }
+
+  if (existing.rows.length === 1) {
+    return { id: existing.rows[0]!.id };
+  }
+
+  return null;
+}
 
 export async function resolveCustomerByPhoneE164(
   db: { query: CustomerQuery },
@@ -60,6 +83,7 @@ export async function resolveCustomerByPhoneE164(
 
 export interface CustomerRepository {
   findOrCreateByPhoneE164(phoneE164: string): Promise<Customer>;
+  findByPhoneE164?(phoneE164: string): Promise<Customer | null>;
 }
 
 export class PostgresCustomerRepository implements CustomerRepository {
@@ -67,6 +91,16 @@ export class PostgresCustomerRepository implements CustomerRepository {
     private readonly execute?: CustomerQuery,
     private readonly transaction: <T>(callback: (client: DatabaseClient) => Promise<T>) => Promise<T> = withTransaction,
   ) {}
+
+  async findByPhoneE164(phoneE164: string, db?: { query: CustomerQuery }): Promise<Customer | null> {
+    if (db) {
+      return findCustomerByPhoneE164(db, phoneE164);
+    }
+    if (this.execute) {
+      return findCustomerByPhoneE164({ query: this.execute }, phoneE164);
+    }
+    return findCustomerByPhoneE164({ query }, phoneE164);
+  }
 
   async findOrCreateByPhoneE164(phoneE164: string, db?: { query: CustomerQuery }): Promise<Customer> {
     if (db) {
