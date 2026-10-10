@@ -49,6 +49,7 @@ import type {
   SearchConversationService,
 } from "./modules/search-conversations/search-conversation.types.js";
 import { PostgresCustomerRepository, type CustomerRepository } from "./modules/customers/customer.repository.js";
+import { PostgresCustomerLastLocationRepository, type CustomerLastLocationRepository } from "./modules/customers/customer-last-location.repository.js";
 import { customerSearchRoutes } from "./modules/customer-search/customer-search.routes.js";
 import { DefaultCustomerSearchRouter } from "./modules/customer-search/customer-search.service.js";
 import type { CustomerSearchRouter } from "./modules/customer-search/customer-search.types.js";
@@ -105,6 +106,7 @@ type AppDependencies = {
   searchConversationService?: SearchConversationService;
   searchConversationConfig?: SearchConversationConfig;
   customerRepository?: CustomerRepository;
+  customerLastLocationRepository?: CustomerLastLocationRepository;
   customerSearchRouter?: CustomerSearchRouter;
   selectionCommandService?: SelectionCommandService;
   globalConversationCommandService?: GlobalConversationCommandService;
@@ -132,6 +134,14 @@ function createLazyLocationResolutionService(provider: GeocodingProvider | undef
         observe,
       );
       return service.resolve(input);
+    },
+    reverseGeocode(input) {
+      service ??= new DeterministicLocationResolutionService(
+        () => provider ?? new OpenRouteServiceGeocodingProvider(),
+        readLocationResolutionConfig(),
+        observe,
+      );
+      return service.reverseGeocode(input);
     },
   };
 }
@@ -169,6 +179,7 @@ export function buildApp({
   searchConversationService,
   searchConversationConfig,
   customerRepository,
+  customerLastLocationRepository,
   customerSearchRouter,
   selectionCommandService,
   globalConversationCommandService,
@@ -240,12 +251,18 @@ export function buildApp({
     resolvedSearchOrchestrationService,
     resolvedSearchConversationConfig,
   );
-  const resolvedCustomerSearchRouter = customerSearchRouter ?? new DefaultCustomerSearchRouter(
+   const resolvedCustomerLastLocationRepository = customerLastLocationRepository ?? new PostgresCustomerLastLocationRepository();
+   const resolvedCustomerSearchRouter = customerSearchRouter ?? new DefaultCustomerSearchRouter(
     customerRepository ?? new PostgresCustomerRepository(),
     resolvedSearchConversationRepository,
     resolvedSearchConversationService,
     selectionCommandService ?? new DefaultSelectionCommandService({ selectionMatchRepository: new PostgresSelectionMatchRepository() }),
     globalConversationCommandService ?? new DefaultGlobalConversationCommandService(new PostgresGlobalConversationCommandRepository()),
+    resolvedCustomerLastLocationRepository,
+    resolvedLocationResolutionService,
+    resolvedServiceResolutionRepository,
+    resolvedSearchOrchestrationService,
+    resolvedSearchConversationConfig,
   );
   const resolvedChannelOutboundMessageRepository = channelOutboundMessageRepository ?? new PostgresChannelOutboundMessageRepository();
   const resolvedChannelOutboundService = channelOutboundService ?? new DefaultChannelOutboundService(

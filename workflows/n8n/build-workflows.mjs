@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { claimDecision, transportDecision, confirmationDecision, httpResponse, buildEvolutionSendRequest } from "./delivery-contract.mjs";
-import { normalizeGatewayEvent, extractEvolutionInteractiveReply, transcriptionDecision, inboxDecision, mediaAdmissionDecision, mediaClaimDecision } from "./gateway-contract.mjs";
+import { normalizeGatewayEvent, extractEvolutionInteractiveReply, extractLocation, transcriptionDecision, inboxDecision, mediaAdmissionDecision, mediaClaimDecision } from "./gateway-contract.mjs";
 
 const node = (name, type, parameters, x, y = 0, extra = {}) => ({
   id: name.toLowerCase().replaceAll(" ", "-"), name, type: `n8n-nodes-base.${type}`,
@@ -96,7 +96,7 @@ const gateway = flow("ContatoCerto - WhatsApp Gateway", [
       webhookId: "3df44b42-e4d3-4080-a1fb-89acaea99659",
       credentials: { jwtAuth: { name: "ContatoCerto Evolution Webhook JWT" } },
     }),
-  code("Validate event", `${extractEvolutionInteractiveReply.toString()}\n${normalizeGatewayEvent.toString()}\nreturn { json: normalizeGatewayEvent($json, { instance: $env.EVOLUTION_INSTANCE, provider: $env.EVOLUTION_PROVIDER, origin: $env.EVOLUTION_WEBHOOK_ORIGIN }) };`, 220),
+  code("Validate event", `${extractEvolutionInteractiveReply.toString()}\n${extractLocation.toString()}\n${normalizeGatewayEvent.toString()}\nreturn { json: normalizeGatewayEvent($json, { instance: $env.EVOLUTION_INSTANCE, provider: $env.EVOLUTION_PROVIDER, origin: $env.EVOLUTION_WEBHOOK_ORIGIN }) };`, 220),
   branch("Text input", "={{ $json.action === 'inbox' }}", 440),
   { ...http("Channel Inbox", "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}", "={{ $json.inbound }}", "ContatoCerto Internal API", 660),
     parameters: { ...http("Channel Inbox", "", null, "", 0).parameters,

@@ -23,7 +23,7 @@ type ChannelInboundMessageRow = {
   provider: string;
   provider_message_id: string;
   phone_e164: string;
-  raw_text: string;
+  raw_text: string | null;
   interactive_action_id?: string | null;
   country_code: string;
   limit_value: number;
@@ -39,6 +39,9 @@ type ChannelInboundMessageRow = {
   contextual_queue: boolean;
   attempt_count: number;
   context_fingerprint: string | null;
+  latitude: number | string | null;
+  longitude: number | string | null;
+  location_name: string | null;
 };
 
 export type ChannelInboxQuery = <T extends QueryResultRow>(text: string, values?: unknown[]) => Promise<{ rows: T[] }>;
@@ -47,7 +50,8 @@ export type ChannelInboxTransaction = <T>(callback: (client: DatabaseClient) => 
 const columns = `
   id, provider, provider_message_id, phone_e164, raw_text, interactive_action_id, country_code, limit_value,
   status, customer_id, conversation_id, search_request_id,
-  result, error_code, processing_token, processing_started_at, recovery_state, contextual_queue, attempt_count, context_fingerprint
+  result, error_code, processing_token, processing_started_at, recovery_state, contextual_queue, attempt_count, context_fingerprint,
+  latitude, longitude, location_name
 `;
 
 function toRecord(row: ChannelInboundMessageRow): ChannelInboundMessageRecord {
@@ -72,6 +76,9 @@ function toRecord(row: ChannelInboundMessageRow): ChannelInboundMessageRecord {
     contextualQueue: row.contextual_queue,
     attemptCount: row.attempt_count,
     contextFingerprint: row.context_fingerprint,
+    latitude: row.latitude !== null && row.latitude !== undefined ? Number(row.latitude) : null,
+    longitude: row.longitude !== null && row.longitude !== undefined ? Number(row.longitude) : null,
+    locationName: row.location_name ?? null,
   };
 }
 
@@ -88,11 +95,23 @@ export class PostgresChannelInboundMessageRepository implements ChannelInboundMe
     const useCtxQueue = Boolean(options?.contextual && !input.interactive_action_id);
     const inserted = await this.execute<ChannelInboundMessageRow>(
       `INSERT INTO channel_inbound_messages (
-         provider, provider_message_id, phone_e164, raw_text, interactive_action_id, country_code, limit_value${useCtxQueue ? ", contextual_queue" : ""}
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7${useCtxQueue ? ", TRUE" : ""})
+         provider, provider_message_id, phone_e164, raw_text, interactive_action_id, country_code, limit_value,
+         latitude, longitude, location_name${useCtxQueue ? ", contextual_queue" : ""}
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${useCtxQueue ? ", TRUE" : ""})
        ON CONFLICT (provider, provider_message_id) DO NOTHING
        RETURNING ${columns}`,
-      [input.provider, input.provider_message_id, phoneE164, input.raw_text, input.interactive_action_id ?? null, input.country_code, input.limit],
+      [
+        input.provider,
+        input.provider_message_id,
+        phoneE164,
+        input.raw_text ?? null,
+        input.interactive_action_id ?? null,
+        input.country_code,
+        input.limit,
+        input.location?.latitude ?? null,
+        input.location?.longitude ?? null,
+        input.location?.name ?? null,
+      ],
     );
     if (inserted.rows[0]) return { record: toRecord(inserted.rows[0]), created: true };
 

@@ -58,7 +58,11 @@ export class DefaultMessagePresenter implements MessagePresenter {
       case "needs_location":
         return "Em qual cidade você precisa do atendimento?";
       case "needs_service":
-        return "Qual serviço você precisa? Pode me contar o que aconteceu.";
+        return "prompt" in result && typeof result.prompt === "string" && result.prompt.length > 0
+          ? result.prompt
+          : "Qual serviço você precisa? Pode me contar o que aconteceu.";
+      case "needs_location_confirmation":
+        return result.prompt;
       case "matched":
         return presentMatches(matchingFrom(result));
       case "no_matches":

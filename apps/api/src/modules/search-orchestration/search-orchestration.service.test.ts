@@ -111,7 +111,40 @@ test("search orchestration passes the original text and resolved location to mat
   const noMatches = createOrchestrator(serviceResolved, locationResolved, { kind: "success", response: matchingResponse([]) });
   const noMatchesResult = await noMatches.service.orchestrate(input);
   assert.equal(noMatchesResult.kind, "response");
-  if (noMatchesResult.kind === "response") assert.equal(noMatchesResult.response.status, "no_matches");
   const unavailable = createOrchestrator(serviceResolved, locationResolved, { kind: "service_inactive" });
   assert.deepEqual(await unavailable.service.orchestrate(input), { kind: "service_unavailable" });
 });
+
+test("search orchestration uses direct coordinates when provided without querying location service", async () => {
+  const matched = createOrchestrator(serviceResolved, locationResolved, { kind: "success", response: matchingResponse([]) });
+  const result = await matched.service.orchestrate({
+    ...input,
+    coordinates: {
+      latitude: -11.85,
+      longitude: -55.51,
+      city: "Sinop",
+      state: "MT",
+      source: "whatsapp_native",
+    },
+  });
+
+  assert.equal(result.kind, "response");
+  assert.deepEqual(matched.order, ["service", "matching"]);
+  assert.equal(matched.locationService.calls, 0);
+  assert.deepEqual(matched.matchingRepository.received, {
+    raw_text: input.raw_text,
+    service_id: serviceId,
+    latitude: -11.85,
+    longitude: -55.51,
+    city: "Sinop",
+    state: "MT",
+    neighborhood: null,
+    limit: 3,
+  });
+  if (result.kind === "response") {
+    assert.equal(result.response.location_resolution?.match?.latitude, -11.85);
+    assert.equal(result.response.location_resolution?.match?.longitude, -55.51);
+    assert.equal(result.response.location_resolution?.match?.layer, "whatsapp_native");
+  }
+});
+

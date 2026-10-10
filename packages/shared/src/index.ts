@@ -33,6 +33,7 @@ export {
   locationResolutionResponseSchema,
 } from "./schemas/location-resolution.js";
 export {
+  searchOrchestrationCoordinatesSchema,
   searchOrchestrationRequestSchema,
   searchOrchestrationResponseSchema,
 } from "./schemas/search-orchestration.js";
@@ -45,6 +46,8 @@ export {
   continueSearchConversationParamsSchema,
   continueSearchConversationRequestSchema,
   continueSearchConversationResponseSchema,
+  locationConfirmationResultSchema,
+  nativeLocationNeedsServiceResultSchema,
   startSearchConversationRequestSchema,
   startSearchConversationResponseSchema,
 } from "./schemas/search-conversation.js";
@@ -64,6 +67,7 @@ export { globalConversationMessageContractSchema } from "./schemas/global-conver
 export {
   channelInboundMessageRequestSchema,
   channelInboundMessageResponseSchema,
+  channelLocationInputSchema,
 } from "./schemas/channel-inbox.js";
 export {
   channelOutboundMessageClaimResponseSchema,
@@ -131,6 +135,7 @@ export type {
 export type {
   ChannelInboundMessageInput,
   ChannelInboundMessageResponse,
+  ChannelLocationInput,
 } from "./types/channel-inbox.js";
 export type {
   ChannelOutboundMessageClaimResponse,

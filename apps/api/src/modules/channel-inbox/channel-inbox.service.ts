@@ -32,8 +32,13 @@ import type {
 function searchRequestIdFrom(record: ReturnType<typeof customerSearchMessageResponseSchema.parse>): string | null {
   if (record.route === "selection" || record.route === "global_command") return null;
   const result = record.conversation.result;
-  if ("matching" in result) return result.matching?.search_request_id ?? null;
-  return result.orchestration?.matching?.search_request_id ?? null;
+  if ("matching" in result && result.matching) {
+    return result.matching.search_request_id ?? null;
+  }
+  if ("orchestration" in result && (result as { orchestration?: { matching?: { search_request_id?: string } } }).orchestration?.matching) {
+    return (result as { orchestration: { matching: { search_request_id: string } } }).orchestration.matching.search_request_id;
+  }
+  return null;
 }
 
 function presentedMatchIdsFrom(record: ReturnType<typeof customerSearchMessageResponseSchema.parse>): string[] {
@@ -41,8 +46,13 @@ function presentedMatchIdsFrom(record: ReturnType<typeof customerSearchMessageRe
   if (record.route === "selection") return [];
   const result = record.conversation.result;
   if (result.status !== "matched") return [];
-  const matching = "matching" in result ? result.matching : result.orchestration.matching;
-  return matching?.matches.map((match) => match.match_id) ?? [];
+  if ("matching" in result && result.matching) {
+    return result.matching.matches.map((match) => match.match_id);
+  }
+  if ("orchestration" in result && (result as { orchestration?: { matching?: { matches: Array<{ match_id: string }> } } }).orchestration?.matching) {
+    return (result as { orchestration: { matching: { matches: Array<{ match_id: string }> } } }).orchestration.matching.matches.map((match) => match.match_id);
+  }
+  return [];
 }
 
 function errorCodeFor(error: unknown) {
@@ -76,11 +86,19 @@ function presentRouteResult(result: ReturnType<typeof customerSearchMessageRespo
 }
 
 function sameInboundPayload(record: ChannelInboundMessageRecord, input: ChannelInboundMessageInput) {
+  const sameLocation = input.location
+    ? record.latitude !== null && record.latitude !== undefined
+      && Number(record.latitude) === input.location.latitude
+      && record.longitude !== null && record.longitude !== undefined
+      && Number(record.longitude) === input.location.longitude
+    : (record.latitude === null || record.latitude === undefined) && (record.longitude === null || record.longitude === undefined);
+
   return record.phoneE164 === input.phone_e164
-    && record.rawText === input.raw_text
+    && (record.rawText ?? null) === (input.raw_text ?? null)
     && record.countryCode === input.country_code
     && record.limitValue === input.limit
-    && (record.interactiveActionId ?? null) === (input.interactive_action_id ?? null);
+    && (record.interactiveActionId ?? null) === (input.interactive_action_id ?? null)
+    && sameLocation;
 }
 
 class InboxOutcomeError extends Error {
@@ -152,10 +170,17 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       const operation = async (): Promise<ChannelInboxOutcome> => {
       const routed = await this.customerSearchRouter.route({
         phone_e164: claimed.phoneE164,
-        raw_text: claimed.rawText,
+        raw_text: claimed.rawText ?? undefined,
         country_code: claimed.countryCode,
         limit: claimed.limitValue,
         selectionKey: claimed.id,
+        ...(claimed.latitude !== null && claimed.latitude !== undefined && claimed.longitude !== null && claimed.longitude !== undefined ? {
+          location: {
+            latitude: Number(claimed.latitude),
+            longitude: Number(claimed.longitude),
+            ...(claimed.locationName ? { name: claimed.locationName } : {}),
+          },
+        } : {}),
       });
       if (routed.kind !== "response") {
         throw new InboxOutcomeError(routed);

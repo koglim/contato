@@ -6,7 +6,8 @@ import type {
 } from "@contatocerto/shared";
 
 export type SearchConversationStatus = "active" | "completed" | "cancelled" | "expired";
-export type SearchConversationPendingSlot = "location" | "service" | "selection";
+export type SearchConversationPendingSlot = "location" | "service" | "selection" | "location_confirmation";
+export type SearchConversationLocationSource = "whatsapp_native" | "text_resolved" | "memory_reuse";
 
 export type SearchConversationRecord = {
   id: string;
@@ -25,6 +26,12 @@ export type SearchConversationRecord = {
   updatedAt: Date;
   completedAt: Date | null;
   isExpired: boolean;
+  pinLatitude?: number | null;
+  pinLongitude?: number | null;
+  pinName?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type CreatePendingConversation = {
@@ -36,6 +43,12 @@ export type CreatePendingConversation = {
   countryCode: string;
   limitValue: number;
   ttlMinutes: number;
+  pinLatitude?: number | null;
+  pinLongitude?: number | null;
+  pinName?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type CreateAwaitingSelectionConversation = {
@@ -47,6 +60,12 @@ export type CreateAwaitingSelectionConversation = {
   limitValue: number;
   searchRequestId: string;
   ttlMinutes: number;
+  pinLatitude?: number | null;
+  pinLongitude?: number | null;
+  pinName?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type UpdatePendingConversation = {
@@ -57,6 +76,12 @@ export type UpdatePendingConversation = {
   locationText: string | null;
   lastMessageText: string;
   ttlMinutes: number;
+  pinLatitude?: number | null;
+  pinLongitude?: number | null;
+  pinName?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
 };
 
 export type MoveToAwaitingSelectionConversation = {
@@ -67,6 +92,21 @@ export type MoveToAwaitingSelectionConversation = {
   lastMessageText: string;
   searchRequestId: string;
   ttlMinutes: number;
+  pinLatitude?: number | null;
+  pinLongitude?: number | null;
+  pinName?: string | null;
+  locationSource?: SearchConversationLocationSource | null;
+  locationCity?: string | null;
+  locationState?: string | null;
+};
+
+export type CompleteSearchConversationLocationSnapshot = {
+  latitude: number | null;
+  longitude: number | null;
+  name?: string | null;
+  source: SearchConversationLocationSource | null;
+  city?: string | null;
+  state?: string | null;
 };
 
 export type CompleteSearchConversation = {
@@ -76,6 +116,7 @@ export type CompleteSearchConversation = {
   locationText: string;
   lastMessageText: string;
   searchRequestId: string;
+  locationSnapshot?: CompleteSearchConversationLocationSnapshot;
 };
 
 export type HistoricallyShownCandidate = {

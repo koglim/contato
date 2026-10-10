@@ -33,8 +33,9 @@ Iniciativas ativas e imediatas para o ciclo atual de desenvolvimento:
 1. **Launch Readiness / Homologação Residual:**
    * Checkpoint A & A.2 de auditoria da realidade atual e runtime remoto concluído em 2026-09-28 ([`docs/launch-readiness/00-current-reality-audit.md`](launch-readiness/00-current-reality-audit.md)).
    * **Homologação em Produção Real (2026-10-01 a 2026-10-09):** Happy path Golden E2E #2, subfluxos de indisponibilidade profissional, contestação bilateral (T34), seleção expirada (T18), ciclo completo de notificação via template e conclusão bilateral de atendimento por botões rápidos (WP6.9 / Gate B — [`docs/launch-readiness/01-wp6-9-gate-b-closeout.md`](launch-readiness/01-wp6-9-gate-b-closeout.md)) e preservação/retomada de busca com outra busca ativa (T29 — [`docs/launch-readiness/02-t29-real-e2e-closeout.md`](launch-readiness/02-t29-real-e2e-closeout.md)) comprovados em produção real. **T29 — REAL PRODUCTION HOMOLOGATION COMPLETE / PASS** (`LAUNCH_READINESS_T29_RESIDUAL = CLOSED`).
-2. **Localização v2 (Fundação de Entrada):**
-   * Suporte a mensagens de localização nativa do WhatsApp (pino geográfico / mapa) e retenção inteligente da última localização com confirmação explícita (*"É para Sinop - MT novamente?"*).
+2. **Localização v2 — Fundação de Entrada:**
+   * **Status:** IMPLEMENTED IN PR #45 / AWAITING INDEPENDENT REVIEW AND MERGE.
+   * Ingestão nativa de mensagens de pino de localização do WhatsApp (`message.locationMessage`), dutos estruturados Gateway -> Inbox durável (`channel_inbound_messages`), coordenadas exatas como autoridade máxima de busca espacial, geocodificação reversa para enriquecimento de metadados, memória durável de última localização (`customer_last_locations`) e confirmação explícita obrigatória antes do reuso (`location_confirmation`) com zero reuso silencioso e zero chamadas LLM (Migration 029 / ADR-007). Em fase de revisão independente e validação em CI.
 3. **Reconciliação n8n / Evolution / Workflows Versionados:**
    * O Shared Delivery e o Gateway foram sincronizados em produção no Gate B. Pendente apenas a reimportação do suporte a `professional_auth_challenge` para habilitar OTP (`PROFESSIONAL_AUTH_ENABLED=true`).
 4. **Sincronização Contínua da Documentação:**

@@ -63,6 +63,12 @@ test("search conversation repository creates and maps either pending slot with d
     "BR",
     3,
     30,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
   ]);
 
   const serviceContext = fakeDatabase([[row({ pending_slot: "service", location_text: "Sinop" })]]);
@@ -86,6 +92,12 @@ test("search conversation repository creates and maps either pending slot with d
     "BR",
     4,
     30,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
   ]);
 });
 
@@ -128,6 +140,12 @@ test("search conversation repository creates an active selection with an optiona
     5,
     searchRequestId,
     30,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
   ]);
 
   const withoutCustomer = fakeDatabase([[row({
@@ -186,7 +204,7 @@ test("search conversation repository claims a conversation without a processing 
   const context = fakeDatabase([[row()]]);
   assert.equal((await context.repository.claim(conversationId, token, 60))?.id, conversationId);
   assert.match(context.calls[0]!.text, /SET processing_token = \$2, processing_started_at = NOW\(\)/u);
-  assert.match(context.calls[0]!.text, /pending_slot IN \('location', 'service'\)/u);
+  assert.match(context.calls[0]!.text, /pending_slot IN \('location', 'service', 'location_confirmation'\)/u);
   assert.match(context.calls[0]!.text, /expires_at > NOW\(\)/u);
   assert.deepEqual(context.calls[0]!.values, [conversationId, token, 60]);
 });
@@ -242,6 +260,12 @@ test("search conversation repository transitions, completes and releases with th
     "Sinop",
     "Sinop",
     30,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
   ]);
   assert.match(context.calls[1]!.text, /status = 'completed'/u);
   assert.match(context.calls[1]!.text, /processing_token = \$2/u);
@@ -254,6 +278,49 @@ test("search conversation repository transitions, completes and releases with th
     searchRequestId,
   ]);
   assert.match(context.calls[2]!.text, /processing_token = NULL/u);
+});
+
+test("search conversation repository complete with locationSnapshot updates structured location columns", async () => {
+  const token = randomUUID();
+  const searchRequestId = randomUUID();
+  const context = fakeDatabase([[{ id: conversationId }]]);
+
+  assert.equal(await context.repository.complete({
+    id: conversationId,
+    processingToken: token,
+    serviceText: "eletricista",
+    locationText: "Sorriso - MT",
+    lastMessageText: "Sorriso",
+    searchRequestId,
+    locationSnapshot: {
+      latitude: -12.543210,
+      longitude: -55.712340,
+      name: null,
+      source: "text_resolved",
+      city: "Sorriso",
+      state: "MT",
+    },
+  }), true);
+
+  assert.match(context.calls[0]!.text, /status = 'completed'/u);
+  assert.match(context.calls[0]!.text, /pin_latitude = \$7/u);
+  assert.match(context.calls[0]!.text, /location_source = \$10/u);
+  assert.match(context.calls[0]!.text, /location_city = \$11/u);
+  assert.match(context.calls[0]!.text, /location_state = \$12/u);
+  assert.deepEqual(context.calls[0]!.values, [
+    conversationId,
+    token,
+    "eletricista",
+    "Sorriso - MT",
+    "Sorriso",
+    searchRequestId,
+    -12.543210,
+    -55.712340,
+    null,
+    "text_resolved",
+    "Sorriso",
+    "MT",
+  ]);
 });
 
 test("search conversation repository atomically moves claimed location and service conversations to selection", async () => {
@@ -273,7 +340,7 @@ test("search conversation repository atomically moves claimed location and servi
   assert.equal(await locationContext.repository.moveToAwaitingSelection(input), true);
   assert.match(locationContext.calls[0]!.text, /SET pending_slot = 'selection'/u);
   assert.match(locationContext.calls[0]!.text, /processing_token = \$2/u);
-  assert.match(locationContext.calls[0]!.text, /pending_slot IN \('location', 'service'\)/u);
+  assert.match(locationContext.calls[0]!.text, /pending_slot IN \('location', 'service', 'location_confirmation'\)/u);
   assert.match(locationContext.calls[0]!.text, /processing_token = NULL,\s+processing_started_at = NULL/u);
   assert.match(locationContext.calls[0]!.text, /expires_at = NOW\(\) \+ \(\$7 \* INTERVAL '1 minute'\)/u);
   assert.doesNotMatch(locationContext.calls[0]!.text, /matches|shown_at/u);
@@ -285,6 +352,12 @@ test("search conversation repository atomically moves claimed location and servi
     "Sinop",
     searchRequestId,
     30,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
   ]);
 
   const serviceContext = fakeDatabase([[{ id: conversationId }]]);
@@ -293,7 +366,7 @@ test("search conversation repository atomically moves claimed location and servi
     locationText: "Sorriso",
     lastMessageText: "eletricista",
   }), true);
-  assert.match(serviceContext.calls[0]!.text, /pending_slot IN \('location', 'service'\)/u);
+  assert.match(serviceContext.calls[0]!.text, /pending_slot IN \('location', 'service', 'location_confirmation'\)/u);
 });
 
 test("search conversation repository returns false when a selection transition updates no claimed row", async () => {
