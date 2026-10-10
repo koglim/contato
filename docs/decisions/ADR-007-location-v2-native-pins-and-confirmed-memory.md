@@ -1,14 +1,14 @@
 # ADR-007: Localização v2 — Pinos Nativos de WhatsApp, Coordenadas Exatas e Memória Confirmada de Localização
 
-* **Status:** ACCEPTED / IMPLEMENTED IN PR #45 (Awaiting independent review and merge)
+* **Status:** ACCEPTED / IMPLEMENTED / MERGED
 * **Data:** 2026-10-09
 * **Decisores:** Produto e Arquitetura ContatoCerto
 
 ---
 
 > [!NOTE]
-> **Fundação de Entrada de Localização v2 (Implementação no PR #45):**
-> Este documento formaliza a arquitetura e as regras de domínio para a ingestão nativa de pinos de localização do WhatsApp, preservação de coordenadas geográficas exatas no matching espacial, geocodificação reversa para enriquecimento contextual e a memória durável de última localização com confirmação explícita obrigatória antes do reuso. Implementado no **PR #45** (`feat/location-v2-foundation`, Migration 029), aguardando aprovação de revisão independente e merge.
+> **Fundação de Entrada de Localização v2 (Implementação e Integração no PR #45):**
+> Este documento formaliza a arquitetura e as regras de domínio para a ingestão nativa de pinos de localização do WhatsApp, preservação de coordenadas geográficas exatas no matching espacial, geocodificação reversa para enriquecimento contextual e a memória durável de última localização com confirmação explícita obrigatória antes do reuso. Implementado no **PR #45** (`feat/location-v2-foundation`, Migration 029) e integrado ao branch canônico `main` (commit de merge `3c74fbba13d2d4879c8e8ca4ce472c4a9605ff61`, CI pós-merge `38009843312` SUCCESS). Deploy e homologação em produção permanecem pendentes de etapa operacional autorizada.
 
 ---
 
