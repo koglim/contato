@@ -119,7 +119,17 @@ export class DefaultChannelInboxService implements ChannelInboxService {
   ) {}
 
   async receive(input: ChannelInboundMessageInput): Promise<ChannelInboxOutcome> {
-    const registered = await this.repository.createOrFind(input, this.contextualConversation ? { contextual: true } : undefined);
+    const hasStructuredLocation =
+      input.location !== undefined &&
+      input.location !== null &&
+      input.location.latitude !== undefined &&
+      input.location.latitude !== null &&
+      input.location.longitude !== undefined &&
+      input.location.longitude !== null;
+    const registered = await this.repository.createOrFind(
+      input,
+      this.contextualConversation && !hasStructuredLocation ? { contextual: true } : undefined,
+    );
     if (!sameInboundPayload(registered.record, input)) {
       await this.repository.recordPayloadConflict?.(registered.record.id, input);
       return { kind: "channel_message_payload_conflict" };
@@ -162,7 +172,12 @@ export class DefaultChannelInboxService implements ChannelInboxService {
       if (completion) return { kind: "response", response: completion };
       const opportunity = await this.professionalOpportunities?.handle(claimed);
       if (opportunity) return { kind: "response", response: opportunity };
-      if (this.contextualConversation) {
+      const hasStructuredLocation =
+        claimed.latitude !== null &&
+        claimed.latitude !== undefined &&
+        claimed.longitude !== null &&
+        claimed.longitude !== undefined;
+      if (this.contextualConversation && !hasStructuredLocation) {
         const outcome = await this.contextualConversation.handle(claimed);
         if (outcome.kind !== "response") await this.failOrDefer(claimed.id, processingToken, outcome.kind);
         return outcome;

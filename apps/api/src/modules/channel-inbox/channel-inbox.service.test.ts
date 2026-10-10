@@ -7,6 +7,7 @@ import { DefaultMessagePresenter } from "../message-presentation/message-present
 import { MatchReservationConflictError } from "../channel-outbox/channel-outbox.repository.js";
 import { CustomerPhoneIdentityCollisionError } from "../customers/customer.repository.js";
 import type { ChannelOutboundMessageRecord, ChannelOutboundMessageRepository } from "../channel-outbox/channel-outbox.types.js";
+import type { ContextualInboxHandler } from "../contextual-conversation/contextual.service.js";
 import type {
   ChannelInboundMessageRecord,
   ChannelInboundMessageRepository,
@@ -147,10 +148,10 @@ class FakeRouter implements CustomerSearchRouter {
   async route(inputValue: Parameters<CustomerSearchRouter["route"]>[0]) { this.calls += 1; this.received = inputValue; this.started?.(); await this.pending; return this.outcome; }
 }
 
-function context() {
+function context(contextualHandler?: ContextualInboxHandler) {
   const repository = new FakeRepository(); const router = new FakeRouter();
   const outbox = new FakeOutboundRepository(repository.outbound);
-  return { repository, router, outbox, service: new DefaultChannelInboxService(repository, router, { processingLeaseSeconds: 60 }, new DefaultMessagePresenter(), outbox) };
+  return { repository, router, outbox, service: new DefaultChannelInboxService(repository, router, { processingLeaseSeconds: 60 }, new DefaultMessagePresenter(), outbox, undefined, contextualHandler) };
 }
 
 test("channel inbox processes a new message once and persists its routing references", async () => {
@@ -404,4 +405,84 @@ test("Regression C: customer phone identity collision is handled deterministical
   const outcome = await current.service.receive(input);
   assert.deepEqual(outcome, { kind: "customer_phone_identity_collision" });
   assert.equal(current.repository.markedFailed, "customer_phone_identity_collision");
+});
+
+test("CONTEXTUAL_ENABLED_STRUCTURED_LOCATION_BYPASSES_CONTEXTUAL: claimed record with latitude and longitude bypasses contextual handler to router", async () => {
+  class FakeContextual implements ContextualInboxHandler {
+    calls = 0;
+    async handle() {
+      this.calls += 1;
+      return { kind: "response", response: routerResponse() };
+    }
+  }
+  const contextual = new FakeContextual();
+  const current = context(contextual);
+
+  const locInput: ChannelInboundMessageInput = {
+    provider: "test",
+    provider_message_id: "msg-pin-001",
+    phone_e164: input.phone_e164,
+    country_code: "BR",
+    limit: 3,
+    location: {
+      latitude: -15.601,
+      longitude: -56.097,
+      name: "Praça da República",
+    },
+  };
+
+  current.repository.current = record({
+    providerMessageId: "msg-pin-001",
+    rawText: null,
+    latitude: -15.601,
+    longitude: -56.097,
+    locationName: "Praça da República",
+  });
+
+  const outcome = await current.service.receive(locInput);
+  assert.equal(outcome.kind, "response");
+  assert.equal(contextual.calls, 0, "contextual handler must not be called when native location is present");
+  assert.equal(current.router.calls, 1, "customerSearchRouter must be called exactly once");
+  assert.deepEqual(current.router.received?.location, {
+    latitude: -15.601,
+    longitude: -56.097,
+    name: "Praça da República",
+  });
+  assert.equal(current.router.received?.raw_text, undefined);
+  assert.equal(current.repository.markedProcessed?.result !== null, true);
+  assert.ok(current.repository.outbound);
+});
+
+test("CONTEXTUAL_ENABLED_TEXT_ONLY_STILL_USES_CONTEXTUAL: text-only message without coordinates is still handled by contextual handler", async () => {
+  class FakeContextual implements ContextualInboxHandler {
+    calls = 0;
+    async handle() {
+      this.calls += 1;
+      return { kind: "response", response: routerResponse() };
+    }
+  }
+  const contextual = new FakeContextual();
+  const current = context(contextual);
+
+  const textInput: ChannelInboundMessageInput = {
+    provider: "test",
+    provider_message_id: "msg-text-001",
+    phone_e164: input.phone_e164,
+    raw_text: "preciso de eletricista",
+    country_code: "BR",
+    limit: 3,
+  };
+
+  current.repository.current = record({
+    providerMessageId: "msg-text-001",
+    rawText: "preciso de eletricista",
+    latitude: null,
+    longitude: null,
+    locationName: null,
+  });
+
+  const outcome = await current.service.receive(textInput);
+  assert.equal(outcome.kind, "response");
+  assert.equal(contextual.calls, 1, "contextual handler must be called for text-only inbound");
+  assert.equal(current.router.calls, 0, "customerSearchRouter must not be directly called when contextual handles text");
 });
