@@ -198,12 +198,25 @@ async function setupTestEnvironment() {
   };
 
   const close = async () => {
-    await app.close();
-    await query("DELETE FROM professional_service_areas WHERE professional_id = $1", [proId]);
-    await query("DELETE FROM professional_services WHERE professional_id = $1", [proId]);
-    await query("DELETE FROM professionals WHERE id = $1", [proId]);
-    if (createdService) {
-      await query("DELETE FROM services WHERE id = $1", [serviceId]);
+    try {
+      await app.close();
+    } finally {
+      await withTransaction(async (client) => {
+        await client.query(
+          `DELETE FROM channel_outbound_message_matches WHERE match_id IN (
+             SELECT id FROM matches WHERE professional_id = $1
+           )`,
+          [proId],
+        );
+        await client.query("DELETE FROM contacts WHERE professional_id = $1", [proId]);
+        await client.query("DELETE FROM matches WHERE professional_id = $1", [proId]);
+        await client.query("DELETE FROM professional_service_areas WHERE professional_id = $1", [proId]);
+        await client.query("DELETE FROM professional_services WHERE professional_id = $1", [proId]);
+        await client.query("DELETE FROM professionals WHERE id = $1", [proId]);
+        if (createdService) {
+          await client.query("DELETE FROM services WHERE id = $1", [serviceId]);
+        }
+      });
     }
   };
 
@@ -308,8 +321,11 @@ test("Test 1 (Scenario A): Service-first active conversation pending location by
     )).rows[0].cnt;
     assert.ok(activeCount <= 1, `Active conversation count must be <= 1, got ${activeCount}`);
   } finally {
-    await env.close();
-    await env.cleanup(phoneE164);
+    try {
+      await env.cleanup(phoneE164);
+    } finally {
+      await env.close();
+    }
   }
 });
 
@@ -421,8 +437,11 @@ test("Test 2: Pin First -> Service Full Sequence - pin P1 then service text exec
     )).rows[0].cnt;
     assert.ok(activeCount <= 1);
   } finally {
-    await env.close();
-    await env.cleanup(phoneE164);
+    try {
+      await env.cleanup(phoneE164);
+    } finally {
+      await env.close();
+    }
   }
 });
 
@@ -435,9 +454,9 @@ test("Test 3: Remembered Location -> Service - customer with remembered location
     await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, phoneE164]);
     await query(
       `INSERT INTO customer_last_locations (
-        id, customer_id, latitude, longitude, city, state, country_code, label, source, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'BR', $7, 'whatsapp_native', NOW())`,
-      [randomUUID(), customerId, P1.latitude, P1.longitude, P1.city, P1.state, P1.label],
+        customer_id, latitude, longitude, city, state, country_code, label, source, confirmed_at
+      ) VALUES ($1, $2, $3, $4, $5, 'BR', $6, 'whatsapp_native', NOW())`,
+      [customerId, P1.latitude, P1.longitude, P1.city, P1.state, P1.label],
     );
 
     // Customer sends service text "Eletricista" without explicit location
@@ -482,8 +501,11 @@ test("Test 3: Remembered Location -> Service - customer with remembered location
     )).rows[0].cnt;
     assert.equal(searchCount, 0, "Search must not be silently executed");
   } finally {
-    await env.close();
-    await env.cleanup(phoneE164);
+    try {
+      await env.cleanup(phoneE164);
+    } finally {
+      await env.close();
+    }
   }
 });
 
@@ -496,9 +518,9 @@ test("Test 4: Location Confirmation -> Sim - sending 'sim' confirms remembered l
     await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, phoneE164]);
     await query(
       `INSERT INTO customer_last_locations (
-        id, customer_id, latitude, longitude, city, state, country_code, label, source, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'BR', $7, 'whatsapp_native', NOW())`,
-      [randomUUID(), customerId, P1.latitude, P1.longitude, P1.city, P1.state, P1.label],
+        customer_id, latitude, longitude, city, state, country_code, label, source, confirmed_at
+      ) VALUES ($1, $2, $3, $4, $5, 'BR', $6, 'whatsapp_native', NOW())`,
+      [customerId, P1.latitude, P1.longitude, P1.city, P1.state, P1.label],
     );
 
     const convId = randomUUID();
@@ -555,8 +577,11 @@ test("Test 4: Location Confirmation -> Sim - sending 'sim' confirms remembered l
     assert.ok(lastLoc);
     assert.equal(lastLoc.source, "memory_reuse");
   } finally {
-    await env.close();
-    await env.cleanup(phoneE164);
+    try {
+      await env.cleanup(phoneE164);
+    } finally {
+      await env.close();
+    }
   }
 });
 
@@ -569,9 +594,9 @@ test("Test 5: Location Confirmation -> Não - old location not searched, pending
     await query("INSERT INTO customers (id, phone_e164) VALUES ($1, $2)", [customerId, phoneE164]);
     await query(
       `INSERT INTO customer_last_locations (
-        id, customer_id, latitude, longitude, city, state, country_code, label, source, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'BR', $7, 'whatsapp_native', NOW())`,
-      [randomUUID(), customerId, P1.latitude, P1.longitude, P1.city, P1.state, P1.label],
+        customer_id, latitude, longitude, city, state, country_code, label, source, confirmed_at
+      ) VALUES ($1, $2, $3, $4, $5, 'BR', $6, 'whatsapp_native', NOW())`,
+      [customerId, P1.latitude, P1.longitude, P1.city, P1.state, P1.label],
     );
 
     const convId = randomUUID();
@@ -665,8 +690,11 @@ test("Test 5: Location Confirmation -> Não - old location not searched, pending
     assert.ok(Math.abs(Number(lastLoc.latitude) - P2.latitude) < 0.0001);
     assert.ok(Math.abs(Number(lastLoc.longitude) - P2.longitude) < 0.0001);
   } finally {
-    await env.close();
-    await env.cleanup(phoneE164);
+    try {
+      await env.cleanup(phoneE164);
+    } finally {
+      await env.close();
+    }
   }
 });
 
@@ -765,8 +793,11 @@ test("Test 6: Second Pin -> Service - P1 followed by P2 then service text execut
     assert.ok(Math.abs(Number(lastLoc.latitude) - P2.latitude) < 0.0001);
     assert.ok(Math.abs(Number(lastLoc.longitude) - P2.longitude) < 0.0001);
   } finally {
-    await env.close();
-    await env.cleanup(phoneE164);
+    try {
+      await env.cleanup(phoneE164);
+    } finally {
+      await env.close();
+    }
   }
 });
 
@@ -826,8 +857,11 @@ test("Test 7: Selection Pin Safety - pin in pending_slot='selection' does not se
     assert.equal(convRow.status, "active");
     assert.equal(convRow.pending_slot, "selection");
   } finally {
-    await env.close();
-    await env.cleanup(phoneE164);
+    try {
+      await env.cleanup(phoneE164);
+    } finally {
+      await env.close();
+    }
   }
 });
 
@@ -875,10 +909,10 @@ test("Contextual Regressions: Normal text turns route to contextual provider", a
     if (customer) {
       await query(
         `INSERT INTO customer_last_locations (
-          id, customer_id, latitude, longitude, city, state, country_code, label, source, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'BR', $7, 'whatsapp_native', NOW())
-        ON CONFLICT (customer_id) DO UPDATE SET latitude = EXCLUDED.latitude`,
-        [randomUUID(), customer.id, P1.latitude, P1.longitude, P1.city, P1.state, P1.label],
+          customer_id, latitude, longitude, city, state, country_code, label, source, confirmed_at
+        ) VALUES ($1, $2, $3, $4, $5, 'BR', $6, 'whatsapp_native', NOW())
+        ON CONFLICT (customer_id) DO UPDATE SET latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude, confirmed_at = NOW()`,
+        [customer.id, P1.latitude, P1.longitude, P1.city, P1.state, P1.label],
       );
     }
 
@@ -898,7 +932,10 @@ test("Contextual Regressions: Normal text turns route to contextual provider", a
     assert.equal(explicitRes.statusCode, 200);
     assert.equal(env.getContextualCalls(), 3, "Contextual provider must be called for search with explicit location");
   } finally {
-    await env.close();
-    await env.cleanup(phoneE164);
+    try {
+      await env.cleanup(phoneE164);
+    } finally {
+      await env.close();
+    }
   }
 });
