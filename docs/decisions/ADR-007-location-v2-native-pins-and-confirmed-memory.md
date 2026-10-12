@@ -1,14 +1,14 @@
 # ADR-007: Localização v2 — Pinos Nativos de WhatsApp, Coordenadas Exatas e Memória Confirmada de Localização
 
-* **Status:** ACCEPTED / IMPLEMENTED / MERGED
-* **Data:** 2026-10-09
+* **Status:** IMPLEMENTED & HOMOLOGATED IN PRODUCTION (PR #45 / PR #47)
+* **Data:** 2026-10-09 (Homologado em Produção: 2026-10-12)
 * **Decisores:** Produto e Arquitetura ContatoCerto
 
 ---
 
 > [!NOTE]
-> **Fundação de Entrada de Localização v2 (Implementação e Integração no PR #45):**
-> Este documento formaliza a arquitetura e as regras de domínio para a ingestão nativa de pinos de localização do WhatsApp, preservação de coordenadas geográficas exatas no matching espacial, geocodificação reversa para enriquecimento contextual e a memória durável de última localização com confirmação explícita obrigatória antes do reuso. Implementado no **PR #45** (`feat/location-v2-foundation`, Migration 029) e integrado ao branch canônico `main` (commit de merge `3c74fbba13d2d4879c8e8ca4ce472c4a9605ff61`, CI pós-merge `38009843312` SUCCESS). Deploy e homologação em produção permanecem pendentes de etapa operacional autorizada.
+> **Fundação de Entrada de Localização v2 e Homologação em Produção (PR #45 / PR #47):**
+> Este documento formaliza a arquitetura e as regras de domínio para a ingestão nativa de pinos de localização do WhatsApp, preservação de coordenadas geográficas exatas no matching espacial, geocodificação reversa para enriquecimento contextual, memória durável de última localização com confirmação explícita obrigatória antes do reuso e propriedade determinística de turno perante o motor contextual. Implementado no **PR #45** (`feat/location-v2-foundation`, Migration 029, merge `3c74fbba13d2d4879c8e8ca4ce472c4a9605ff61`), consolidado na interoperabilidade contextual pelo **PR #47** (`fix/location-v2-contextual-native-pin-routing`, merge `e2b434d01d8c0b84afe4455f8ea00d9e7f746cd7`, `PR47_PRODUCTION_FIX_VALIDATED=YES`) e homologado em produção real com 5/5 casos E2E aprovados (`LOCATION_V2_PRODUCTION_E2E=PASS`, `LOCATION_V2_PRODUCTION_HOMOLOGATED=YES`; ver [`docs/launch-readiness/03-location-v2-foundation-closeout.md`](../launch-readiness/03-location-v2-foundation-closeout.md)).
 
 ---
 
@@ -59,12 +59,15 @@ Esse modelo apresentava limitações fundamentais de produto e precisão:
      * **Substituição direta (nova cidade ou novo pino):** resolve imediatamente a nova localização e executa a busca, atualizando a memória.
      * **Amígua / Não compreendida:** reapresenta o prompt de confirmação de forma segura sem mutar dados ou quebrar o fluxo.
 
-6. **Autoridade Determinística e Limites da IA (ADR-002):**
+6. **Autoridade Determinística, Propriedade de Turno e Limites da IA (ADR-002 / PR #47):**
    * Em conformidade absoluta com o [ADR-002](ADR-002-ai-interpretation-vs-deterministic-domain-authority.md), **nenhuma chamada a LLM é utilizada** para extrair coordenadas, avaliar confirmações de memória ou mutar os slots de conversa de localização.
    * Todo o parsing de confirmação (`parseLocationConfirmation`) e roteamento é 100% determinístico e coberto por testes unitários exaustivos.
+   * Mesmo quando `CONVERSATION_AI_ENABLED=true` está habilitado em produção, o `CustomerSearchRouter` detém a propriedade determinística sobre mensagens com coordenadas nativas estruturadas, conversas ativas nos estados transacionais de Localização v2 (`location`, `location_confirmation`, `service` com pino estagiado) e turnos service-first de clientes com memória em `customer_last_locations` (verificada via consulta read-only `findByPhone`), impedindo interceptação pelo `ContextualConversationService`.
 
 7. **Proteção Transacional e Política de Rollback:**
    * A migration 029 (`029_add_location_v2_foundation.js`) inclui trava de segurança programática (`P0029` / `LOCATION_V2_ROLLBACK_BLOCKED`) impedindo rollbacks acidentais que possam truncar dados de histórico de localização de clientes em produção.
+   * Com dados reais de Localização v2 persistidos em produção após a homologação, a trava `P0029` encontra-se ativamente engatilhada (`P0029_GUARD_CURRENTLY_TRIGGERED=YES`), sendo proibido o rollback destrutivo (`PRODUCTION_MIGRATION_029_ROLLBACK=PROHIBITED`) e vigorando exclusivamente `PRODUCTION_ROLLBACK_STRATEGY=FORWARD_FIX_ONLY`.
+
 
 ---
 
