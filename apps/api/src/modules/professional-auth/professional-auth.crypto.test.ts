@@ -84,13 +84,56 @@ test("structured auth envelope round-trip, validation and backward compatibility
   assert.throws(() => createAuthEnvelope("1234567"), /invalid_otp_code/);
   assert.throws(() => createAuthEnvelope("abcdef"), /invalid_otp_code/);
 
-  // Invalid envelope contents fail closed
-  assert.throws(() => parseAuthEnvelope("not-json-and-no-digits"), /auth_envelope_invalid/);
+  // Structured V1:
+  // - valido -> PASS
+  assert.deepEqual(parseAuthEnvelope(JSON.stringify({ version: 1, otp: "123456" })), { otp: "123456" });
+  // - OTP 5 digitos -> FAIL
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 1, otp: "12345" })), /auth_envelope_invalid/);
+  // - OTP 7 digitos -> FAIL
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 1, otp: "1234567" })), /auth_envelope_invalid/);
+  // - letras -> FAIL
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 1, otp: "abcdef" })), /auth_envelope_invalid/);
+  // - version 2 -> FAIL
   assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 2, otp: "123456" })), /auth_envelope_invalid/);
-  assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 1, otp: "bad" })), /auth_envelope_invalid/);
+  // - campo ausente -> FAIL
   assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 1 })), /auth_envelope_invalid/);
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ otp: "123456" })), /auth_envelope_invalid/);
+  // - campos extras -> FAIL
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 1, otp: "123456", extra: true })), /auth_envelope_invalid/);
 
-  // Historical backward compatibility with legacy plain text
+  // Valid JSON but not envelope:
+  // - JSON string de seis digitos -> FAIL
+  assert.throws(() => parseAuthEnvelope(JSON.stringify("123456")), /auth_envelope_invalid/);
+  // - JSON number de seis digitos -> FAIL
+  assert.throws(() => parseAuthEnvelope(JSON.stringify(123456)), /auth_envelope_invalid/);
+  // - JSON array -> FAIL
+  assert.throws(() => parseAuthEnvelope(JSON.stringify(["123456"])), /auth_envelope_invalid/);
+  // - objeto sem version -> FAIL
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ otp: "123456" })), /auth_envelope_invalid/);
+
+  // Legacy:
+  // - formato historico exato -> PASS
+  assert.deepEqual(
+    parseAuthEnvelope("Seu código ContatoCerto é 654321. Ele expira em 5 minutos."),
+    { otp: "654321" },
+  );
+  // - prefixo extra -> FAIL
+  assert.throws(
+    () => parseAuthEnvelope("foo Seu código ContatoCerto é 654321. Ele expira em 5 minutos."),
+    /auth_envelope_invalid/,
+  );
+  // - sufixo extra -> FAIL
+  assert.throws(
+    () => parseAuthEnvelope("Seu código ContatoCerto é 654321. Ele expira em 5 minutos. bar"),
+    /auth_envelope_invalid/,
+  );
+  // - texto arbitrario contendo seis digitos -> FAIL
+  assert.throws(() => parseAuthEnvelope("foo 123456 bar"), /auth_envelope_invalid/);
+  assert.throws(() => parseAuthEnvelope("OTP: 123456"), /auth_envelope_invalid/);
+  // - seis digitos isolados -> FAIL
+  assert.throws(() => parseAuthEnvelope("123456"), /auth_envelope_invalid/);
+
+  // Historical backward compatibility with legacy encrypted text
   const legacyText = "Seu código ContatoCerto é 654321. Ele expira em 5 minutos.";
   const legacyEncrypted = encryptAuthMessage(pepper, legacyText);
   const legacyParsed = decryptAuthEnvelope(pepper, legacyEncrypted);
@@ -102,6 +145,17 @@ test("structured auth envelope round-trip, validation and backward compatibility
   } catch (err: unknown) {
     if (err instanceof Error) {
       assert.equal(err.message.includes("12345"), false);
+    } else {
+      assert.fail("expected Error instance");
+    }
+  }
+
+  try {
+    parseAuthEnvelope(JSON.stringify({ version: 1, otp: "999888" }).replace("999888", "bad"));
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      assert.equal(err.message.includes("999888"), false);
+      assert.equal(err.message, "auth_envelope_invalid");
     } else {
       assert.fail("expected Error instance");
     }

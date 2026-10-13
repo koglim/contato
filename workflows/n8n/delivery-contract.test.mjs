@@ -1069,6 +1069,165 @@ test("template_authentication rejects malformed template name, language or OTP",
   assert.throws(() => buildEvolutionSendRequest({ ...base, interactive_payload: { ...base.interactive_payload, otp_code: "bad" } }, "pilot"), /interactive_payload_invalid/u);
 });
 
+test("purpose / template_authentication bijection mandatory matrix", () => {
+  const validAuth = authTemplateMessage();
+
+  // 1. professional_auth_challenge + text = REJECT
+  assert.throws(
+    () => claimDecision(response({
+      ...validAuth,
+      message_type: "text",
+      text_content: "Seu codigo e 123456",
+      interactive_payload: null,
+    }), "evolution"),
+    /outbox_claim_invalid/u,
+  );
+
+  // 2. professional_auth_challenge + button_group = REJECT
+  assert.throws(
+    () => claimDecision(response({
+      ...validAuth,
+      message_type: "interactive",
+      interactive_payload: {
+        schema_version: 1,
+        type: "button_group",
+        body: "Confirmar codigo",
+        actions: [{ action_id: "ia_1", label: "OK" }],
+      },
+    }), "evolution"),
+    /outbox_claim_invalid/u,
+  );
+
+  // 3. professional_auth_challenge + template_quick_reply = REJECT
+  assert.throws(
+    () => claimDecision(response({
+      ...validAuth,
+      message_type: "interactive",
+      interactive_payload: {
+        schema_version: 1,
+        type: "template_quick_reply",
+        template_name: "quick_reply_tpl",
+        language_code: "pt_BR",
+        body_parameters: ["param1"],
+        actions: [{ action_id: "ia_1", label: "OK" }],
+      },
+    }), "evolution"),
+    /outbox_claim_invalid/u,
+  );
+
+  // 4. professional_auth_challenge + template_authentication = ACCEPT
+  const accepted = claimDecision(response(validAuth), "evolution");
+  assert.equal(accepted.action, "send");
+  assert.equal(accepted.message.purpose, "professional_auth_challenge");
+  assert.equal(accepted.message.interactive_payload.type, "template_authentication");
+
+  // 5. customer_reply + template_authentication = REJECT
+  assert.throws(
+    () => claimDecision(response({
+      ...validAuth,
+      purpose: "customer_reply",
+    }), "evolution"),
+    /outbox_claim_invalid/u,
+  );
+
+  // 6. professional_contact_notification + template_authentication = REJECT
+  assert.throws(
+    () => claimDecision(response({
+      ...validAuth,
+      purpose: "professional_contact_notification",
+    }), "evolution"),
+    /outbox_claim_invalid/u,
+  );
+
+  // 7. outro purpose permitido + template_authentication = REJECT
+  for (const otherPurpose of ["professional_reply", "customer_contact_update", "channel_notice"]) {
+    assert.throws(
+      () => claimDecision(response({
+        ...validAuth,
+        purpose: otherPurpose,
+      }), "evolution"),
+      /outbox_claim_invalid/u,
+    );
+  }
+
+  // 8. customer_reply normal text = comportamento anterior preservado
+  const normalTextMsg = {
+    id: randomUUID(),
+    status: "processing",
+    attempt_count: 1,
+    purpose: "customer_reply",
+    provider: "evolution",
+    recipient_phone_e164: "+5566991234567",
+    message_type: "text",
+    text_content: "Ola, tudo bem?",
+    processing_token: randomUUID(),
+  };
+  const normalTextDecision = claimDecision(response(normalTextMsg), "evolution");
+  assert.equal(normalTextDecision.action, "send");
+  assert.equal(normalTextDecision.message.message_type, "text");
+  assert.equal(normalTextDecision.message.text_content, "Ola, tudo bem?");
+
+  // 9. template_quick_reply legitimo existente = comportamento anterior preservado
+  const legitimateQuickReply = {
+    id: randomUUID(),
+    status: "processing",
+    attempt_count: 1,
+    purpose: "professional_contact_notification",
+    provider: "evolution",
+    recipient_phone_e164: "+5566991234567",
+    message_type: "interactive",
+    text_content: "Nova oportunidade",
+    interactive_payload: {
+      schema_version: 1,
+      type: "template_quick_reply",
+      template_name: "contato_certo_nova_solicitacao_v1",
+      language_code: "pt_BR",
+      body_parameters: ["Pintor", "Sinop"],
+      actions: [{ action_id: "ia_111111111111111111111111111111111111111111111111", label: "Aceitar" }],
+    },
+    processing_token: randomUUID(),
+  };
+  const quickReplyDecision = claimDecision(response(legitimateQuickReply), "evolution");
+  assert.equal(quickReplyDecision.action, "send");
+  assert.equal(quickReplyDecision.message.interactive_payload.type, "template_quick_reply");
+
+  // Defense in depth: buildEvolutionSendRequest checks
+  assert.throws(
+    () => buildEvolutionSendRequest({
+      ...validAuth,
+      message_type: "text",
+      text_content: "Seu codigo e 123456",
+      interactive_payload: null,
+    }, "pilot"),
+    /interactive_payload_invalid/u,
+  );
+
+  assert.throws(
+    () => buildEvolutionSendRequest({
+      ...validAuth,
+      interactive_payload: {
+        schema_version: 1,
+        type: "button_group",
+        body: "Confirmar",
+        actions: [{ action_id: "ia_1", label: "OK" }],
+      },
+    }, "pilot"),
+    /interactive_payload_invalid/u,
+  );
+
+  assert.throws(
+    () => buildEvolutionSendRequest({
+      ...validAuth,
+      purpose: "customer_reply",
+    }, "pilot"),
+    /interactive_payload_invalid/u,
+  );
+
+  const validReq = buildEvolutionSendRequest(validAuth, "pilot");
+  assert.equal(validReq.endpoint, "/message/sendTemplate/pilot");
+  assert.equal(validReq.body.name, "contatocerto_auth_otp_v1");
+});
+
 test("generated Validate claim Code node runtime parity for template_authentication", () => {
   const shared = JSON.parse(readFileSync(new URL("shared-delivery.json", import.meta.url), "utf8"));
   const gate = shared.nodes.find((node) => node.name === "Validate claim").parameters.jsCode;
@@ -1083,4 +1242,26 @@ test("generated Validate claim Code node runtime parity for template_authenticat
   assert.equal(outcome.json.request.body.components[1].parameters[0].text, "123456");
   assert.equal(outcome.json.request.body.components[1].index, "0");
   assert.equal(outcome.json.request.body.components[1].sub_type, "url");
+
+  // Rejections in generated Code node match claimDecision
+  assert.throws(
+    () => runGate(response({ ...item, message_type: "text", text_content: "code", interactive_payload: null })),
+    /outbox_claim_invalid/u,
+  );
+  assert.throws(
+    () => runGate(response({ ...item, purpose: "customer_reply" })),
+    /outbox_claim_invalid/u,
+  );
+  assert.throws(
+    () => runGate(response({
+      ...item,
+      interactive_payload: {
+        schema_version: 1,
+        type: "button_group",
+        body: "Confirmar",
+        actions: [{ action_id: "ia_1", label: "OK" }],
+      },
+    })),
+    /outbox_claim_invalid/u,
+  );
 });

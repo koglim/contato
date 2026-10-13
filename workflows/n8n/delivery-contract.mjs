@@ -58,10 +58,31 @@ export function claimDecision(response, expectedProvider) {
     || typeof message.text_content !== "string"
     || !message.text_content.trim() || message.text_content.length > 2000) throw new Error("outbox_claim_invalid");
 
-  if (message.message_type === "text") {
-    if (message.purpose === "professional_auth_challenge") {
+  // Strict purpose / auth template bijection (fail-closed in both directions)
+  if (message.purpose === "professional_auth_challenge") {
+    if (
+      message.message_type !== "interactive" ||
+      !message.interactive_payload ||
+      typeof message.interactive_payload !== "object" ||
+      Array.isArray(message.interactive_payload) ||
+      message.interactive_payload.type !== "template_authentication"
+    ) {
       throw new Error("outbox_claim_invalid");
     }
+  }
+
+  if (
+    message.interactive_payload &&
+    typeof message.interactive_payload === "object" &&
+    !Array.isArray(message.interactive_payload) &&
+    message.interactive_payload.type === "template_authentication"
+  ) {
+    if (message.purpose !== "professional_auth_challenge" || message.message_type !== "interactive") {
+      throw new Error("outbox_claim_invalid");
+    }
+  }
+
+  if (message.message_type === "text") {
     if (message.interactive_payload !== undefined && message.interactive_payload !== null) {
       throw new Error("outbox_claim_invalid");
     }
@@ -193,6 +214,30 @@ export function buildEvolutionSendRequest(message, instance) {
   }
   const encodedInstance = encodeURIComponent(instance);
   const number = message.recipient_phone_e164.slice(1);
+
+  // Defense in depth: purpose / auth template bijection
+  if (message.purpose === "professional_auth_challenge") {
+    if (
+      message.message_type !== "interactive" ||
+      !message.interactive_payload ||
+      typeof message.interactive_payload !== "object" ||
+      Array.isArray(message.interactive_payload) ||
+      message.interactive_payload.type !== "template_authentication"
+    ) {
+      throw new Error("interactive_payload_invalid");
+    }
+  }
+
+  if (
+    message.interactive_payload &&
+    typeof message.interactive_payload === "object" &&
+    !Array.isArray(message.interactive_payload) &&
+    message.interactive_payload.type === "template_authentication"
+  ) {
+    if (message.purpose !== "professional_auth_challenge" || message.message_type !== "interactive") {
+      throw new Error("interactive_payload_invalid");
+    }
+  }
 
   if (message.message_type === "text") {
     if (typeof message.text_content !== "string" || !message.text_content.trim()) {

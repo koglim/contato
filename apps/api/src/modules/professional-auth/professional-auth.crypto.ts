@@ -76,29 +76,37 @@ export function createAuthEnvelope(otp: string): string {
   return JSON.stringify({ version: 1, otp });
 }
 
+const EXACT_LEGACY_AUTH_MESSAGE_PATTERN = /^Seu código ContatoCerto é (\d{6})\. Ele expira em 5 minutos\.$/u;
+
 export function parseAuthEnvelope(decrypted: string): { otp: string } {
+  let isJson = false;
   try {
     const parsed = JSON.parse(decrypted);
-    if (parsed && typeof parsed === "object") {
-      if (
-        parsed.version === 1 &&
-        typeof parsed.otp === "string" &&
-        /^\d{6}$/.test(parsed.otp)
-      ) {
-        return { otp: parsed.otp };
-      }
-      throw new Error("auth_envelope_invalid");
+    isJson = true;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      parsed.version === 1 &&
+      typeof parsed.otp === "string" &&
+      /^\d{6}$/.test(parsed.otp) &&
+      Object.keys(parsed).length === 2
+    ) {
+      return { otp: parsed.otp };
     }
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message === "auth_envelope_invalid") {
-      throw err;
-    }
-    // Fall back to historical pattern only if decrypted is not a JSON object
+  } catch {
+    // decrypted is not valid JSON
   }
-  const match = /\b(\d{6})\b/u.exec(decrypted);
+
+  if (isJson) {
+    throw new Error("auth_envelope_invalid");
+  }
+
+  const match = EXACT_LEGACY_AUTH_MESSAGE_PATTERN.exec(decrypted);
   if (match) {
     return { otp: match[1] };
   }
+
   throw new Error("auth_envelope_invalid");
 }
 
