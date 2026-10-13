@@ -9,6 +9,7 @@
 **Base / Ramo Canônico Atual (`main`):** `e2b434d01d8c0b84afe4455f8ea00d9e7f746cd7`  
 **Commit de Merge da Fundação (PR #45):** `3c74fbba13d2d4879c8e8ca4ce472c4a9605ff61` (HEAD `762e9fdf2cf90823754a9a3cd40f10015bf53976`)  
 **Commit de Merge da Correção de Interoperabilidade Contextual (PR #47):** `e2b434d01d8c0b84afe4455f8ea00d9e7f746cd7` (HEAD `43773a105be6a9f855fd8f874d0236de77740cf5`)  
+**CI do PR #47 (HEAD Exato / Pós-Merge `main`):** Runs `38073973954` (SUCCESS) / `38076217454` (SUCCESS)  
 **Migration de Banco de Dados:** 029 (`029_add_location_v2_foundation.js` — Ativa em Produção; Guard `P0029` acionado)  
 **Arquitetura Canônica:** [ADR-007](../decisions/ADR-007-location-v2-native-pins-and-confirmed-memory.md)  
 **Bloqueadores:** NENHUM  
@@ -57,7 +58,7 @@ A fundação de Localização v2 entrega e comprova em operação real:
    * Quando o cliente envia um primeiro pino (P1), entra no slot de espera de serviço (`pending_slot = 'service'`) e posteriormente envia um segundo pino (P2) antes do serviço, o manipulador `handleLocationPinWhileAwaitingService` substitui deterministicamente e integralmente o snapshot canônico da localização na mesma conversa e em `customer_last_locations`, sem preservar resíduos de P1.
 
 7. **Interoperabilidade Determinística com Motor Contextual (PR #47):**
-   * Quando `CONVERSATION_AI_ENABLED=true` está ativo em produção, o `ChannelInboxService` e o `CustomerSearchRouter.shouldOwnTurn` garantem que mensagens contendo pino nativo estruturado, conversas ativas aguardando slots de localização (`location`, `location_confirmation`, `service` com pino estagiado) e inícios service-first para clientes com memória em `customer_last_locations` sejam governados exclusivamente pelo `CustomerSearchRouter`, sem interceptação pelo `ContextualConversationService` e sem escrita especulativa de registro de cliente durante a sondagem read-only (`findByPhone`).
+   * Quando `CONVERSATION_AI_ENABLED=true` está ativo em produção, o `ChannelInboxService` (`shouldRouterOwnTurn`) e o `DefaultCustomerSearchRouter.shouldOwnTurn` garantem que mensagens contendo pino nativo estruturado, conversas ativas aguardando slots de localização (`location`, `location_confirmation`, `service` com pino estagiado) e inícios service-first para clientes com memória em `customer_last_locations` contornem o `ContextualConversationService` e sejam governados pelo `CustomerSearchRouter`. No encadeamento do repositório de produção, `shouldOwnTurn` utiliza `findByPhoneE164` para a busca read-only do cliente antes de decidir a propriedade determinística do turno (mantendo fallback de compatibilidade para `findOrCreateByPhoneE164` apenas quando `findByPhoneE164` não estiver disponível na implementação do repositório).
 
 8. **Proteção Transacional e Política de Rollback da Migration 029:**
    * Como o banco de dados de produção agora contém dados reais estruturados de Localização v2, a trava programática `P0029` (`LOCATION_V2_ROLLBACK_BLOCKED`) encontra-se ativamente engatilhada (`P0029_GUARD_CURRENTLY_TRIGGERED=YES`).
@@ -74,20 +75,20 @@ A fundação de Localização v2 entrega e comprova em operação real:
 | **Integração Real PostgreSQL / PostGIS (Migration 029)** | `apps/api/integration/migration-029-location-v2.integration.test.ts` | 22/22 Cenários Verticais PASS |
 | **Integração de Bypass Contextual e Interoperabilidade (PR #47)** | `apps/api/integration/contextual-location-bypass.integration.test.ts` | PASS |
 | **CI GitHub Actions (PR #45 / Post-Merge `main`)** | Runs `38007603486` / `38009843312` | SUCCESS |
-| **CI GitHub Actions (PR #47 / Post-Merge `main` @ `e2b434d`)** | Runs `38045232896` / `38046421265` | SUCCESS |
+| **CI GitHub Actions (PR #47 / Post-Merge `main` @ `e2b434d`)** | Runs `38073973954` / `38076217454` | SUCCESS |
 
 ---
 
 ## 4. Nota de Causa-Raiz e Validação do PR #47
 
-Durante o início do ensaio E2E em produção (com `CONVERSATION_AI_ENABLED=true`), constatou-se que os pinos nativos do WhatsApp eram extraídos e persistidos corretamente na tabela `channel_inbound_messages` (`latitude`, `longitude`, `location_name` presentes, `raw_text = null`), **não** havendo falha de parsing ou de extração no Gateway ou na Evolution API.
+Durante o início do ensaio E2E em produção (com `CONVERSATION_AI_ENABLED=true`), constatou-se que os pinos nativos do WhatsApp já haviam sido extraídos corretamente, persistidos na tabela `channel_inbound_messages` com `latitude` e `longitude` estruturadas (características de eventos de pino puro incluem `raw_text = null`) e estavam integralmente disponíveis no registro reclamado da Inbox, **não** havendo falha de parsing ou de extração no Gateway ou na Evolution API.
 
-O bloqueador inicial residia na precedência de roteamento no `ChannelInboxService`: como mensagens de pino puro possuem `raw_text = null`, a guarda textual antes da delegação ao `ContextualConversationService` permitia que o motor contextual interceptasse o turno antes do `CustomerSearchRouter`.
+O bloqueador inicial residia na precedência de roteamento em `ChannelInboxService.processClaimed()`: quando o `ContextualConversationService` estava configurado, `processClaimed()` delegava a execução a `this.contextualConversation.handle(claimed)` antes de alcançar o `CustomerSearchRouter`. Assim, turnos nativos de Localização v2 podiam ser consumidos pela camada contextual embora suas coordenadas estruturadas já tivessem sido extraídas e persistidas.
 
-O **PR #47** (mesclado em `main` no commit `e2b434d01d8c0b84afe4455f8ea00d9e7f746cd7` e implantado via EasyPanel) resolveu definitivamente a fronteira de propriedade determinística:
+O **PR #47** (mesclado em `main` no commit `e2b434d01d8c0b84afe4455f8ea00d9e7f746cd7` e implantado via EasyPanel) introduziu a propriedade determinística de turno (`shouldOwnTurn` / `shouldRouterOwnTurn`) para que os estados transacionais de Localização v2 contornem o `ContextualConversationService` e alcancem o `CustomerSearchRouter`:
 * Turnos com coordenadas nativas estruturadas fazem bypass imediato do manipulador contextual e seguem diretamente para o `CustomerSearchRouter`;
 * Conversas ativas em `pending_slot IN ('location', 'location_confirmation')` ou `pending_slot = 'service'` com coordenadas nativas estagiadas permanecem sob autoridade estrita do `CustomerSearchRouter`;
-* Turnos service-first para clientes que possuem registro em `customer_last_locations` são reclamados deterministicamente pelo `CustomerSearchRouter` via consulta read-only (`findByPhone`), acionando o slot `location_confirmation`.
+* Turnos service-first para clientes que possuem registro em `customer_last_locations` são reclamados deterministicamente pelo `CustomerSearchRouter` (no encadeamento do repositório de produção, `shouldOwnTurn` utiliza `findByPhoneE164` para a busca read-only do cliente antes de decidir a propriedade determinística, com fallback de compatibilidade para `findOrCreateByPhoneE164` caso `findByPhoneE164` não esteja disponível), acionando o slot `location_confirmation`.
 
 A campanha subsequente de homologação em produção comprovou a eficácia da correção (`PR47_PRODUCTION_FIX_VALIDATED=YES`).
 
