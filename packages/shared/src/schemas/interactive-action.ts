@@ -85,9 +85,42 @@ export type InteractiveTemplateQuickReplyPayload = z.infer<
   typeof interactiveTemplateQuickReplyPayloadSchema
 >;
 
+export const interactiveTemplateAuthenticationPayloadSchema = z
+  .object({
+    schema_version: z.literal(1),
+    type: z.literal("template_authentication"),
+    template_name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(512)
+      .regex(/^[a-z0-9_]+$/, {
+        message: "template_name must be a lower-case Meta-safe identifier",
+      }),
+    language_code: z
+      .string()
+      .trim()
+      .min(2)
+      .max(10)
+      .regex(/^[a-z]{2}(_[A-Z]{2})?$/, {
+        message: "language_code must be standard format like pt_BR or en_US",
+      }),
+    otp_code: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, {
+        message: "otp_code must be exactly 6 digits",
+      }),
+  })
+  .strict();
+export type InteractiveTemplateAuthenticationPayload = z.infer<
+  typeof interactiveTemplateAuthenticationPayloadSchema
+>;
+
 export const interactiveOutboundPayloadSchema = z.discriminatedUnion("type", [
   interactiveButtonGroupPayloadSchema,
   interactiveTemplateQuickReplyPayloadSchema,
+  interactiveTemplateAuthenticationPayloadSchema,
 ]);
 export type InteractiveOutboundPayload = z.infer<typeof interactiveOutboundPayloadSchema>;
 

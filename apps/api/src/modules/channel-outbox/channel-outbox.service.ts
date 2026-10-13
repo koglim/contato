@@ -11,13 +11,50 @@ import type {
 } from "./channel-outbox.types.js";
 import type { MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
 import { CUSTOMER_REPLY_EXPIRY_REASON } from "./channel-outbox.expiry.js";
-import { decryptAuthMessage } from "../professional-auth/professional-auth.crypto.js";
+import { decryptAuthEnvelope, validateProfessionalAuthPepper } from "../professional-auth/professional-auth.crypto.js";
 
-function claimResponse(record: ChannelOutboundMessageRecord) {
+function claimResponse(record: ChannelOutboundMessageRecord, config?: ChannelOutboundConfig) {
   if (record.status === "sent") return { id: record.id, status: "sent" as const, attempt_count: record.attemptCount, purpose: record.purpose };
   if (record.status !== "processing" || record.processingToken === null) {
     throw new Error(`Cannot create outbound claim response for ${record.status}`);
   }
+
+  if (record.purpose === "professional_auth_challenge") {
+    const pepper = process.env.PROFESSIONAL_AUTH_PEPPER;
+    validateProfessionalAuthPepper(pepper);
+
+    const templateName = config?.authTemplateName ?? process.env.WHATSAPP_PROFESSIONAL_AUTH_TEMPLATE_NAME?.trim();
+    const templateLanguage = config?.authTemplateLanguage ?? process.env.WHATSAPP_PROFESSIONAL_AUTH_TEMPLATE_LANGUAGE?.trim();
+
+    if (!templateName || !/^[a-z0-9_]+$/.test(templateName)) {
+      throw new Error("WHATSAPP_PROFESSIONAL_AUTH_TEMPLATE_NAME is required and must be a lower-case Meta-safe identifier");
+    }
+    if (!templateLanguage || !/^[a-z]{2}(_[A-Z]{2})?$/.test(templateLanguage)) {
+      throw new Error("WHATSAPP_PROFESSIONAL_AUTH_TEMPLATE_LANGUAGE is required and must be standard format like pt_BR or en_US");
+    }
+
+    const { otp } = decryptAuthEnvelope(pepper, record.textContent);
+
+    return {
+      id: record.id,
+      status: "processing" as const,
+      attempt_count: record.attemptCount,
+      purpose: record.purpose,
+      provider: record.provider,
+      recipient_phone_e164: record.recipientPhoneE164,
+      message_type: "interactive" as const,
+      text_content: `[auth template: ${templateName}]`,
+      interactive_payload: {
+        schema_version: 1 as const,
+        type: "template_authentication" as const,
+        template_name: templateName,
+        language_code: templateLanguage,
+        otp_code: otp,
+      },
+      processing_token: record.processingToken,
+    };
+  }
+
   return {
     id: record.id,
     status: "processing" as const,
@@ -26,9 +63,7 @@ function claimResponse(record: ChannelOutboundMessageRecord) {
     provider: record.provider,
     recipient_phone_e164: record.recipientPhoneE164,
     message_type: record.messageType,
-    text_content: record.purpose === "professional_auth_challenge"
-      ? decryptAuthMessage(process.env.PROFESSIONAL_AUTH_PEPPER ?? "", record.textContent)
-      : record.textContent,
+    text_content: record.textContent,
     ...(record.interactivePayload ? { interactive_payload: record.interactivePayload } : {}),
     processing_token: record.processingToken,
   };
@@ -46,11 +81,11 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
 
   async claim(id: string): Promise<ChannelOutboundClaimOutcome> {
     const claimed = await this.repository.claim(id, randomUUID(), this.config.processingLeaseSeconds);
-    if (claimed) return { kind: "response", response: claimResponse(claimed) };
+    if (claimed) return { kind: "response", response: claimResponse(claimed, this.config) };
 
     const current = await this.repository.findById(id);
     if (!current) return { kind: "outbound_message_not_found" };
-    if (current.status === "sent") return { kind: "response", response: claimResponse(current) };
+    if (current.status === "sent") return { kind: "response", response: claimResponse(current, this.config) };
     if (current.purpose === "customer_reply"
       && current.status === "failed"
       && current.administrativeClosedAt !== null
@@ -62,7 +97,7 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
 
   async claimNextPending(): Promise<ChannelOutboundClaimOutcome> {
     const claimed = await this.repository.claimNextPending(randomUUID(), this.config.processingLeaseSeconds);
-    if (claimed) return { kind: "response", response: claimResponse(claimed) };
+    if (claimed) return { kind: "response", response: claimResponse(claimed, this.config) };
     return { kind: "outbound_queue_empty" };
   }
 

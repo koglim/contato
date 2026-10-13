@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { PostgresProfessionalAuthRepository } from "./professional-auth.repository.js";
 import {
   createPublicChallengeReference,
-  encryptAuthMessage,
+  encryptAuthEnvelope,
   generateOtp,
   generateSessionToken,
   hashOtp,
@@ -33,7 +33,7 @@ export class ProfessionalAuthService {
       phone,
       codeHash: hashOtp(this.pepper, id, otp),
       expiresAt,
-      encryptedMessage: encryptAuthMessage(this.pepper, `Seu código ContatoCerto é ${otp}. Ele expira em 5 minutos.`),
+      encryptedMessage: encryptAuthEnvelope(this.pepper, otp),
       provider: "evolution",
     });
     return {

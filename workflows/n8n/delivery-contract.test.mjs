@@ -295,7 +295,7 @@ test("empty, already sent and busy claims never authorize transport", () => {
 });
 
 test("delivery preserves recipient and content from each claimed message, including independent purposes", () => {
-  for (const purpose of ["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice", "professional_auth_challenge"]) {
+  for (const purpose of ["customer_reply", "professional_contact_notification", "professional_reply", "customer_contact_update", "channel_notice"]) {
     const item = { ...message(), purpose };
     const decision = claimDecision(response(item), "evolution");
     assert.equal(decision.message.text_content, item.text_content);
@@ -304,6 +304,8 @@ test("delivery preserves recipient and content from each claimed message, includ
     assert.equal(decision.message.purpose, purpose);
   }
   assert.throws(() => claimDecision(response({ ...message(), purpose: "unknown" }), "evolution"), /claim_invalid/u);
+  // professional_auth_challenge as text MUST fail closed (never fallback to sendText)
+  assert.throws(() => claimDecision(response({ ...message(), purpose: "professional_auth_challenge" }), "evolution"), /claim_invalid/u);
 });
 
 test("acceptance must match the recipient and provider message id; only proven rejection goes to failed", () => {
@@ -991,4 +993,94 @@ test("exported Code gate evaluates the same contract and dispatcher budgets are 
   assert.equal(runBudget([{ json: { count: 0, started_at: Date.now() - 60000 } }]).length, 0);
   assert.equal(runBudget([{ json: {} }]).length, 1);
   assert.throws(() => runBudget([{ json: {} }, { json: {} }]), /one_budget/u);
+});
+
+const authTemplateMessage = (otp_code = "123456", template_name = "contatocerto_auth_otp_v1", language_code = "pt_BR") => ({
+  id: randomUUID(),
+  status: "processing",
+  attempt_count: 1,
+  purpose: "professional_auth_challenge",
+  provider: "evolution",
+  recipient_phone_e164: "+5566991234567",
+  message_type: "interactive",
+  text_content: "[auth template: " + template_name + "]",
+  interactive_payload: {
+    schema_version: 1,
+    type: "template_authentication",
+    template_name,
+    language_code,
+    otp_code,
+  },
+  processing_token: randomUUID(),
+});
+
+test("template_authentication claim accepted and builds accurate sendTemplate request", () => {
+  const item = authTemplateMessage();
+  const decision = claimDecision(response(item), "evolution");
+  assert.equal(decision.action, "send");
+  assert.equal(decision.message.message_type, "interactive");
+  assert.equal(decision.message.interactive_payload.type, "template_authentication");
+  assert.equal(decision.message.interactive_payload.template_name, "contatocerto_auth_otp_v1");
+  assert.equal(decision.message.interactive_payload.language_code, "pt_BR");
+  assert.equal(decision.message.interactive_payload.otp_code, "123456");
+
+  const req = buildEvolutionSendRequest(decision.message, "contato-certo-oficial");
+  assert.equal(req.endpoint, "/message/sendTemplate/contato-certo-oficial");
+  assert.equal(req.body.number, "5566991234567");
+  assert.equal(req.body.name, "contatocerto_auth_otp_v1");
+  assert.equal(req.body.language, "pt_BR");
+  assert.deepEqual(req.body.components, [
+    {
+      type: "body",
+      parameters: [{ type: "text", text: "123456" }],
+    },
+    {
+      type: "button",
+      sub_type: "url",
+      index: "0",
+      parameters: [{ type: "text", text: "123456" }],
+    },
+  ]);
+});
+
+test("template_authentication rejects malformed template name, language or OTP", () => {
+  const base = authTemplateMessage();
+
+  // Invalid template names
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, template_name: "" } }), "evolution"), /claim_invalid/u);
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, template_name: "Invalid-Name!" } }), "evolution"), /claim_invalid/u);
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, template_name: "UPPERCASE" } }), "evolution"), /claim_invalid/u);
+
+  // Invalid language
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, language_code: "" } }), "evolution"), /claim_invalid/u);
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, language_code: "pt-br" } }), "evolution"), /claim_invalid/u);
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, language_code: "invalid_lang" } }), "evolution"), /claim_invalid/u);
+
+  // Invalid OTP
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, otp_code: "" } }), "evolution"), /claim_invalid/u);
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, otp_code: "12345" } }), "evolution"), /claim_invalid/u);
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, otp_code: "1234567" } }), "evolution"), /claim_invalid/u);
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, otp_code: "abcdef" } }), "evolution"), /claim_invalid/u);
+
+  // Wrong schema version
+  assert.throws(() => claimDecision(response({ ...base, interactive_payload: { ...base.interactive_payload, schema_version: 2 } }), "evolution"), /claim_invalid/u);
+
+  // buildEvolutionSendRequest checks
+  assert.throws(() => buildEvolutionSendRequest({ ...base, interactive_payload: { ...base.interactive_payload, otp_code: "bad" } }, "pilot"), /interactive_payload_invalid/u);
+});
+
+test("generated Validate claim Code node runtime parity for template_authentication", () => {
+  const shared = JSON.parse(readFileSync(new URL("shared-delivery.json", import.meta.url), "utf8"));
+  const gate = shared.nodes.find((node) => node.name === "Validate claim").parameters.jsCode;
+  const runGate = (claim) => runInNewContext(`(() => { ${gate} })()`, { $json: claim, $env: { EVOLUTION_PROVIDER: "evolution", EVOLUTION_INSTANCE: "pilot" } });
+
+  const item = authTemplateMessage();
+  const outcome = runGate(response(item));
+  assert.equal(outcome.json.action, "send");
+  assert.equal(outcome.json.request.endpoint, "/message/sendTemplate/pilot");
+  assert.equal(outcome.json.request.body.name, "contatocerto_auth_otp_v1");
+  assert.equal(outcome.json.request.body.components[0].parameters[0].text, "123456");
+  assert.equal(outcome.json.request.body.components[1].parameters[0].text, "123456");
+  assert.equal(outcome.json.request.body.components[1].index, "0");
+  assert.equal(outcome.json.request.body.components[1].sub_type, "url");
 });

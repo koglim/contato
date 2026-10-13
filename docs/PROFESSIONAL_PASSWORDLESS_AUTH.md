@@ -30,7 +30,14 @@ The authenticated BFF uses `/internal/professional-auth/profiles/:professionalId
 
 ## Outbox and n8n
 
-`professional_auth_challenge` is a distinct purpose with business key `professional-auth:<challenge-id>`. Its `expires_at` matches the challenge. A versioned 30-second safety margin prevents `claim(id)` and `claimNextPending()` from releasing plaintext when insufficient OTP lifetime remains. Pending and retryable rows become `failed` with `auth_challenge_expired` and an immutable audit event. A processing or held row is not falsely classified as unsent; its evidence remains available for confirmation or reconciliation, while it cannot receive a new claim. Retries retain the same encrypted OTP. Versioned n8n delivery contracts accept the purpose; no remote workflow is changed by this repository update.
+`professional_auth_challenge` is a distinct purpose with business key `professional-auth:<challenge-id>`. Its `expires_at` matches the challenge. A versioned 30-second safety margin prevents `claim(id)` and `claimNextPending()` from releasing plaintext when insufficient OTP lifetime remains. Pending and retryable rows become `failed` with `auth_challenge_expired` and an immutable audit event. A processing or held row is not falsely classified as unsent; its evidence remains available for confirmation or reconciliation, while it cannot receive a new claim. Retries retain the same encrypted OTP.
+
+Challenges store encrypted structured envelopes (`{ version: 1, otp }`) in `channel_outbound_messages.text_content` at rest with `message_type: 'text'` and `interactive_payload: NULL`, preserving strict database invariants and zero plaintext OTP persistence. At claim time, `claimResponse` decrypts the envelope in memory and constructs a transient interactive payload:
+- `message_type: 'interactive'`
+- `text_content: '[auth template: <template_name>]'`
+- `interactive_payload: { schema_version: 1, type: 'template_authentication', template_name, language_code, otp_code }`
+
+Configuration via `WHATSAPP_PROFESSIONAL_AUTH_TEMPLATE_NAME` and `WHATSAPP_PROFESSIONAL_AUTH_TEMPLATE_LANGUAGE` is mandatory when `PROFESSIONAL_AUTH_ENABLED=true`. If missing or invalid, delivery fails closed; freeform text (`sendText`) is strictly prohibited. The Shared Outbox Delivery workflow validates the `template_authentication` contract and dispatches via Evolution API `/message/sendTemplate/{instance}` using Meta WABA Authentication template parameters (body OTP and button index 0 copy code parameter). Versioned n8n delivery contracts enforce this transport without remote mutations.
 
 ## CSRF
 

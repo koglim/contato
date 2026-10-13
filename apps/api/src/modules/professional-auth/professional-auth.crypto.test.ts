@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import {
+  createAuthEnvelope,
   createPublicChallengeReference,
+  decryptAuthEnvelope,
   decryptAuthMessage,
+  encryptAuthEnvelope,
   encryptAuthMessage,
   generateOtp,
   generateSessionToken,
   hashOtp,
   hashSessionToken,
   otpMatches,
+  parseAuthEnvelope,
   PROFESSIONAL_AUTH_REFERENCE_PATTERN,
   resolvePublicChallengeReference,
   validateProfessionalAuthPepper,
@@ -62,4 +66,44 @@ test("pepper validation rejects missing, empty and short material", () => {
   assert.throws(() => validateProfessionalAuthPepper(""));
   assert.throws(() => validateProfessionalAuthPepper("short"));
   assert.doesNotThrow(() => validateProfessionalAuthPepper("x".repeat(32)));
+});
+
+test("structured auth envelope round-trip, validation and backward compatibility", () => {
+  const otp = "847291";
+  const envelope = createAuthEnvelope(otp);
+  assert.deepEqual(JSON.parse(envelope), { version: 1, otp: "847291" });
+
+  // Encrypted envelope round-trip
+  const encrypted = encryptAuthEnvelope(pepper, otp);
+  assert.equal(encrypted.includes(otp), false);
+  const decrypted = decryptAuthEnvelope(pepper, encrypted);
+  assert.equal(decrypted.otp, otp);
+
+  // Invalid OTP code for envelope creation
+  assert.throws(() => createAuthEnvelope("12345"), /invalid_otp_code/);
+  assert.throws(() => createAuthEnvelope("1234567"), /invalid_otp_code/);
+  assert.throws(() => createAuthEnvelope("abcdef"), /invalid_otp_code/);
+
+  // Invalid envelope contents fail closed
+  assert.throws(() => parseAuthEnvelope("not-json-and-no-digits"), /auth_envelope_invalid/);
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 2, otp: "123456" })), /auth_envelope_invalid/);
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 1, otp: "bad" })), /auth_envelope_invalid/);
+  assert.throws(() => parseAuthEnvelope(JSON.stringify({ version: 1 })), /auth_envelope_invalid/);
+
+  // Historical backward compatibility with legacy plain text
+  const legacyText = "Seu código ContatoCerto é 654321. Ele expira em 5 minutos.";
+  const legacyEncrypted = encryptAuthMessage(pepper, legacyText);
+  const legacyParsed = decryptAuthEnvelope(pepper, legacyEncrypted);
+  assert.equal(legacyParsed.otp, "654321");
+
+  // Error message safety: OTP is never exposed in error message
+  try {
+    createAuthEnvelope("12345");
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      assert.equal(err.message.includes("12345"), false);
+    } else {
+      assert.fail("expected Error instance");
+    }
+  }
 });
