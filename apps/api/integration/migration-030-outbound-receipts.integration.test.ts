@@ -171,8 +171,8 @@ test("Migration 030: Immutability triggers protect against UPDATE, DELETE, and T
   try {
     await query(
       `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
-       VALUES ($1, 'test-prov', $1::text, $2, 'inbound test')`,
-      [inboundId, testPhone],
+       VALUES ($1, 'test-prov', $2, $3, 'inbound test')`,
+      [inboundId, inboundId, testPhone],
     );
 
     await query(
@@ -250,8 +250,8 @@ test("Migration 030: Protected rollback blocker prevents down migration when rec
   try {
     await query(
       `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
-       VALUES ($1, 'test-prov', $1::text, $2, 'inbound test')`,
-      [inboundId, testPhone],
+       VALUES ($1, 'test-prov', $2, $3, 'inbound test')`,
+      [inboundId, inboundId, testPhone],
     );
 
     await query(
@@ -347,8 +347,8 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
   try {
     await query(
       `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
-       VALUES ($1, 'test-prov', $1::text, $2, 'inbound e2e')`,
-      [inboundId, testPhone],
+       VALUES ($1, 'test-prov', $2, $3, 'inbound e2e')`,
+      [inboundId, inboundId, testPhone],
     );
 
     // Initial outbound message has status = 'sent'
