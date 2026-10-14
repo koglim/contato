@@ -4,7 +4,7 @@ import test from "node:test";
 import { DefaultChannelOutboundService, computeReceiptFingerprint } from "./channel-outbox.service.js";
 import { OUTBOX_MAX_ATTEMPTS, outboxAttemptIsDeadLetter, outboxRetryBackoffSeconds } from "./channel-outbox.retry.js";
 import type { ChannelOutboundMessageRecord, ChannelOutboundMessageRepository, RecordReceiptResult } from "./channel-outbox.types.js";
-import type { RecordChannelOutboundReceiptInput } from "@contatocerto/shared";
+import { recordChannelOutboundReceiptSchema, type RecordChannelOutboundReceiptInput } from "@contatocerto/shared";
 
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -262,25 +262,50 @@ test("computeReceiptFingerprint produces stable 64-char hex SHA-256 excluding re
   assert.notEqual(fp1, diffError);
 });
 
-test("computeReceiptFingerprint uses canonical JSON serialization and avoids join(':') delimitation ambiguity", () => {
-  const inputA: RecordChannelOutboundReceiptInput = {
-    provider: "evolution:primary",
-    provider_message_id: "wamid.synthetic.123",
-    provider_status: "DELIVERY_ACK",
-    normalized_status: "delivered",
-  };
-  const inputB: RecordChannelOutboundReceiptInput = {
+test("computeReceiptFingerprint uses canonical JSON serialization and avoids join(':') delimitation ambiguity with valid inputs", () => {
+  const inputA = {
     provider: "evolution",
-    provider_message_id: "primary:wamid.synthetic.123",
+    provider_message_id: "wamid.synthetic:123",
     provider_status: "DELIVERY_ACK",
-    normalized_status: "delivered",
+    normalized_status: "delivered" as const,
+  };
+  const inputB = {
+    provider: "evolution",
+    provider_message_id: "wamid.synthetic",
+    provider_status: "123:DELIVERY_ACK",
+    normalized_status: "delivered" as const,
   };
 
+  // 1. Both inputs are structurally and schema-valid per public API contract
+  const parsedA = recordChannelOutboundReceiptSchema.safeParse(inputA);
+  const parsedB = recordChannelOutboundReceiptSchema.safeParse(inputB);
+  assert.equal(parsedA.success, true, "VALID_INPUT_A_SCHEMA_PARSE=PASS");
+  assert.equal(parsedB.success, true, "VALID_INPUT_B_SCHEMA_PARSE=PASS");
+
+  // 2. Demonstrate that legacy naive join(":") would collide on the message_id / status boundary
+  const legacyJoinA = [
+    inputA.provider,
+    inputA.provider_message_id,
+    inputA.provider_status,
+    inputA.normalized_status,
+    null,
+    null,
+  ].join(":");
+  const legacyJoinB = [
+    inputB.provider,
+    inputB.provider_message_id,
+    inputB.provider_status,
+    inputB.normalized_status,
+    null,
+    null,
+  ].join(":");
+  assert.equal(legacyJoinA, legacyJoinB, "FINGERPRINT_OLD_JOIN_WOULD_COLLIDE=YES");
+
+  // 3. Prove canonical JSON serialization produces distinct fingerprints
   const fpA = computeReceiptFingerprint(inputA);
   const fpB = computeReceiptFingerprint(inputB);
 
-  // Both inputs produce different fingerprints with JSON serialization
-  assert.notEqual(fpA, fpB, "Ambiguous inputs must not produce the same fingerprint");
+  assert.notEqual(fpA, fpB, "FINGERPRINT_CANONICAL_JSON_DIFFERS=YES");
   assert.match(fpA, /^[a-f0-9]{64}$/);
   assert.match(fpB, /^[a-f0-9]{64}$/);
 });

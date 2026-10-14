@@ -640,9 +640,14 @@ test("Professional auth challenge: async FAILED receipt preserves outbox status 
   try {
     await query("INSERT INTO accounts (id) VALUES ($1)", [accountId]);
     await query(
-      "INSERT INTO account_identifiers (id, account_id, kind, normalized_value, verified_at) VALUES ($1, $2, 'phone', $3, NOW())",
+      "INSERT INTO account_identifiers (id, account_id, kind, normalized_value, verified_at) VALUES ($1, $2, 'phone', $3, NULL)",
       [identifierId, accountId, phone],
     );
+    const identifierBefore = await query<{ verified_at: string | null }>(
+      "SELECT verified_at FROM account_identifiers WHERE id = $1",
+      [identifierId],
+    );
+    assert.equal(identifierBefore.rows[0].verified_at, null, "account_identifier verified_at must initially be null");
     await query(
       `INSERT INTO channel_outbound_messages (
          id, channel_inbound_message_id, provider, recipient_phone_e164,
@@ -687,6 +692,13 @@ test("Professional auth challenge: async FAILED receipt preserves outbox status 
     assert.equal(body.outcome, "recorded");
     assert.equal(body.outbound_message_id, outboundId);
     assert.equal(body.normalized_status, "failed");
+
+    // 0. Account identifier verified_at remains strictly NULL
+    const identifierAfter = await query<{ verified_at: string | null }>(
+      "SELECT verified_at FROM account_identifiers WHERE id = $1",
+      [identifierId],
+    );
+    assert.equal(identifierAfter.rows[0].verified_at, null, "account_identifier verified_at must remain null after receipt");
 
     // 1. Outbound status remains 'sent'
     const outboxCheck = await query<{
