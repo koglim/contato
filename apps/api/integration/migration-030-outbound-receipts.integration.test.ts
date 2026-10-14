@@ -336,8 +336,9 @@ test("Migration 030: Compatible rollback succeeds when table is empty and reappl
 test("End-to-End: POST /internal/channel/outbound/receipts records delivered, read, failed (131047), unknown and preserves outbox status", async () => {
   await migrateUp();
 
-  const app = buildApp();
-  const internalApiKey = process.env.INTERNAL_API_KEY || "contatocerto-internal-key";
+  const internalApiKey = "test-internal-receipt-key";
+  const app = buildApp({ internalApiKey });
+  const headers = { "x-internal-key": internalApiKey };
 
   const inboundId = randomUUID();
   const outboundId = randomUUID();
@@ -370,7 +371,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     const resDelivered = await app.inject({
       method: "POST",
       url: "/internal/channel/outbound/receipts",
-      headers: { authorization: `Bearer ${internalApiKey}` },
+      headers,
       payload: deliveredPayload,
     });
 
@@ -392,7 +393,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     const resDuplicate = await app.inject({
       method: "POST",
       url: "/internal/channel/outbound/receipts",
-      headers: { authorization: `Bearer ${internalApiKey}` },
+      headers,
       payload: deliveredPayload,
     });
 
@@ -421,7 +422,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     const resRead = await app.inject({
       method: "POST",
       url: "/internal/channel/outbound/receipts",
-      headers: { authorization: `Bearer ${internalApiKey}` },
+      headers,
       payload: readPayload,
     });
 
@@ -445,7 +446,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     const resFailed = await app.inject({
       method: "POST",
       url: "/internal/channel/outbound/receipts",
-      headers: { authorization: `Bearer ${internalApiKey}` },
+      headers,
       payload: failedPayload,
     });
 
@@ -497,7 +498,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     const resUnknown = await app.inject({
       method: "POST",
       url: "/internal/channel/outbound/receipts",
-      headers: { authorization: `Bearer ${internalApiKey}` },
+      headers,
       payload: unknownPayload,
     });
 
@@ -520,7 +521,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     const resInvalid = await app.inject({
       method: "POST",
       url: "/internal/channel/outbound/receipts",
-      headers: { authorization: `Bearer ${internalApiKey}` },
+      headers,
       payload: invalidPayload,
     });
 
