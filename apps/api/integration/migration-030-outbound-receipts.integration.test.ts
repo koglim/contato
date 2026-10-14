@@ -176,8 +176,8 @@ test("Migration 030: Immutability triggers protect against UPDATE, DELETE, and T
     );
 
     await query(
-      `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id)
-       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound test', 'sent', 'test-prov:wamid.123')`,
+      `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id, sent_at)
+       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound test', 'sent', 'test-prov:wamid.123', NOW())`,
       [outboundId, inboundId, testPhone],
     );
 
@@ -255,8 +255,8 @@ test("Migration 030: Protected rollback blocker prevents down migration when rec
     );
 
     await query(
-      `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id)
-       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound test', 'sent', 'test-prov:wamid.456')`,
+      `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id, sent_at)
+       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound test', 'sent', 'test-prov:wamid.456', NOW())`,
       [outboundId, inboundId, testPhone],
     );
 
@@ -353,8 +353,8 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
 
     // Initial outbound message has status = 'sent'
     await query(
-      `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id)
-       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound e2e', 'sent', $4)`,
+      `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id, sent_at)
+       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound e2e', 'sent', $4, NOW())`,
       [outboundId, inboundId, testPhone, providerMsgId],
     );
 
