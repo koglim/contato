@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ChannelOutboundConfig } from "../../config/channel-outbound.js";
 import type {
   ChannelOutboundMessageRecord,
@@ -9,7 +9,13 @@ import type {
   ChannelOutboundHoldOutcome,
   HoldOutboundInput,
 } from "./channel-outbox.types.js";
-import type { MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
+import type {
+  MarkChannelOutboundMessageFailedInput,
+  MarkChannelOutboundMessageSentInput,
+  RecordChannelOutboundReceiptInput,
+  RecordChannelOutboundReceiptResponse,
+} from "@contatocerto/shared";
+
 import { CUSTOMER_REPLY_EXPIRY_REASON } from "./channel-outbox.expiry.js";
 import { decryptAuthEnvelope, validateProfessionalAuthPepper } from "../professional-auth/professional-auth.crypto.js";
 
@@ -121,9 +127,42 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
     return this.mutationFailure(id);
   }
 
+  async recordReceipt(input: RecordChannelOutboundReceiptInput): Promise<RecordChannelOutboundReceiptResponse> {
+    const outbound = await this.repository.findByProviderMessageId(input.provider, input.provider_message_id);
+    if (!outbound) {
+      return {
+        outcome: "unknown_provider_message_id",
+        provider: input.provider,
+        provider_message_id: input.provider_message_id,
+      };
+    }
+    const fingerprint = computeReceiptFingerprint(input);
+    const result = await this.repository.recordReceipt(input, fingerprint, outbound.id);
+    return {
+      outcome: "recorded",
+      receipt_id: result.receiptId,
+      outbound_message_id: result.outboundMessageId,
+      normalized_status: result.normalizedStatus,
+      duplicate: result.duplicate,
+    };
+  }
+
   private async mutationFailure(id: string): Promise<Exclude<ChannelOutboundMutationOutcome, { kind: "response" }>> {
     return (await this.repository.findById(id))
       ? { kind: "outbound_message_claim_invalid" }
       : { kind: "outbound_message_not_found" };
   }
 }
+
+export function computeReceiptFingerprint(input: RecordChannelOutboundReceiptInput): string {
+  const canonical = JSON.stringify([
+    input.provider,
+    input.provider_message_id,
+    input.provider_status,
+    input.normalized_status,
+    input.provider_event_at ?? null,
+    input.provider_error_code ?? null,
+  ]);
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+

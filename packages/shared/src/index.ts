@@ -79,7 +79,11 @@ export {
   markChannelOutboundMessageSentSchema,
   holdChannelOutboundMessageSchema,
   channelOutboundHoldResponseSchema,
+  channelOutboundReceiptNormalizedStatusSchema,
+  recordChannelOutboundReceiptSchema,
+  recordChannelOutboundReceiptResponseSchema,
 } from "./schemas/channel-outbound.js";
+
 export type { HealthResponse } from "./types/health.js";
 export type {
   CreateProfessionalInput,
@@ -145,7 +149,11 @@ export type {
   ChannelOutboundMessagePurpose,
   MarkChannelOutboundMessageFailedInput,
   MarkChannelOutboundMessageSentInput,
+  ChannelOutboundReceiptNormalizedStatus,
+  RecordChannelOutboundReceiptInput,
+  RecordChannelOutboundReceiptResponse,
 } from "./types/channel-outbound.js";
+
 export type { SelectionMessageContract } from "./types/selection-message.js";
 export type { GlobalConversationMessageContract } from "./types/global-conversation-message.js";
 export { opportunityMessageSchema } from "./schemas/opportunity-message.js";

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildApp } from "../../app.js";
 import type { ChannelOutboundService } from "./channel-outbox.types.js";
+import type { RecordChannelOutboundReceiptInput } from "@contatocerto/shared";
+
 
 const internalApiKey = "test-internal-key";
 const outboundId = "11111111-1111-4111-8111-111111111111";
@@ -26,7 +28,24 @@ class FakeOutbox implements ChannelOutboundService {
     if (!this.next) return { kind: "outbound_queue_empty" as const };
     return this.claim();
   }
+  async recordReceipt(input: RecordChannelOutboundReceiptInput) {
+    if (input.provider_message_id === "unknown-msg-id") {
+      return {
+        outcome: "unknown_provider_message_id" as const,
+        provider: input.provider,
+        provider_message_id: input.provider_message_id,
+      };
+    }
+    return {
+      outcome: "recorded" as const,
+      receipt_id: "33333333-3333-4333-8333-333333333333",
+      outbound_message_id: outboundId,
+      normalized_status: input.normalized_status,
+      duplicate: false,
+    };
+  }
 }
+
 
 class ExpiredOutbox extends FakeOutbox {
   override async claim() { return { kind: "outbound_message_expired" as const }; }
@@ -117,3 +136,72 @@ test("delivery hold requires internal authentication and a bounded reason withou
     assert.equal((await app.inject({ method: "POST", url, payload: { ...payload, reason: "sensitive provider error" }, headers: { "x-internal-key": internalApiKey } })).statusCode, 400);
   } finally { await app.close(); }
 });
+
+test("receipt endpoint requires auth, validates input, strictly rejects extra fields and returns 200 for known and unknown IDs", async () => {
+  const app = buildApp({ channelOutboundService: new FakeOutbox(), internalApiKey });
+  const receiptsUrl = "/internal/channel/outbound/receipts";
+  try {
+    const validPayload = {
+      provider: "evolution",
+      provider_message_id: "test-instance:wamid.123",
+      provider_status: "DELIVERY_ACK",
+      normalized_status: "delivered",
+      provider_event_at: "2026-10-14T12:00:00.000Z",
+    };
+
+    // 1. Auth required (401 without header)
+    assert.equal((await app.inject({ method: "POST", url: receiptsUrl, payload: validPayload })).statusCode, 401);
+
+    // 2. 200 with recorded outcome for known message
+    const res = await app.inject({
+      method: "POST",
+      url: receiptsUrl,
+      headers: { "x-internal-key": internalApiKey },
+      payload: validPayload,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), {
+      outcome: "recorded",
+      receipt_id: "33333333-3333-4333-8333-333333333333",
+      outbound_message_id: outboundId,
+      normalized_status: "delivered",
+      duplicate: false,
+    });
+
+    // 3. 200 with unknown_provider_message_id outcome for unknown message
+    const unknownRes = await app.inject({
+      method: "POST",
+      url: receiptsUrl,
+      headers: { "x-internal-key": internalApiKey },
+      payload: { ...validPayload, provider_message_id: "unknown-msg-id" },
+    });
+    assert.equal(unknownRes.statusCode, 200);
+    assert.deepEqual(unknownRes.json(), {
+      outcome: "unknown_provider_message_id",
+      provider: "evolution",
+      provider_message_id: "unknown-msg-id",
+    });
+
+    // 4. Invalid status rejected (400)
+    const badStatusRes = await app.inject({
+      method: "POST",
+      url: receiptsUrl,
+      headers: { "x-internal-key": internalApiKey },
+      payload: { ...validPayload, normalized_status: "invalid_status" },
+    });
+    assert.equal(badStatusRes.statusCode, 400);
+
+    // 5. Extra fields strictly rejected (400) - prevent leaking PII, OTP or tokens
+    const extraFieldRes = await app.inject({
+      method: "POST",
+      url: receiptsUrl,
+      headers: { "x-internal-key": internalApiKey },
+      payload: { ...validPayload, text_content: "hello", otp_code: "123456" },
+    });
+    assert.equal(extraFieldRes.statusCode, 400);
+  } finally {
+    await app.close();
+  }
+});
+
+

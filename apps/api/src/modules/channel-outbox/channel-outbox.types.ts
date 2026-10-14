@@ -6,7 +6,11 @@ import type {
   MarkChannelOutboundMessageSentInput,
   ChannelOutboundQueueStatus,
   InteractiveOutboundPayload,
+  ChannelOutboundReceiptNormalizedStatus,
+  RecordChannelOutboundReceiptInput,
+  RecordChannelOutboundReceiptResponse,
 } from "@contatocerto/shared";
+
 
 export type ChannelOutboundMessageRecord = {
   id: string;
@@ -64,7 +68,16 @@ export interface ChannelOutboundMessageRepository {
   claimNextPending(processingToken: string, processingLeaseSeconds: number): Promise<ChannelOutboundMessageRecord | null>;
   markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<boolean>;
   markFailed(id: string, input: MarkChannelOutboundMessageFailedInput): Promise<boolean>;
+  findByProviderMessageId(provider: string, providerMessageId: string): Promise<ChannelOutboundMessageRecord | null>;
+  recordReceipt(input: RecordChannelOutboundReceiptInput, fingerprint: string, outboundMessageId: string): Promise<RecordReceiptResult>;
 }
+
+export type RecordReceiptResult = {
+  receiptId: string;
+  outboundMessageId: string;
+  normalizedStatus: ChannelOutboundReceiptNormalizedStatus;
+  duplicate: boolean;
+};
 
 export type ChannelOutboundClaimOutcome =
   | { kind: "response"; response: ChannelOutboundMessageClaimResponse }
@@ -85,7 +98,9 @@ export interface ChannelOutboundService {
   claimNextPending(): Promise<ChannelOutboundClaimOutcome>;
   markSent(id: string, input: MarkChannelOutboundMessageSentInput): Promise<ChannelOutboundMutationOutcome>;
   markFailed(id: string, input: MarkChannelOutboundMessageFailedInput): Promise<ChannelOutboundMutationOutcome>;
+  recordReceipt(input: RecordChannelOutboundReceiptInput): Promise<RecordChannelOutboundReceiptResponse>;
 }
+
 
 export type HoldOutboundInput = {
   processing_token: string;

@@ -81,3 +81,51 @@ export const channelOutboundQueueStatusSchema = z.object({
     oldest_unfinished_at: z.string().datetime({ offset: true }),
   }).strict()).max(6),
 }).strict();
+
+export const channelOutboundReceiptNormalizedStatusSchema = z.enum([
+  "accepted",
+  "delivered",
+  "read",
+  "failed",
+  "unknown",
+]);
+
+function hasNoAsciiControl(val: string): boolean {
+  for (let i = 0; i < val.length; i++) {
+    const code = val.charCodeAt(i);
+    if ((code >= 0 && code <= 31) || code === 127) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export const recordChannelOutboundReceiptSchema = z.object({
+  provider: z.string().trim().regex(/^[a-z][a-z0-9_-]{0,62}$/u),
+  provider_message_id: z.string().trim().min(1).max(255).refine(hasNoAsciiControl, {
+    message: "provider_message_id must not contain ASCII control characters",
+  }),
+  provider_status: z.string().trim().min(1).max(64).refine(hasNoAsciiControl, {
+    message: "provider_status must not contain ASCII control characters",
+  }),
+  normalized_status: channelOutboundReceiptNormalizedStatusSchema,
+  provider_event_at: z.string().datetime({ offset: true }).optional().nullable(),
+  provider_error_code: z.string().trim().min(1).max(64).optional().nullable(),
+  provider_error_reason: z.string().trim().min(1).max(500).optional().nullable(),
+}).strict();
+
+export const recordChannelOutboundReceiptResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("recorded"),
+    receipt_id: z.string().uuid(),
+    outbound_message_id: z.string().uuid(),
+    normalized_status: channelOutboundReceiptNormalizedStatusSchema,
+    duplicate: z.boolean(),
+  }).strict(),
+  z.object({
+    outcome: z.literal("unknown_provider_message_id"),
+    provider: z.string().trim().regex(/^[a-z][a-z0-9_-]{0,62}$/u),
+    provider_message_id: z.string().trim().min(1).max(255).refine(hasNoAsciiControl),
+  }).strict(),
+]);
+
