@@ -64,6 +64,61 @@ export function decryptAuthMessage(pepper: string, value: string) {
   return Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8");
 }
 
+export interface ProfessionalAuthEnvelopeV1 {
+  version: 1;
+  otp: string;
+}
+
+export function createAuthEnvelope(otp: string): string {
+  if (!/^\d{6}$/.test(otp)) {
+    throw new Error("invalid_otp_code");
+  }
+  return JSON.stringify({ version: 1, otp });
+}
+
+const EXACT_LEGACY_AUTH_MESSAGE_PATTERN = /^Seu código ContatoCerto é (\d{6})\. Ele expira em 5 minutos\.$/u;
+
+export function parseAuthEnvelope(decrypted: string): { otp: string } {
+  let isJson = false;
+  try {
+    const parsed = JSON.parse(decrypted);
+    isJson = true;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      parsed.version === 1 &&
+      typeof parsed.otp === "string" &&
+      /^\d{6}$/.test(parsed.otp) &&
+      Object.keys(parsed).length === 2
+    ) {
+      return { otp: parsed.otp };
+    }
+  } catch {
+    // decrypted is not valid JSON
+  }
+
+  if (isJson) {
+    throw new Error("auth_envelope_invalid");
+  }
+
+  const match = EXACT_LEGACY_AUTH_MESSAGE_PATTERN.exec(decrypted);
+  if (match) {
+    return { otp: match[1] };
+  }
+
+  throw new Error("auth_envelope_invalid");
+}
+
+export function encryptAuthEnvelope(pepper: string, otp: string): string {
+  return encryptAuthMessage(pepper, createAuthEnvelope(otp));
+}
+
+export function decryptAuthEnvelope(pepper: string, value: string): { otp: string } {
+  const decrypted = decryptAuthMessage(pepper, value);
+  return parseAuthEnvelope(decrypted);
+}
+
 function uuidToBytes(id: string) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(id)) throw new Error("invalid_challenge_id");
   return Buffer.from(id.replaceAll("-", ""), "hex");

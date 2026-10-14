@@ -147,3 +147,73 @@ test("transient failure can report pending and the fifth failure remains dead-le
     kind: "response", response: { id, status: "failed" },
   });
 });
+
+test("professional_auth_challenge claim transforms to template_authentication interactive payload", async () => {
+  const pepper = "a".repeat(64);
+  const previousPepper = process.env.PROFESSIONAL_AUTH_PEPPER;
+  process.env.PROFESSIONAL_AUTH_PEPPER = pepper;
+
+  try {
+    const { encryptAuthEnvelope } = await import("../professional-auth/professional-auth.crypto.js");
+    const ciphertext = encryptAuthEnvelope(pepper, "482910");
+
+    const repo = new FakeRepository();
+    repo.current = record({
+      purpose: "professional_auth_challenge",
+      textContent: ciphertext,
+      messageType: "text",
+      interactivePayload: null,
+    });
+
+    const service = new DefaultChannelOutboundService(repo, {
+      processingLeaseSeconds: 60,
+      authTemplateName: "auth_otp_v1",
+      authTemplateLanguage: "pt_BR",
+    });
+
+    const claimResult = await service.claim(id);
+    assert.equal(claimResult.kind, "response");
+    if (claimResult.kind === "response" && claimResult.response.status === "processing") {
+      assert.equal(claimResult.response.purpose, "professional_auth_challenge");
+      assert.equal(claimResult.response.message_type, "interactive");
+      assert.equal(claimResult.response.text_content, "[auth template: auth_otp_v1]");
+      assert.deepEqual(claimResult.response.interactive_payload, {
+        schema_version: 1,
+        type: "template_authentication",
+        template_name: "auth_otp_v1",
+        language_code: "pt_BR",
+        otp_code: "482910",
+      });
+    }
+
+    // Fails closed if template config is missing
+    const serviceNoTemplate = new DefaultChannelOutboundService(repo, {
+      processingLeaseSeconds: 60,
+    });
+    repo.current = record({
+      purpose: "professional_auth_challenge",
+      textContent: ciphertext,
+      messageType: "text",
+      interactivePayload: null,
+    });
+    await assert.rejects(
+      async () => serviceNoTemplate.claim(id),
+      /WHATSAPP_PROFESSIONAL_AUTH_TEMPLATE_NAME is required/,
+    );
+
+    // Fails closed if envelope is corrupt/invalid
+    repo.current = record({
+      purpose: "professional_auth_challenge",
+      textContent: "corrupt_ciphertext",
+      messageType: "text",
+      interactivePayload: null,
+    });
+    await assert.rejects(
+      async () => service.claim(id),
+      /auth_outbox_payload_invalid/,
+    );
+  } finally {
+    process.env.PROFESSIONAL_AUTH_PEPPER = previousPepper;
+  }
+});
+

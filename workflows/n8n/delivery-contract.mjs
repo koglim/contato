@@ -58,6 +58,30 @@ export function claimDecision(response, expectedProvider) {
     || typeof message.text_content !== "string"
     || !message.text_content.trim() || message.text_content.length > 2000) throw new Error("outbox_claim_invalid");
 
+  // Strict purpose / auth template bijection (fail-closed in both directions)
+  if (message.purpose === "professional_auth_challenge") {
+    if (
+      message.message_type !== "interactive" ||
+      !message.interactive_payload ||
+      typeof message.interactive_payload !== "object" ||
+      Array.isArray(message.interactive_payload) ||
+      message.interactive_payload.type !== "template_authentication"
+    ) {
+      throw new Error("outbox_claim_invalid");
+    }
+  }
+
+  if (
+    message.interactive_payload &&
+    typeof message.interactive_payload === "object" &&
+    !Array.isArray(message.interactive_payload) &&
+    message.interactive_payload.type === "template_authentication"
+  ) {
+    if (message.purpose !== "professional_auth_challenge" || message.message_type !== "interactive") {
+      throw new Error("outbox_claim_invalid");
+    }
+  }
+
   if (message.message_type === "text") {
     if (message.interactive_payload !== undefined && message.interactive_payload !== null) {
       throw new Error("outbox_claim_invalid");
@@ -152,6 +176,30 @@ export function claimDecision(response, expectedProvider) {
       } };
     }
 
+    if (payload.type === "template_authentication") {
+      if (typeof payload.template_name !== "string" || !/^[a-z0-9_]+$/.test(payload.template_name)) {
+        throw new Error("outbox_claim_invalid");
+      }
+      if (typeof payload.language_code !== "string" || !/^[a-z]{2}(_[A-Z]{2})?$/.test(payload.language_code)) {
+        throw new Error("outbox_claim_invalid");
+      }
+      if (typeof payload.otp_code !== "string" || !/^\d{6}$/.test(payload.otp_code)) {
+        throw new Error("outbox_claim_invalid");
+      }
+      return { action: "send", message: {
+        id: message.id, purpose: message.purpose, provider: message.provider,
+        recipient_phone_e164: message.recipient_phone_e164, message_type: "interactive",
+        text_content: message.text_content, interactive_payload: {
+          schema_version: 1,
+          type: "template_authentication",
+          template_name: payload.template_name,
+          language_code: payload.language_code,
+          otp_code: payload.otp_code,
+        },
+        processing_token: message.processing_token,
+      } };
+    }
+
     throw new Error("outbox_claim_invalid");
   }
 
@@ -166,6 +214,30 @@ export function buildEvolutionSendRequest(message, instance) {
   }
   const encodedInstance = encodeURIComponent(instance);
   const number = message.recipient_phone_e164.slice(1);
+
+  // Defense in depth: purpose / auth template bijection
+  if (message.purpose === "professional_auth_challenge") {
+    if (
+      message.message_type !== "interactive" ||
+      !message.interactive_payload ||
+      typeof message.interactive_payload !== "object" ||
+      Array.isArray(message.interactive_payload) ||
+      message.interactive_payload.type !== "template_authentication"
+    ) {
+      throw new Error("interactive_payload_invalid");
+    }
+  }
+
+  if (
+    message.interactive_payload &&
+    typeof message.interactive_payload === "object" &&
+    !Array.isArray(message.interactive_payload) &&
+    message.interactive_payload.type === "template_authentication"
+  ) {
+    if (message.purpose !== "professional_auth_challenge" || message.message_type !== "interactive") {
+      throw new Error("interactive_payload_invalid");
+    }
+  }
 
   if (message.message_type === "text") {
     if (typeof message.text_content !== "string" || !message.text_content.trim()) {
@@ -237,6 +309,47 @@ export function buildEvolutionSendRequest(message, instance) {
           ],
         });
       });
+
+      return {
+        endpoint: `/message/sendTemplate/${encodedInstance}`,
+        body: {
+          number,
+          name: payload.template_name,
+          language: payload.language_code,
+          components,
+        },
+      };
+    }
+
+    if (payload.type === "template_authentication") {
+      if (typeof payload.template_name !== "string" || !payload.template_name.trim()
+        || typeof payload.language_code !== "string" || !payload.language_code.trim()
+        || typeof payload.otp_code !== "string" || !/^\d{6}$/.test(payload.otp_code)) {
+        throw new Error("interactive_payload_invalid");
+      }
+
+      const components = [
+        {
+          type: "body",
+          parameters: [
+            {
+              type: "text",
+              text: payload.otp_code,
+            },
+          ],
+        },
+        {
+          type: "button",
+          sub_type: "url",
+          index: "0",
+          parameters: [
+            {
+              type: "text",
+              text: payload.otp_code,
+            },
+          ],
+        },
+      ];
 
       return {
         endpoint: `/message/sendTemplate/${encodedInstance}`,
