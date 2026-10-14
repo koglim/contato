@@ -69,9 +69,15 @@ flowchart TD
 
 O ContatoCerto implementa separação estrita entre o aceite síncrono pelo provedor e o ciclo assíncrono de entrega:
 
+* **Status de Implementação e Limitações Operacionais:**
+  * `CODE SUPPORT = YES`: O código versionado suporta ingestão, normalização, persistência append-only e idempotência de recibos (`messages.update` / `messages_update`).
+  * `PRODUCTION EVENT SUBSCRIPTION = NO`: Webhook de status callbacks não está habilitado em produção.
+  * `PRODUCTION RUNTIME VERIFIED = NO`: Nenhuma homologação de produção foi executada para eventos de status.
+  * `EVOLUTION_2_3_7_WHATSAPP_BUSINESS_STATUS_LIMITATION = YES`: A Evolution 2.3.7 + WHATSAPP-BUSINESS possui limitação upstream conhecida no processamento de status callbacks, podendo impedir a emissão de `MESSAGES_UPDATE`. A existência de suporte no código WP-B não significa que produção esteja operacionalmente habilitada ou homologada.
+  * `EVOLUTION_2_3_7_ERROR_DETAILS_LIMITATION = YES`: Detalhes de erro da Meta (como `error_data.details`) não fazem parte do payload de `MESSAGES_UPDATE` da Evolution 2.3.7 stock, sendo tratados de forma defensiva apenas quando factualmente presentes em versões patchadas.
 * **Semântica Invariante de `status = 'sent'`:** Na tabela `channel_outbound_messages`, o estado `'sent'` expressa única e exclusivamente que o provedor aceitou o payload e retornou um identificador autoritativo (`wamid`). Ele **não** significa que a mensagem chegou ao aparelho do destinatário.
 * **Tabela Imutável de Recibos (`channel_outbound_receipts`):** Cada evento de atualização de status recebido da Evolution/Meta é persistido como registro autônomo, vinculado à mensagem correspondente através de `outbound_message_id`. Triggers em nível de linha e comando bloqueiam qualquer `UPDATE`, `DELETE` ou `TRUNCATE` (`OUTBOUND_RECEIPT_IMMUTABLE`, código `P0030`), e o rollback da migration é protegido (`OUTBOUND_RECEIPT_ROLLBACK_BLOCKED`, código `P0030`).
-* **Idempotência Criptográfica:** Um fingerprint SHA-256 é calculado deterministamente a partir de `(provider, provider_message_id, provider_status, normalized_status, provider_event_at, provider_error_code)`, garantindo deduplicação atômica no banco sem efeitos colaterais caso a Meta reenvie webhooks.
+* **Idempotência Criptográfica Canônica:** Um fingerprint SHA-256 é calculado deterministamente a partir da serialização JSON inequívoca de `[provider, provider_message_id, provider_status, normalized_status, provider_event_at ?? null, provider_error_code ?? null]`, evitando ambiguidades de delimitação e garantindo deduplicação atômica no banco sem efeitos colaterais caso a Meta reenvie webhooks.
 * **Ausência de Efeitos Colaterais no Domínio:** Nenhum recibo assíncrono altera o campo `status` da tabela `channel_outbound_messages`, nem reinicia retentativas de envio. Falhas assíncronas (como o erro Meta `131047` — janela de 24h fechada) são registradas estritamente para observabilidade e auditoria, sem invalidar ou reemitir challenges de OTP automaticamente.
 
 ### Autoridade Compartilhada de Domínio Pós-Conexão (CURRENT — WP6.3)

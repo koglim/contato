@@ -240,7 +240,7 @@ test("professional_auth_challenge claim transforms to template_authentication in
 test("computeReceiptFingerprint produces stable 64-char hex SHA-256 excluding received_at", () => {
   const input: RecordChannelOutboundReceiptInput = {
     provider: "evolution",
-    provider_message_id: "test-instance:wamid.123",
+    provider_message_id: "wamid.synthetic.123",
     provider_status: "DELIVERY_ACK",
     normalized_status: "delivered",
     provider_event_at: "2026-10-14T12:00:00.000Z",
@@ -262,18 +262,41 @@ test("computeReceiptFingerprint produces stable 64-char hex SHA-256 excluding re
   assert.notEqual(fp1, diffError);
 });
 
+test("computeReceiptFingerprint uses canonical JSON serialization and avoids join(':') delimitation ambiguity", () => {
+  const inputA: RecordChannelOutboundReceiptInput = {
+    provider: "evolution:primary",
+    provider_message_id: "wamid.synthetic.123",
+    provider_status: "DELIVERY_ACK",
+    normalized_status: "delivered",
+  };
+  const inputB: RecordChannelOutboundReceiptInput = {
+    provider: "evolution",
+    provider_message_id: "primary:wamid.synthetic.123",
+    provider_status: "DELIVERY_ACK",
+    normalized_status: "delivered",
+  };
+
+  const fpA = computeReceiptFingerprint(inputA);
+  const fpB = computeReceiptFingerprint(inputB);
+
+  // Both inputs produce different fingerprints with JSON serialization
+  assert.notEqual(fpA, fpB, "Ambiguous inputs must not produce the same fingerprint");
+  assert.match(fpA, /^[a-f0-9]{64}$/);
+  assert.match(fpB, /^[a-f0-9]{64}$/);
+});
+
 test("recordReceipt records receipt when outbound message is known and identifies duplicates", async () => {
   const current = context();
   current.repository.current = record({
     id,
     provider: "evolution",
-    providerMessageId: "test-instance:wamid.123",
+    providerMessageId: "wamid.synthetic.123",
     status: "sent",
   });
 
   const receiptInput: RecordChannelOutboundReceiptInput = {
     provider: "evolution",
-    provider_message_id: "test-instance:wamid.123",
+    provider_message_id: "wamid.synthetic.123",
     provider_status: "DELIVERY_ACK",
     normalized_status: "delivered",
     provider_event_at: "2026-10-14T12:00:00.000Z",
@@ -308,7 +331,7 @@ test("recordReceipt returns unknown_provider_message_id when outbound message no
 
   const receiptInput: RecordChannelOutboundReceiptInput = {
     provider: "evolution",
-    provider_message_id: "test-instance:wamid.unknown",
+    provider_message_id: "wamid.synthetic.unknown",
     provider_status: "DELIVERY_ACK",
     normalized_status: "delivered",
   };
@@ -317,8 +340,34 @@ test("recordReceipt returns unknown_provider_message_id when outbound message no
   assert.deepEqual(outcome, {
     outcome: "unknown_provider_message_id",
     provider: "evolution",
-    provider_message_id: "test-instance:wamid.unknown",
+    provider_message_id: "wamid.synthetic.unknown",
   });
+});
+
+test("recordReceipt returns unknown_provider_message_id on provider mismatch", async () => {
+  const current = context();
+  current.repository.current = record({
+    id,
+    provider: "evolution",
+    providerMessageId: "wamid.synthetic.123",
+    status: "sent",
+  });
+
+  const receiptInput: RecordChannelOutboundReceiptInput = {
+    provider: "outro-provider",
+    provider_message_id: "wamid.synthetic.123",
+    provider_status: "DELIVERY_ACK",
+    normalized_status: "delivered",
+  };
+
+  const outcome = await current.service.recordReceipt(receiptInput);
+  assert.deepEqual(outcome, {
+    outcome: "unknown_provider_message_id",
+    provider: "outro-provider",
+    provider_message_id: "wamid.synthetic.123",
+  });
+  // Outbound message remains untouched
+  assert.equal(current.repository.current?.status, "sent");
 });
 
 

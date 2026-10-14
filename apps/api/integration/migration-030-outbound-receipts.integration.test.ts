@@ -177,7 +177,7 @@ test("Migration 030: Immutability triggers protect against UPDATE, DELETE, and T
 
     await query(
       `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id, sent_at)
-       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound test', 'sent', 'test-prov:wamid.123', NOW())`,
+       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound test', 'sent', 'wamid.synthetic.123', NOW())`,
       [outboundId, inboundId, testPhone],
     );
 
@@ -185,7 +185,7 @@ test("Migration 030: Immutability triggers protect against UPDATE, DELETE, and T
       `INSERT INTO channel_outbound_receipts (
          id, outbound_message_id, provider, provider_message_id,
          provider_status, normalized_status, event_fingerprint
-       ) VALUES ($1, $2, 'test-prov', 'test-prov:wamid.123', 'DELIVERY_ACK', 'delivered', $3)`,
+       ) VALUES ($1, $2, 'test-prov', 'wamid.synthetic.123', 'DELIVERY_ACK', 'delivered', $3)`,
       [receiptId, outboundId, fingerprint],
     );
 
@@ -256,7 +256,7 @@ test("Migration 030: Protected rollback blocker prevents down migration when rec
 
     await query(
       `INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id, sent_at)
-       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound test', 'sent', 'test-prov:wamid.456', NOW())`,
+       VALUES ($1, $2, 'test-prov', $3, 'text', 'outbound test', 'sent', 'wamid.synthetic.456', NOW())`,
       [outboundId, inboundId, testPhone],
     );
 
@@ -264,7 +264,7 @@ test("Migration 030: Protected rollback blocker prevents down migration when rec
       `INSERT INTO channel_outbound_receipts (
          id, outbound_message_id, provider, provider_message_id,
          provider_status, normalized_status, event_fingerprint
-       ) VALUES ($1, $2, 'test-prov', 'test-prov:wamid.456', 'FAILED', 'failed', $3)`,
+       ) VALUES ($1, $2, 'test-prov', 'wamid.synthetic.456', 'FAILED', 'failed', $3)`,
       [receiptId, outboundId, fingerprint],
     );
 
@@ -343,7 +343,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
   const inboundId = randomUUID();
   const outboundId = randomUUID();
   const testPhone = "+5566999990003";
-  const providerMsgId = `test-prov:wamid.${randomUUID()}`;
+  const providerMsgId = `wamid.synthetic.${randomUUID()}`;
 
   try {
     await query(
@@ -383,11 +383,20 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     assert.equal(bodyDelivered.duplicate, false);
 
     // CRUCIAL DOMAIN INVARIANT: channel_outbound_messages.status MUST REMAIN 'sent'
-    const outboxCheck1 = await query<{ status: string }>(
-      "SELECT status FROM channel_outbound_messages WHERE id = $1",
+    // and attempt_count, processing_token, next_attempt_at must not be mutated
+    const outboxCheck1 = await query<{
+      status: string;
+      attempt_count: number;
+      processing_token: string | null;
+      next_attempt_at: string | null;
+    }>(
+      "SELECT status, attempt_count, processing_token, next_attempt_at FROM channel_outbound_messages WHERE id = $1",
       [outboundId],
     );
     assert.equal(outboxCheck1.rows[0].status, "sent", "channel_outbound_messages.status must NEVER mutate on receipt");
+    assert.equal(outboxCheck1.rows[0].attempt_count, 0, "attempt_count must remain unchanged");
+    assert.equal(outboxCheck1.rows[0].processing_token, null, "processing_token must remain null");
+    assert.equal(outboxCheck1.rows[0].next_attempt_at, null, "next_attempt_at must remain null");
 
     // 2. Replay identical receipt: must be idempotent duplicate
     const resDuplicate = await app.inject({
@@ -458,11 +467,19 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
 
     // CRUCIAL DOMAIN INVARIANT: channel_outbound_messages.status STILL 'sent' even on async FAILED receipt!
     // No automated retry, no requeue to pending, no status mutation.
-    const outboxCheck2 = await query<{ status: string }>(
-      "SELECT status FROM channel_outbound_messages WHERE id = $1",
+    const outboxCheck2 = await query<{
+      status: string;
+      attempt_count: number;
+      processing_token: string | null;
+      next_attempt_at: string | null;
+    }>(
+      "SELECT status, attempt_count, processing_token, next_attempt_at FROM channel_outbound_messages WHERE id = $1",
       [outboundId],
     );
     assert.equal(outboxCheck2.rows[0].status, "sent", "channel_outbound_messages.status must remain 'sent' on async failure");
+    assert.equal(outboxCheck2.rows[0].attempt_count, 0, "attempt_count must remain unchanged on async failure");
+    assert.equal(outboxCheck2.rows[0].processing_token, null, "processing_token must remain null on async failure");
+    assert.equal(outboxCheck2.rows[0].next_attempt_at, null, "next_attempt_at must remain null on async failure");
 
     // 5. Query persisted receipt details to verify fidelity
     const persistedReceipts = await query<{
@@ -490,7 +507,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     // 6. Unknown provider_message_id receipt returns 200 with unknown_provider_message_id outcome
     const unknownPayload = {
       provider: "test-prov",
-      provider_message_id: "test-prov:wamid.UNKNOWN_NONEXISTENT",
+      provider_message_id: "wamid.synthetic.UNKNOWN_NONEXISTENT",
       provider_status: "DELIVERED",
       normalized_status: "delivered",
     };
@@ -507,7 +524,7 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     assert.deepEqual(bodyUnknown, {
       outcome: "unknown_provider_message_id",
       provider: "test-prov",
-      provider_message_id: "test-prov:wamid.UNKNOWN_NONEXISTENT",
+      provider_message_id: "wamid.synthetic.UNKNOWN_NONEXISTENT",
     });
 
     // 7. Validation failure returns 400
@@ -531,5 +548,198 @@ test("End-to-End: POST /internal/channel/outbound/receipts records delivered, re
     await cleanReceipts();
     await query("DELETE FROM channel_outbound_messages WHERE id = $1", [outboundId]);
     await query("DELETE FROM channel_inbound_messages WHERE id = $1", [inboundId]);
+  }
+});
+
+test("Provider mismatch: receipt for different provider does not link to outbound and returns unknown_provider_message_id", async () => {
+  await migrateUp();
+
+  const internalApiKey = "test-internal-mismatch-key";
+  const app = buildApp({ internalApiKey });
+  const headers = { "x-internal-key": internalApiKey };
+
+  const inboundId = randomUUID();
+  const outboundId = randomUUID();
+  const testPhone = "+5566999990004";
+  const providerMsgId = `wamid.synthetic.mismatch.${randomUUID()}`;
+
+  try {
+    await query(
+      `INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
+       VALUES ($1, 'evolution', $2, $3, 'inbound mismatch test')`,
+      [inboundId, inboundId, testPhone],
+    );
+
+    await query(
+      `INSERT INTO channel_outbound_messages (
+         id, channel_inbound_message_id, provider, recipient_phone_e164,
+         message_type, text_content, status, provider_message_id, sent_at
+       ) VALUES ($1, $2, 'evolution', $3, 'text', 'outbound mismatch test', 'sent', $4, NOW())`,
+      [outboundId, inboundId, testPhone, providerMsgId],
+    );
+
+    // Incoming receipt has provider = 'outro-provider' but same provider_message_id
+    const mismatchPayload = {
+      provider: "outro-provider",
+      provider_message_id: providerMsgId,
+      provider_status: "DELIVERY_ACK",
+      normalized_status: "delivered",
+    };
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/outbound/receipts",
+      headers,
+      payload: mismatchPayload,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body, {
+      outcome: "unknown_provider_message_id",
+      provider: "outro-provider",
+      provider_message_id: providerMsgId,
+    });
+
+    // Zero receipts recorded for this outbound
+    const countCheck = await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM channel_outbound_receipts WHERE outbound_message_id = $1",
+      [outboundId],
+    );
+    assert.equal(countCheck.rows[0].cnt, 0, "No receipt must be linked on provider mismatch");
+
+    // Outbound message remains completely unchanged
+    const outboundCheck = await query<{ status: string; attempt_count: number }>(
+      "SELECT status, attempt_count FROM channel_outbound_messages WHERE id = $1",
+      [outboundId],
+    );
+    assert.equal(outboundCheck.rows[0].status, "sent");
+    assert.equal(outboundCheck.rows[0].attempt_count, 0);
+  } finally {
+    await app.close();
+    await cleanReceipts();
+    await query("DELETE FROM channel_outbound_messages WHERE id = $1", [outboundId]);
+    await query("DELETE FROM channel_inbound_messages WHERE id = $1", [inboundId]);
+  }
+});
+
+test("Professional auth challenge: async FAILED receipt preserves outbox status and never reissues or retries challenge", async () => {
+  await migrateUp();
+
+  const internalApiKey = "test-internal-auth-key";
+  const app = buildApp({ internalApiKey });
+  const headers = { "x-internal-key": internalApiKey };
+
+  const accountId = randomUUID();
+  const identifierId = randomUUID();
+  const phone = `+5566${String(Date.now()).slice(-9)}`;
+  const challengeId = randomUUID();
+  const outboundId = randomUUID();
+  const wamid = `wamid.synthetic.auth.${randomUUID()}`;
+
+  try {
+    await query("INSERT INTO accounts (id) VALUES ($1)", [accountId]);
+    await query(
+      "INSERT INTO account_identifiers (id, account_id, kind, normalized_value, verified_at) VALUES ($1, $2, 'phone', $3, NOW())",
+      [identifierId, accountId, phone],
+    );
+    await query(
+      `INSERT INTO channel_outbound_messages (
+         id, channel_inbound_message_id, provider, recipient_phone_e164,
+         message_type, text_content, status, provider_message_id, sent_at,
+         purpose, expires_at
+       ) VALUES (
+         $1, NULL, 'evolution', $2,
+         'interactive', '[auth template: contatocerto_auth_otp_v1]', 'sent', $3, NOW(),
+         'professional_auth_challenge', NOW() + INTERVAL '5 minutes'
+       )`,
+      [outboundId, phone, wamid],
+    );
+    await query(
+      `INSERT INTO professional_auth_challenges (
+         id, account_identifier_id, code_hash, expires_at, outbound_id
+       ) VALUES (
+         $1, $2, $3, NOW() + INTERVAL '5 minutes', $4
+       )`,
+      [challengeId, identifierId, "c".repeat(64), outboundId],
+    );
+
+    // Record async FAILED receipt (e.g. Meta 131047 / customer service window closed)
+    const failedPayload = {
+      provider: "evolution",
+      provider_message_id: wamid,
+      provider_status: "FAILED",
+      normalized_status: "failed",
+      provider_event_at: new Date().toISOString(),
+      provider_error_code: "131047",
+      provider_error_reason: "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+    };
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/channel/outbound/receipts",
+      headers,
+      payload: failedPayload,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.outcome, "recorded");
+    assert.equal(body.outbound_message_id, outboundId);
+    assert.equal(body.normalized_status, "failed");
+
+    // 1. Outbound status remains 'sent'
+    const outboxCheck = await query<{
+      status: string;
+      attempt_count: number;
+      processing_token: string | null;
+      next_attempt_at: string | null;
+    }>(
+      "SELECT status, attempt_count, processing_token, next_attempt_at FROM channel_outbound_messages WHERE id = $1",
+      [outboundId],
+    );
+    assert.equal(outboxCheck.rows[0].status, "sent", "Outbox status must remain 'sent' on async failure");
+    assert.equal(outboxCheck.rows[0].attempt_count, 0, "attempt_count must not increment");
+    assert.equal(outboxCheck.rows[0].processing_token, null, "processing_token must remain null");
+    assert.equal(outboxCheck.rows[0].next_attempt_at, null, "next_attempt_at must remain null");
+
+    // 2. Challenge record remains unmutated
+    const challengeCheck = await query<{
+      consumed_at: string | null;
+      invalidated_at: string | null;
+      attempts: number;
+    }>(
+      "SELECT consumed_at, invalidated_at, attempts FROM professional_auth_challenges WHERE id = $1",
+      [challengeId],
+    );
+    assert.equal(challengeCheck.rows[0].consumed_at, null, "challenge must not be consumed");
+    assert.equal(challengeCheck.rows[0].invalidated_at, null, "challenge must not be invalidated");
+    assert.equal(challengeCheck.rows[0].attempts, 0, "challenge attempts must not change");
+
+    // 3. No new challenge, no new outbound, no session created
+    const allChallenges = await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM professional_auth_challenges WHERE account_identifier_id = $1",
+      [identifierId],
+    );
+    assert.equal(allChallenges.rows[0].cnt, 1, "No new challenge must be created");
+
+    const allOutbound = await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM channel_outbound_messages WHERE recipient_phone_e164 = $1",
+      [phone],
+    );
+    assert.equal(allOutbound.rows[0].cnt, 1, "No new outbound must be created");
+
+    const allSessions = await query<{ cnt: number }>(
+      "SELECT count(*)::int AS cnt FROM professional_sessions WHERE account_id = $1",
+      [accountId],
+    );
+    assert.equal(allSessions.rows[0].cnt, 0, "No session must be created");
+  } finally {
+    await app.close();
+    await cleanReceipts();
+    await query("DELETE FROM professional_auth_challenges WHERE id = $1", [challengeId]);
+    await query("DELETE FROM channel_outbound_messages WHERE id = $1", [outboundId]);
+    await query("DELETE FROM account_identifiers WHERE id = $1", [identifierId]);
+    await query("DELETE FROM accounts WHERE id = $1", [accountId]);
   }
 });

@@ -1011,58 +1011,105 @@ test("gateway normalizes messages.update events across status lifecycle and erro
     },
   });
 
-  // 1. Delivered event with numeric epoch timestamp (seconds)
-  const deliveredEvt = updateEvent({
-    key: { id: "wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA", fromMe: true, remoteJid: "5566991234567@s.whatsapp.net" },
-    status: "DELIVERY_ACK",
-    messageTimestamp: 1713000000,
+  // 1. WHATSAPP-BUSINESS real shape: data.keyId + SENT -> accepted (pure keyId)
+  const bizSentEvt = updateEvent({
+    messageId: "wamid.synthetic.biz.001",
+    keyId: "wamid.synthetic.biz.001",
+    remoteJid: "5566991234567@s.whatsapp.net",
+    fromMe: true,
+    participant: "",
+    status: "SENT",
+    instanceId: "inst-001",
+    dateTime: "2026-10-14T12:00:00.000Z",
   });
-  const resDelivered = normalize(deliveredEvt);
-  assert.equal(resDelivered.action, "receipt");
-  assert.equal(resDelivered.receipt.provider, "evolution");
-  assert.equal(resDelivered.receipt.provider_message_id, "test-instance:wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA");
-  assert.equal(resDelivered.receipt.provider_status, "DELIVERY_ACK");
-  assert.equal(resDelivered.receipt.normalized_status, "delivered");
-  assert.equal(resDelivered.receipt.provider_event_at, new Date(1713000000 * 1000).toISOString());
+  const resBizSent = normalize(bizSentEvt);
+  assert.equal(resBizSent.action, "receipt");
+  assert.equal(resBizSent.receipt.provider, "evolution");
+  assert.equal(resBizSent.receipt.provider_message_id, "wamid.synthetic.biz.001");
+  assert.equal(resBizSent.receipt.provider_status, "SENT");
+  assert.equal(resBizSent.receipt.normalized_status, "accepted");
+  assert.equal(resBizSent.receipt.provider_event_at, "2026-10-14T12:00:00.000Z");
 
-  // 2. Read event with milliseconds timestamp
-  const readEvt = updateEvent({
-    key: { id: "BAILEYS_MSG_001", fromMe: true },
+  // 2. WHATSAPP-BUSINESS real shape: data.keyId + DELIVERED -> delivered
+  const bizDeliveredEvt = updateEvent({
+    keyId: "wamid.synthetic.biz.002",
+    status: "DELIVERY_ACK",
+    timestamp: 1713000000000,
+  });
+  const resBizDelivered = normalize(bizDeliveredEvt);
+  assert.equal(resBizDelivered.action, "receipt");
+  assert.equal(resBizDelivered.receipt.provider_message_id, "wamid.synthetic.biz.002");
+  assert.equal(resBizDelivered.receipt.provider_status, "DELIVERY_ACK");
+  assert.equal(resBizDelivered.receipt.normalized_status, "delivered");
+  assert.equal(resBizDelivered.receipt.provider_event_at, new Date(1713000000000).toISOString());
+
+  // 3. WHATSAPP-BUSINESS real shape: data.keyId + READ -> read
+  const bizReadEvt = updateEvent({
+    keyId: "wamid.synthetic.biz.003",
     status: "READ",
     timestamp: 1713000100000,
   });
-  const resRead = normalize(readEvt);
-  assert.equal(resRead.action, "receipt");
-  assert.equal(resRead.receipt.provider_message_id, "test-instance:BAILEYS_MSG_001");
-  assert.equal(resRead.receipt.provider_status, "READ");
-  assert.equal(resRead.receipt.normalized_status, "read");
-  assert.equal(resRead.receipt.provider_event_at, new Date(1713000100000).toISOString());
+  const resBizRead = normalize(bizReadEvt);
+  assert.equal(resBizRead.action, "receipt");
+  assert.equal(resBizRead.receipt.provider_message_id, "wamid.synthetic.biz.003");
+  assert.equal(resBizRead.receipt.provider_status, "READ");
+  assert.equal(resBizRead.receipt.normalized_status, "read");
+  assert.equal(resBizRead.receipt.provider_event_at, new Date(1713000100000).toISOString());
 
-  // 3. Synthetic Meta 131047 failure (customer service window closed)
-  const meta131047Evt = updateEvent({
-    key: { id: "wamid.HBgMNTU2Njk5OTAyOTA4NxUCMRIA", fromMe: true, remoteJid: "5566999029086@s.whatsapp.net" },
+  // 4. WHATSAPP-BUSINESS real shape: data.keyId + FAILED sem errors -> failed sem inventar erro
+  const bizFailedNoErrorsEvt = updateEvent({
+    keyId: "wamid.synthetic.biz.004",
+    status: "FAILED",
+    timestamp: 1713000150000,
+  });
+  const resBizFailedNoErrors = normalize(bizFailedNoErrorsEvt);
+  assert.equal(resBizFailedNoErrors.action, "receipt");
+  assert.equal(resBizFailedNoErrors.receipt.provider_message_id, "wamid.synthetic.biz.004");
+  assert.equal(resBizFailedNoErrors.receipt.provider_status, "FAILED");
+  assert.equal(resBizFailedNoErrors.receipt.normalized_status, "failed");
+  assert.equal(resBizFailedNoErrors.receipt.provider_error_code, undefined, "Must NOT fabricate error code");
+  assert.equal(resBizFailedNoErrors.receipt.provider_error_reason, undefined, "Must NOT fabricate error reason");
+
+  // 5. WHATSAPP-BUSINESS real shape: data.keyId + FAILED + errors[0].code=131047 -> failed + 131047
+  const bizFailed131047Evt = updateEvent({
+    keyId: "wamid.synthetic.biz.005",
     status: "FAILED",
     messageTimestamp: 1713000200,
-    error: {
-      code: 131047,
-      error_data: {
-        details: "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+    errors: [
+      {
+        code: 131047,
+        message: "Message failed to send",
+        error_data: {
+          details: "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+        },
       },
-    },
+    ],
   });
-  const resFailed = normalize(meta131047Evt);
-  assert.equal(resFailed.action, "receipt");
-  assert.equal(resFailed.receipt.provider, "evolution");
-  assert.equal(resFailed.receipt.provider_message_id, "test-instance:wamid.HBgMNTU2Njk5OTAyOTA4NxUCMRIA");
-  assert.equal(resFailed.receipt.provider_status, "FAILED");
-  assert.equal(resFailed.receipt.normalized_status, "failed");
-  assert.equal(resFailed.receipt.provider_error_code, "131047");
-  assert.equal(resFailed.receipt.provider_error_reason, "Message failed to send because more than 24 hours have passed since the customer last replied to this number.");
-  assert.equal(resFailed.receipt.provider_event_at, new Date(1713000200 * 1000).toISOString());
+  const resBizFailed131047 = normalize(bizFailed131047Evt);
+  assert.equal(resBizFailed131047.action, "receipt");
+  assert.equal(resBizFailed131047.receipt.provider_message_id, "wamid.synthetic.biz.005");
+  assert.equal(resBizFailed131047.receipt.provider_status, "FAILED");
+  assert.equal(resBizFailed131047.receipt.normalized_status, "failed");
+  assert.equal(resBizFailed131047.receipt.provider_error_code, "131047");
+  assert.equal(
+    resBizFailed131047.receipt.provider_error_reason,
+    "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+  );
 
-  // 4. Unknown provider status preserved
+  // 6. Compatible nested key.id shape (Baileys/legacy): produces pure key.id without instance prefix
+  const nestedKeyEvt = updateEvent({
+    key: { id: "wamid.synthetic.nested.001", fromMe: true, remoteJid: "5566991234567@s.whatsapp.net" },
+    status: "DELIVERY_ACK",
+    messageTimestamp: 1713000000,
+  });
+  const resNested = normalize(nestedKeyEvt);
+  assert.equal(resNested.action, "receipt");
+  assert.equal(resNested.receipt.provider_message_id, "wamid.synthetic.nested.001");
+  assert.equal(resNested.receipt.normalized_status, "delivered");
+
+  // 7. Unknown provider status preserved
   const unknownEvt = updateEvent({
-    key: { id: "wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA" },
+    keyId: "wamid.synthetic.biz.006",
     status: "REVOKED",
   });
   const resUnknown = normalize(unknownEvt);
@@ -1070,50 +1117,59 @@ test("gateway normalizes messages.update events across status lifecycle and erro
   assert.equal(resUnknown.receipt.provider_status, "REVOKED");
   assert.equal(resUnknown.receipt.normalized_status, "unknown");
 
-  // 5. Alternate event name 'messages_update' and array data payload
+  // 8. Alternate event name 'messages_update' and array data payload
   const arrayEvt = updateEvent([
     {
-      key: { id: "wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA" },
+      keyId: "wamid.synthetic.biz.007",
       update: { status: "DELIVERED" },
     },
   ], "messages_update");
   const resArray = normalize(arrayEvt);
   assert.equal(resArray.action, "receipt");
+  assert.equal(resArray.receipt.provider_message_id, "wamid.synthetic.biz.007");
   assert.equal(resArray.receipt.normalized_status, "delivered");
-  assert.equal(resArray.receipt.provider_status, "DELIVERED");
 
-  // 6. fromMe === true is preserved and NOT rejected or ignored for receipts
-  // (In contrast to messages.upsert where fromMe === true triggers own_message ignore)
-  const fromMeEvt = updateEvent({
-    key: { id: "wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA", fromMe: true },
-    status: "SERVER_ACK",
-  });
-  const resFromMe = normalize(fromMeEvt);
-  assert.equal(resFromMe.action, "receipt");
-  assert.equal(resFromMe.receipt.normalized_status, "accepted");
-
-  // 7. Malformed payloads
-  // Missing key
+  // 9. Malformed payloads
+  // Missing key / keyId
   assert.deepEqual(normalize(updateEvent({ status: "DELIVERED" })), {
     action: "reject",
     reason: "webhook_key_invalid",
     http_status: 422,
   });
 
-  // Invalid key.id
+  // Empty key.id / keyId
   assert.deepEqual(normalize(updateEvent({ key: { id: "" }, status: "DELIVERED" })), {
     action: "reject",
     reason: "webhook_id_invalid",
     http_status: 422,
   });
-  assert.deepEqual(normalize(updateEvent({ key: { id: "bad id with spaces" }, status: "DELIVERED" })), {
+  assert.deepEqual(normalize(updateEvent({ keyId: "", status: "DELIVERED" })), {
     action: "reject",
     reason: "webhook_id_invalid",
     http_status: 422,
   });
 
+  // Control characters in keyId rejected
+  assert.deepEqual(normalize(updateEvent({ keyId: "wamid\x00corrupt", status: "DELIVERED" })), {
+    action: "reject",
+    reason: "webhook_id_invalid",
+    http_status: 422,
+  });
+  assert.deepEqual(normalize(updateEvent({ keyId: "wamid\r\ninvalid", status: "DELIVERED" })), {
+    action: "reject",
+    reason: "webhook_id_invalid",
+    http_status: 422,
+  });
+
+  // Control characters in status rejected
+  assert.deepEqual(normalize(updateEvent({ keyId: "wamid.synthetic.biz.008", status: "DELIV\x00ERED" })), {
+    action: "reject",
+    reason: "webhook_status_invalid",
+    http_status: 422,
+  });
+
   // Missing status is safely ignored with 200
-  assert.deepEqual(normalize(updateEvent({ key: { id: "wamid.123" } })), {
+  assert.deepEqual(normalize(updateEvent({ keyId: "wamid.synthetic.biz.009" })), {
     action: "ignore",
     reason: "missing_update_status",
     http_status: 200,
@@ -1139,15 +1195,17 @@ test("generated Validate event Code node runtime parity for messages.update rece
       instance: config.instance,
       server_url: config.origin,
       data: {
-        key: { id: "wamid.HBgMNTU2Njk5OTAyOTA4NxUCMRIA", fromMe: true, remoteJid: "5566999029086@s.whatsapp.net" },
+        keyId: "wamid.synthetic.biz.010",
         status: "FAILED",
         messageTimestamp: 1713000200,
-        error: {
-          code: 131047,
-          error_data: {
-            details: "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+        errors: [
+          {
+            code: 131047,
+            error_data: {
+              details: "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+            },
           },
-        },
+        ],
       },
     },
   };
@@ -1165,7 +1223,7 @@ test("generated Validate event Code node runtime parity for messages.update rece
 
   assert.equal(vmResult.json.action, "receipt");
   assert.equal(vmResult.json.receipt.provider, "evolution");
-  assert.equal(vmResult.json.receipt.provider_message_id, "test-instance:wamid.HBgMNTU2Njk5OTAyOTA4NxUCMRIA");
+  assert.equal(vmResult.json.receipt.provider_message_id, "wamid.synthetic.biz.010");
   assert.equal(vmResult.json.receipt.provider_status, "FAILED");
   assert.equal(vmResult.json.receipt.normalized_status, "failed");
   assert.equal(vmResult.json.receipt.provider_error_code, "131047");

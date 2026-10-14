@@ -155,15 +155,14 @@ export class DefaultChannelOutboundService implements ChannelOutboundService {
 }
 
 export function computeReceiptFingerprint(input: RecordChannelOutboundReceiptInput): string {
-  return createHash("sha256")
-    .update([
-      input.provider,
-      input.provider_message_id,
-      input.provider_status,
-      input.normalized_status,
-      input.provider_event_at ?? "",
-      input.provider_error_code ?? "",
-    ].join(":"))
-    .digest("hex");
+  const canonical = JSON.stringify([
+    input.provider,
+    input.provider_message_id,
+    input.provider_status,
+    input.normalized_status,
+    input.provider_event_at ?? null,
+    input.provider_error_code ?? null,
+  ]);
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 

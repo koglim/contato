@@ -372,9 +372,9 @@ jobs:
           INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
           VALUES ('00000000-0000-0000-0030-000000000001', 'evolution', 'inst:inbound030', '+5566900000030', 'inbound text');
           INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id, sent_at)
-          VALUES ('00000000-0000-0000-0030-000000000002', '00000000-0000-0000-0030-000000000001', 'evolution', '+5566900000030', 'text', 'outbound text', 'sent', 'inst:wamid030', NOW());
+          VALUES ('00000000-0000-0000-0030-000000000002', '00000000-0000-0000-0030-000000000001', 'evolution', '+5566900000030', 'text', 'outbound text', 'sent', 'wamid.synthetic.030', NOW());
           INSERT INTO channel_outbound_receipts (outbound_message_id, provider, provider_message_id, provider_status, normalized_status, event_fingerprint)
-          VALUES ('00000000-0000-0000-0030-000000000002', 'evolution', 'inst:wamid030', 'DELIVERY_ACK', 'delivered', repeat('c', 64));
+          VALUES ('00000000-0000-0000-0030-000000000002', 'evolution', 'wamid.synthetic.030', 'DELIVERY_ACK', 'delivered', repeat('c', 64));
           SQL
           set +e
           rollback_output=$(DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)

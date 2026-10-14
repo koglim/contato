@@ -169,13 +169,48 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
   if (!config.origin || body.server_url !== config.origin) return reject("webhook_origin_invalid", 403);
   if (!/^[a-z][a-z0-9_-]{0,62}$/u.test(config.provider ?? "")) return reject("webhook_provider_unconfigured", 503);
 
+  const hasControlChars = (str) => {
+    if (typeof str !== "string") return false;
+    for (let i = 0; i < str.length; i++) {
+      const c = str.charCodeAt(i);
+      if ((c >= 0 && c <= 31) || c === 127) return true;
+    }
+    return false;
+  };
+
+  const sanitizeControlChars = (str, replacement = "") => {
+    if (typeof str !== "string") return str;
+    let res = "";
+    for (let i = 0; i < str.length; i++) {
+      const c = str.charCodeAt(i);
+      if ((c >= 0 && c <= 31) || c === 127) {
+        if (replacement) res += replacement;
+      } else {
+        res += str[i];
+      }
+    }
+    return res;
+  };
+
   if (body.event === "messages.update" || body.event === "messages_update") {
     const dataItem = Array.isArray(body.data) ? body.data[0] : body.data;
     if (!dataItem || typeof dataItem !== "object") return reject("webhook_message_invalid");
-    const key = dataItem.key;
-    if (!key || typeof key !== "object") return reject("webhook_key_invalid");
-    if (typeof key.id !== "string" || !/^[A-Za-z0-9_.=-]+$/u.test(key.id)
-      || `${config.instance}:${key.id}`.length > 255) return reject("webhook_id_invalid");
+
+    let rawId = null;
+    if (typeof dataItem.keyId === "string") {
+      rawId = dataItem.keyId.trim();
+    } else if (dataItem.key && typeof dataItem.key === "object" && typeof dataItem.key.id === "string") {
+      rawId = dataItem.key.id.trim();
+    }
+
+    if (!rawId) {
+      if (!dataItem.key && !("keyId" in dataItem)) return reject("webhook_key_invalid");
+      return reject("webhook_id_invalid");
+    }
+
+    if (rawId.length < 1 || rawId.length > 255 || hasControlChars(rawId)) {
+      return reject("webhook_id_invalid");
+    }
 
     const rawStatus = typeof dataItem.status === "string"
       ? dataItem.status.trim()
@@ -184,6 +219,9 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
         : null;
 
     if (!rawStatus) return ignore("missing_update_status");
+    if (rawStatus.length < 1 || rawStatus.length > 64 || hasControlChars(rawStatus)) {
+      return reject("webhook_status_invalid");
+    }
 
     const normalizedStatus = normalizeEvolutionReceiptStatus(rawStatus);
     if (!normalizedStatus) return ignore("missing_update_status");
@@ -198,28 +236,50 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
 
     let errorCode = null;
     let errorReason = null;
-    const err = dataItem.error ?? dataItem.update?.error;
-    if (err && typeof err === "object") {
-      const c = err.code ?? err.error_code ?? err.statusCode;
+
+    const errorsArray = Array.isArray(dataItem.errors)
+      ? dataItem.errors
+      : Array.isArray(dataItem.update?.errors)
+        ? dataItem.update.errors
+        : null;
+
+    if (errorsArray && errorsArray.length > 0 && typeof errorsArray[0] === "object" && errorsArray[0] !== null) {
+      const firstErr = errorsArray[0];
+      const c = firstErr.code ?? firstErr.error_code ?? firstErr.statusCode;
       if (c !== undefined && c !== null) errorCode = String(c).trim().slice(0, 64) || null;
-      const r = err.error_data?.details ?? err.message ?? err.details ?? err.reason;
+      const r = firstErr.error_data?.details ?? firstErr.message ?? firstErr.details ?? firstErr.reason;
       if (r !== undefined && r !== null) errorReason = String(r).trim().slice(0, 500) || null;
-    } else if (err !== undefined && err !== null) {
-      errorCode = String(err).trim().slice(0, 64) || null;
+    } else {
+      const err = dataItem.error ?? dataItem.update?.error;
+      if (err && typeof err === "object") {
+        const c = err.code ?? err.error_code ?? err.statusCode;
+        if (c !== undefined && c !== null) errorCode = String(c).trim().slice(0, 64) || null;
+        const r = err.error_data?.details ?? err.message ?? err.details ?? err.reason;
+        if (r !== undefined && r !== null) errorReason = String(r).trim().slice(0, 500) || null;
+      } else if (err !== undefined && err !== null) {
+        errorCode = String(err).trim().slice(0, 64) || null;
+      }
     }
 
     if (!errorReason) {
-      const reasonField = dataItem.reason ?? dataItem.update?.reason ?? dataItem.message ?? dataItem.update?.message;
+      const reasonField = dataItem.reason ?? dataItem.update?.reason;
       if (typeof reasonField === "string" && reasonField.trim()) {
         errorReason = reasonField.trim().slice(0, 500);
       }
+    }
+
+    if (errorCode && hasControlChars(errorCode)) {
+      errorCode = sanitizeControlChars(errorCode).trim() || null;
+    }
+    if (errorReason && hasControlChars(errorReason)) {
+      errorReason = sanitizeControlChars(errorReason, " ").trim() || null;
     }
 
     return {
       action: "receipt",
       receipt: {
         provider: config.provider,
-        provider_message_id: `${config.instance}:${key.id}`,
+        provider_message_id: rawId,
         provider_status: rawStatus.slice(0, 64),
         normalized_status: normalizedStatus,
         ...(providerEventAt ? { provider_event_at: providerEventAt } : {}),
