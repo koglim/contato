@@ -1,7 +1,19 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { claimDecision, transportDecision, confirmationDecision, httpResponse, buildEvolutionSendRequest } from "./delivery-contract.mjs";
-import { normalizeGatewayEvent, extractEvolutionInteractiveReply, extractLocation, transcriptionDecision, inboxDecision, mediaAdmissionDecision, mediaClaimDecision } from "./gateway-contract.mjs";
+import {
+
+  normalizeGatewayEvent,
+  normalizeEvolutionReceiptStatus,
+  receiptAdmissionDecision,
+  extractEvolutionInteractiveReply,
+  extractLocation,
+  transcriptionDecision,
+  inboxDecision,
+  mediaAdmissionDecision,
+  mediaClaimDecision,
+} from "./gateway-contract.mjs";
+
 
 const node = (name, type, parameters, x, y = 0, extra = {}) => ({
   id: name.toLowerCase().replaceAll(" ", "-"), name, type: `n8n-nodes-base.${type}`,
@@ -96,7 +108,7 @@ const gateway = flow("ContatoCerto - WhatsApp Gateway", [
       webhookId: "3df44b42-e4d3-4080-a1fb-89acaea99659",
       credentials: { jwtAuth: { name: "ContatoCerto Evolution Webhook JWT" } },
     }),
-  code("Validate event", `${extractEvolutionInteractiveReply.toString()}\n${extractLocation.toString()}\n${normalizeGatewayEvent.toString()}\nreturn { json: normalizeGatewayEvent($json, { instance: $env.EVOLUTION_INSTANCE, provider: $env.EVOLUTION_PROVIDER, origin: $env.EVOLUTION_WEBHOOK_ORIGIN }) };`, 220),
+  code("Validate event", `${normalizeEvolutionReceiptStatus.toString()}\n${extractEvolutionInteractiveReply.toString()}\n${extractLocation.toString()}\n${normalizeGatewayEvent.toString()}\nreturn { json: normalizeGatewayEvent($json, { instance: $env.EVOLUTION_INSTANCE, provider: $env.EVOLUTION_PROVIDER, origin: $env.EVOLUTION_WEBHOOK_ORIGIN }) };`, 220),
   branch("Text input", "={{ $json.action === 'inbox' }}", 440),
   { ...http("Channel Inbox", "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/inbound/messages' }}", "={{ $json.inbound }}", "ContatoCerto Internal API", 660),
     parameters: { ...http("Channel Inbox", "", null, "", 0).parameters,
@@ -111,16 +123,28 @@ const gateway = flow("ContatoCerto - WhatsApp Gateway", [
   http("Persist media","={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/media/events' }}","={{ $json.media }}","ContatoCerto Internal API",880,320),
   code("Inspect media persistence",`${mediaAdmissionDecision.toString()}\nreturn {json:mediaAdmissionDecision($json)};`,1100,320),
   respond("Acknowledge media","={{ $json.http_status }}",1320,320),
-  respond("Acknowledge ignored or rejected","={{ $json.http_status }}",880,560),
+  branch("Receipt input", "={{ $json.action === 'receipt' }}", 660, 480),
+  http("Record receipt", "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/receipts' }}", "={{ $json.receipt }}", "ContatoCerto Internal API", 880, 480),
+  code("Inspect receipt", `${receiptAdmissionDecision.toString()}\nreturn {json:receiptAdmissionDecision($json)};`, 1100, 480),
+  respond("Acknowledge receipt", "={{ $json.http_status }}", 1320, 480),
+  respond("Acknowledge ignored or rejected", "={{ $json.http_status }}", 880, 700),
 ],{
-  "Evolution webhook":{main:[[edge("Validate event")]]},"Validate event":{main:[[edge("Text input")]]},
-  "Text input":{main:[[edge("Channel Inbox")],[edge("Audio input")]]},
-  "Channel Inbox":{main:[[edge("Inspect Inbox")]]},"Inspect Inbox":{main:[[edge("Acknowledge Inbox")]]},
-  "Acknowledge Inbox":{main:[[edge("Outbox available")]]},"Outbox available":{main:[[edge("Claim outbound")],[]]},
-  "Claim outbound":{main:[[edge("Deliver shared")]]},
-  "Audio input":{main:[[edge("Persist media")],[edge("Acknowledge ignored or rejected")]]},
-  "Persist media":{main:[[edge("Inspect media persistence")]]},"Inspect media persistence":{main:[[edge("Acknowledge media")]]},
-},140);
+  "Evolution webhook": { main: [[edge("Validate event")]] },
+  "Validate event": { main: [[edge("Text input")]] },
+  "Text input": { main: [[edge("Channel Inbox")], [edge("Audio input")]] },
+  "Channel Inbox": { main: [[edge("Inspect Inbox")]] },
+  "Inspect Inbox": { main: [[edge("Acknowledge Inbox")]] },
+  "Acknowledge Inbox": { main: [[edge("Outbox available")]] },
+  "Outbox available": { main: [[edge("Claim outbound")], []] },
+  "Claim outbound": { main: [[edge("Deliver shared")]] },
+  "Audio input": { main: [[edge("Persist media")], [edge("Receipt input")]] },
+  "Persist media": { main: [[edge("Inspect media persistence")]] },
+  "Inspect media persistence": { main: [[edge("Acknowledge media")]] },
+  "Receipt input": { main: [[edge("Record receipt")], [edge("Acknowledge ignored or rejected")]] },
+  "Record receipt": { main: [[edge("Inspect receipt")]] },
+  "Inspect receipt": { main: [[edge("Acknowledge receipt")]] },
+}, 140);
+
 
 const media = flow("ContatoCerto - Durable Audio Consumer",[
   node("Schedule","scheduleTrigger",{rule:{interval:[{field:"seconds",secondsInterval:10}]}},0),

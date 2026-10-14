@@ -15,6 +15,8 @@ import {
   isOpaqueJid,
   normalizeBrazilianMobilePhone as gwNormalizeBrazilianMobilePhone,
   VALID_BRAZILIAN_DDDS as gwValidDDDs,
+  normalizeEvolutionReceiptStatus,
+  receiptAdmissionDecision,
 } from "./gateway-contract.mjs";
 import {
   normalizeBrazilianMobilePhone as sharedNormalizeBrazilianMobilePhone,
@@ -947,4 +949,263 @@ test("generated Validate event Code node runtime parity for native location mess
   });
   assert.equal(vmResult.json.inbound.raw_text, undefined);
 });
+
+test("normalizeEvolutionReceiptStatus maps standard, legacy and unknown Evolution/Meta receipt statuses", () => {
+  assert.equal(normalizeEvolutionReceiptStatus("DELIVERY_ACK"), "delivered");
+  assert.equal(normalizeEvolutionReceiptStatus("delivered"), "delivered");
+  assert.equal(normalizeEvolutionReceiptStatus("DELIVERED"), "delivered");
+  assert.equal(normalizeEvolutionReceiptStatus("READ"), "read");
+  assert.equal(normalizeEvolutionReceiptStatus("read"), "read");
+  assert.equal(normalizeEvolutionReceiptStatus("PLAYED"), "read");
+  assert.equal(normalizeEvolutionReceiptStatus("FAILED"), "failed");
+  assert.equal(normalizeEvolutionReceiptStatus("failed"), "failed");
+  assert.equal(normalizeEvolutionReceiptStatus("ERROR"), "failed");
+  assert.equal(normalizeEvolutionReceiptStatus("SERVER_ACK"), "accepted");
+  assert.equal(normalizeEvolutionReceiptStatus("SENT"), "accepted");
+  assert.equal(normalizeEvolutionReceiptStatus("sent"), "accepted");
+  assert.equal(normalizeEvolutionReceiptStatus("UNKNOWN_PROVIDER_EVENT"), "unknown");
+  assert.equal(normalizeEvolutionReceiptStatus("custom_state"), "unknown");
+  assert.equal(normalizeEvolutionReceiptStatus(null), null);
+  assert.equal(normalizeEvolutionReceiptStatus(undefined), null);
+  assert.equal(normalizeEvolutionReceiptStatus(""), null);
+  assert.equal(normalizeEvolutionReceiptStatus("   "), null);
+  assert.equal(normalizeEvolutionReceiptStatus(12345), null);
+});
+
+test("receiptAdmissionDecision acknowledges recorded and unknown_provider_message_id with 200, handles errors defensively", () => {
+  assert.deepEqual(
+    receiptAdmissionDecision({ statusCode: 200, body: { outcome: "recorded", receipt_id: randomUUID() } }),
+    { http_status: 200, reason: "receipt_recorded" }
+  );
+  assert.deepEqual(
+    receiptAdmissionDecision({ statusCode: 200, body: { outcome: "unknown_provider_message_id" } }),
+    { http_status: 200, reason: "receipt_recorded" }
+  );
+  assert.deepEqual(
+    receiptAdmissionDecision({ statusCode: 400, body: { error: "validation_failed" } }),
+    { http_status: 400, reason: "receipt_not_acknowledged" }
+  );
+  assert.deepEqual(
+    receiptAdmissionDecision({ statusCode: 500, body: { error: "internal" } }),
+    { http_status: 503, reason: "receipt_not_acknowledged" }
+  );
+  assert.deepEqual(
+    receiptAdmissionDecision({ statusCode: 502, body: null }),
+    { http_status: 503, reason: "receipt_not_acknowledged" }
+  );
+  assert.deepEqual(
+    receiptAdmissionDecision(null),
+    { http_status: 503, reason: "receipt_not_acknowledged" }
+  );
+});
+
+test("gateway normalizes messages.update events across status lifecycle and error structures", () => {
+  const updateEvent = (updateData, eventName = "messages.update") => ({
+    headers: { "content-type": "application/json; charset=utf-8" },
+    jwtPayload: { app: "evolution", action: "webhook", iat: now - 1, exp: now + 599 },
+    body: {
+      event: eventName,
+      instance: config.instance,
+      server_url: config.origin,
+      data: updateData,
+    },
+  });
+
+  // 1. Delivered event with numeric epoch timestamp (seconds)
+  const deliveredEvt = updateEvent({
+    key: { id: "wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA", fromMe: true, remoteJid: "5566991234567@s.whatsapp.net" },
+    status: "DELIVERY_ACK",
+    messageTimestamp: 1713000000,
+  });
+  const resDelivered = normalize(deliveredEvt);
+  assert.equal(resDelivered.action, "receipt");
+  assert.equal(resDelivered.receipt.provider, "evolution");
+  assert.equal(resDelivered.receipt.provider_message_id, "test-instance:wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA");
+  assert.equal(resDelivered.receipt.provider_status, "DELIVERY_ACK");
+  assert.equal(resDelivered.receipt.normalized_status, "delivered");
+  assert.equal(resDelivered.receipt.provider_event_at, new Date(1713000000 * 1000).toISOString());
+
+  // 2. Read event with milliseconds timestamp
+  const readEvt = updateEvent({
+    key: { id: "BAILEYS_MSG_001", fromMe: true },
+    status: "READ",
+    timestamp: 1713000100000,
+  });
+  const resRead = normalize(readEvt);
+  assert.equal(resRead.action, "receipt");
+  assert.equal(resRead.receipt.provider_message_id, "test-instance:BAILEYS_MSG_001");
+  assert.equal(resRead.receipt.provider_status, "READ");
+  assert.equal(resRead.receipt.normalized_status, "read");
+  assert.equal(resRead.receipt.provider_event_at, new Date(1713000100000).toISOString());
+
+  // 3. Synthetic Meta 131047 failure (customer service window closed)
+  const meta131047Evt = updateEvent({
+    key: { id: "wamid.HBgMNTU2Njk5OTAyOTA4NxUCMRIA", fromMe: true, remoteJid: "5566999029086@s.whatsapp.net" },
+    status: "FAILED",
+    messageTimestamp: 1713000200,
+    error: {
+      code: 131047,
+      error_data: {
+        details: "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+      },
+    },
+  });
+  const resFailed = normalize(meta131047Evt);
+  assert.equal(resFailed.action, "receipt");
+  assert.equal(resFailed.receipt.provider, "evolution");
+  assert.equal(resFailed.receipt.provider_message_id, "test-instance:wamid.HBgMNTU2Njk5OTAyOTA4NxUCMRIA");
+  assert.equal(resFailed.receipt.provider_status, "FAILED");
+  assert.equal(resFailed.receipt.normalized_status, "failed");
+  assert.equal(resFailed.receipt.provider_error_code, "131047");
+  assert.equal(resFailed.receipt.provider_error_reason, "Message failed to send because more than 24 hours have passed since the customer last replied to this number.");
+  assert.equal(resFailed.receipt.provider_event_at, new Date(1713000200 * 1000).toISOString());
+
+  // 4. Unknown provider status preserved
+  const unknownEvt = updateEvent({
+    key: { id: "wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA" },
+    status: "REVOKED",
+  });
+  const resUnknown = normalize(unknownEvt);
+  assert.equal(resUnknown.action, "receipt");
+  assert.equal(resUnknown.receipt.provider_status, "REVOKED");
+  assert.equal(resUnknown.receipt.normalized_status, "unknown");
+
+  // 5. Alternate event name 'messages_update' and array data payload
+  const arrayEvt = updateEvent([
+    {
+      key: { id: "wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA" },
+      update: { status: "DELIVERED" },
+    },
+  ], "messages_update");
+  const resArray = normalize(arrayEvt);
+  assert.equal(resArray.action, "receipt");
+  assert.equal(resArray.receipt.normalized_status, "delivered");
+  assert.equal(resArray.receipt.provider_status, "DELIVERED");
+
+  // 6. fromMe === true is preserved and NOT rejected or ignored for receipts
+  // (In contrast to messages.upsert where fromMe === true triggers own_message ignore)
+  const fromMeEvt = updateEvent({
+    key: { id: "wamid.HBgMNTU2Njk5MTIzNDU2NxUCMRIA", fromMe: true },
+    status: "SERVER_ACK",
+  });
+  const resFromMe = normalize(fromMeEvt);
+  assert.equal(resFromMe.action, "receipt");
+  assert.equal(resFromMe.receipt.normalized_status, "accepted");
+
+  // 7. Malformed payloads
+  // Missing key
+  assert.deepEqual(normalize(updateEvent({ status: "DELIVERED" })), {
+    action: "reject",
+    reason: "webhook_key_invalid",
+    http_status: 422,
+  });
+
+  // Invalid key.id
+  assert.deepEqual(normalize(updateEvent({ key: { id: "" }, status: "DELIVERED" })), {
+    action: "reject",
+    reason: "webhook_id_invalid",
+    http_status: 422,
+  });
+  assert.deepEqual(normalize(updateEvent({ key: { id: "bad id with spaces" }, status: "DELIVERED" })), {
+    action: "reject",
+    reason: "webhook_id_invalid",
+    http_status: 422,
+  });
+
+  // Missing status is safely ignored with 200
+  assert.deepEqual(normalize(updateEvent({ key: { id: "wamid.123" } })), {
+    action: "ignore",
+    reason: "missing_update_status",
+    http_status: 200,
+  });
+
+  // Empty data is rejected
+  assert.deepEqual(normalize(updateEvent(null)), {
+    action: "reject",
+    reason: "webhook_message_invalid",
+    http_status: 422,
+  });
+});
+
+test("generated Validate event Code node runtime parity for messages.update receipt events", () => {
+  const workflow = JSON.parse(readFileSync(new URL("gateway.json", import.meta.url), "utf8"));
+  const gate = workflow.nodes.find(n => n.name === "Validate event").parameters.jsCode;
+
+  const updateEvt = {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    jwtPayload: { app: "evolution", action: "webhook", iat: now - 1, exp: now + 599 },
+    body: {
+      event: "messages.update",
+      instance: config.instance,
+      server_url: config.origin,
+      data: {
+        key: { id: "wamid.HBgMNTU2Njk5OTAyOTA4NxUCMRIA", fromMe: true, remoteJid: "5566999029086@s.whatsapp.net" },
+        status: "FAILED",
+        messageTimestamp: 1713000200,
+        error: {
+          code: 131047,
+          error_data: {
+            details: "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+          },
+        },
+      },
+    },
+  };
+
+  const vmResult = runInNewContext(`(() => { ${gate} })()`, {
+    $json: updateEvt,
+    $env: {
+      EVOLUTION_INSTANCE: config.instance,
+      EVOLUTION_PROVIDER: config.provider,
+      EVOLUTION_WEBHOOK_ORIGIN: config.origin,
+    },
+    Buffer,
+    Date: class extends Date { static now() { return now * 1000; } },
+  });
+
+  assert.equal(vmResult.json.action, "receipt");
+  assert.equal(vmResult.json.receipt.provider, "evolution");
+  assert.equal(vmResult.json.receipt.provider_message_id, "test-instance:wamid.HBgMNTU2Njk5OTAyOTA4NxUCMRIA");
+  assert.equal(vmResult.json.receipt.provider_status, "FAILED");
+  assert.equal(vmResult.json.receipt.normalized_status, "failed");
+  assert.equal(vmResult.json.receipt.provider_error_code, "131047");
+  assert.equal(vmResult.json.receipt.provider_error_reason, "Message failed to send because more than 24 hours have passed since the customer last replied to this number.");
+  assert.equal(vmResult.json.receipt.provider_event_at, new Date(1713000200 * 1000).toISOString());
+});
+
+test("gateway export topology includes complete receipt recording pipeline", () => {
+  const workflow = JSON.parse(readFileSync(new URL("gateway.json", import.meta.url), "utf8"));
+
+  // Verify all required nodes exist
+  const nodeNames = new Set(workflow.nodes.map(n => n.name));
+  for (const expected of ["Receipt input", "Record receipt", "Inspect receipt", "Acknowledge receipt"]) {
+    assert.ok(nodeNames.has(expected), `Node ${expected} must exist in gateway.json`);
+  }
+
+  // Verify Record receipt node parameters
+  const recordReceiptNode = workflow.nodes.find(n => n.name === "Record receipt");
+  assert.equal(recordReceiptNode.type, "n8n-nodes-base.httpRequest");
+  assert.equal(recordReceiptNode.parameters.method, "POST");
+  assert.equal(recordReceiptNode.parameters.url, "={{ $env.CONTATOCERTO_API_BASE_URL + '/internal/channel/outbound/receipts' }}");
+  assert.equal(recordReceiptNode.onError, "continueRegularOutput");
+
+  // Verify connectivity: Audio input (false) -> Receipt input (true) -> Record receipt -> Inspect receipt -> Acknowledge receipt
+  const audioConn = workflow.connections["Audio input"].main;
+  assert.ok(audioConn[1].some(edge => edge.node === "Receipt input"), "Audio input false branch must route to Receipt input");
+
+  const receiptInputConn = workflow.connections["Receipt input"].main;
+  assert.ok(receiptInputConn[0].some(edge => edge.node === "Record receipt"), "Receipt input true branch must connect to Record receipt");
+  assert.ok(receiptInputConn[1].some(edge => edge.node === "Acknowledge ignored or rejected"), "Receipt input false branch must connect to Acknowledge ignored or rejected");
+
+  const recordReceiptConn = workflow.connections["Record receipt"].main[0];
+  assert.ok(recordReceiptConn.some(edge => edge.node === "Inspect receipt"), "Record receipt must connect to Inspect receipt");
+
+  const inspectReceiptConn = workflow.connections["Inspect receipt"].main[0];
+  assert.ok(inspectReceiptConn.some(edge => edge.node === "Acknowledge receipt"), "Inspect receipt must connect to Acknowledge receipt");
+
+  // Verify Inspect receipt code node evaluates receiptAdmissionDecision
+  const inspectCode = workflow.nodes.find(n => n.name === "Inspect receipt").parameters.jsCode;
+  assert.ok(inspectCode.includes("receiptAdmissionDecision"), "Inspect receipt code must call receiptAdmissionDecision");
+});
+
 

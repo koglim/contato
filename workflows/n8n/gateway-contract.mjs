@@ -8,7 +8,19 @@ export {
   isOpaqueJid,
 } from "./delivery-contract.mjs";
 
+export function normalizeEvolutionReceiptStatus(rawStatus) {
+  if (typeof rawStatus !== "string") return null;
+  const s = rawStatus.trim().toUpperCase();
+  if (!s) return null;
+  if (s === "DELIVERY_ACK" || s === "DELIVERED") return "delivered";
+  if (s === "READ" || s === "PLAYED") return "read";
+  if (s === "FAILED" || s === "ERROR") return "failed";
+  if (s === "SERVER_ACK" || s === "SENT") return "accepted";
+  return "unknown";
+}
+
 export function extractEvolutionInteractiveReply(message) {
+
   if (!message || typeof message !== "object" || Array.isArray(message)) return null;
 
   // 1. Evolution / Baileys standard button reply (buttonsResponseMessage)
@@ -156,7 +168,69 @@ export function normalizeGatewayEvent(input, config, now = Math.floor(Date.now()
   if (!config.instance || body.instance !== config.instance) return reject("webhook_instance_invalid", 403);
   if (!config.origin || body.server_url !== config.origin) return reject("webhook_origin_invalid", 403);
   if (!/^[a-z][a-z0-9_-]{0,62}$/u.test(config.provider ?? "")) return reject("webhook_provider_unconfigured", 503);
+
+  if (body.event === "messages.update" || body.event === "messages_update") {
+    const dataItem = Array.isArray(body.data) ? body.data[0] : body.data;
+    if (!dataItem || typeof dataItem !== "object") return reject("webhook_message_invalid");
+    const key = dataItem.key;
+    if (!key || typeof key !== "object") return reject("webhook_key_invalid");
+    if (typeof key.id !== "string" || !/^[A-Za-z0-9_.=-]+$/u.test(key.id)
+      || `${config.instance}:${key.id}`.length > 255) return reject("webhook_id_invalid");
+
+    const rawStatus = typeof dataItem.status === "string"
+      ? dataItem.status.trim()
+      : typeof dataItem.update?.status === "string"
+        ? dataItem.update.status.trim()
+        : null;
+
+    if (!rawStatus) return ignore("missing_update_status");
+
+    const normalizedStatus = normalizeEvolutionReceiptStatus(rawStatus);
+    if (!normalizedStatus) return ignore("missing_update_status");
+
+    let providerEventAt = null;
+    const rawTs = dataItem.messageTimestamp ?? dataItem.timestamp ?? dataItem.dateTime;
+    if (typeof rawTs === "number" && Number.isFinite(rawTs) && rawTs > 0) {
+      providerEventAt = new Date(rawTs > 1e11 ? rawTs : rawTs * 1000).toISOString();
+    } else if (typeof rawTs === "string" && !isNaN(Date.parse(rawTs))) {
+      providerEventAt = new Date(rawTs).toISOString();
+    }
+
+    let errorCode = null;
+    let errorReason = null;
+    const err = dataItem.error ?? dataItem.update?.error;
+    if (err && typeof err === "object") {
+      const c = err.code ?? err.error_code ?? err.statusCode;
+      if (c !== undefined && c !== null) errorCode = String(c).trim().slice(0, 64) || null;
+      const r = err.error_data?.details ?? err.message ?? err.details ?? err.reason;
+      if (r !== undefined && r !== null) errorReason = String(r).trim().slice(0, 500) || null;
+    } else if (err !== undefined && err !== null) {
+      errorCode = String(err).trim().slice(0, 64) || null;
+    }
+
+    if (!errorReason) {
+      const reasonField = dataItem.reason ?? dataItem.update?.reason ?? dataItem.message ?? dataItem.update?.message;
+      if (typeof reasonField === "string" && reasonField.trim()) {
+        errorReason = reasonField.trim().slice(0, 500);
+      }
+    }
+
+    return {
+      action: "receipt",
+      receipt: {
+        provider: config.provider,
+        provider_message_id: `${config.instance}:${key.id}`,
+        provider_status: rawStatus.slice(0, 64),
+        normalized_status: normalizedStatus,
+        ...(providerEventAt ? { provider_event_at: providerEventAt } : {}),
+        ...(errorCode ? { provider_error_code: errorCode } : {}),
+        ...(errorReason ? { provider_error_reason: errorReason } : {}),
+      },
+    };
+  }
+
   if (body.event !== "messages.upsert") return ignore("unsupported_event");
+
   const key = body.data?.key;
   if (key?.fromMe === true) return ignore("own_message");
   if (key?.fromMe !== false) return reject("webhook_key_invalid");
@@ -308,3 +382,12 @@ export function inboxDecision(response) {
   if (status === 409 && body?.error === "channel_message_payload_conflict") return { action: "stop", http_status: 409, reason: "payload_conflict" };
   return { action: "stop", http_status: [400,401,403,422,429].includes(status) ? status : 502, reason: "inbox_unavailable" };
 }
+
+export function receiptAdmissionDecision(response) {
+  response = httpResponse(response);
+  if (response?.statusCode === 200 && (response.body?.outcome === "recorded" || response.body?.outcome === "unknown_provider_message_id")) {
+    return { http_status: 200, reason: "receipt_recorded" };
+  }
+  return { http_status: response?.statusCode === 400 ? 400 : 503, reason: "receipt_not_acknowledged" };
+}
+

@@ -8,7 +8,10 @@ import {
   holdChannelOutboundMessageSchema,
   channelOutboundHoldResponseSchema,
   channelOutboundQueueStatusSchema,
+  recordChannelOutboundReceiptSchema,
+  recordChannelOutboundReceiptResponseSchema,
 } from "@contatocerto/shared";
+
 import { createInternalKeyGuard } from "../internal/internal-auth.js";
 import { validationError } from "../internal/validation.js";
 import type { ChannelOutboundService } from "./channel-outbox.types.js";
@@ -34,7 +37,15 @@ export const channelOutboundRoutes: FastifyPluginAsync<ChannelOutboundRoutesOpti
     return reply.send(channelOutboundQueueStatusSchema.parse(await options.service.queueStatus()));
   });
 
+  app.post("/receipts", { preHandler: requireInternalKey }, async (request, reply) => {
+    const body = recordChannelOutboundReceiptSchema.safeParse(request.body);
+    if (!body.success) return validationError(reply, body.error.issues);
+    const outcome = await options.service.recordReceipt(body.data);
+    return reply.code(200).send(recordChannelOutboundReceiptResponseSchema.parse(outcome));
+  });
+
   app.post("/:outboundId/hold", { preHandler: requireInternalKey }, async (request, reply) => {
+
     const params = channelOutboundMessageParamsSchema.safeParse(request.params);
     if (!params.success) return validationError(reply, params.error.issues);
     const body = holdChannelOutboundMessageSchema.safeParse(request.body);

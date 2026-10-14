@@ -8,8 +8,17 @@ import type {
   ChannelOutboundMessageRepository,
   CreateChannelOutboundMessage,
   CreateIndependentChannelOutboundMessage,
+  RecordReceiptResult,
 } from "./channel-outbox.types.js";
-import type { ChannelOutboundQueueStatus, ChannelOutboundMessageStatus, MarkChannelOutboundMessageFailedInput, MarkChannelOutboundMessageSentInput } from "@contatocerto/shared";
+import type {
+  ChannelOutboundQueueStatus,
+  ChannelOutboundMessageStatus,
+  MarkChannelOutboundMessageFailedInput,
+  MarkChannelOutboundMessageSentInput,
+  ChannelOutboundReceiptNormalizedStatus,
+  RecordChannelOutboundReceiptInput,
+} from "@contatocerto/shared";
+
 import { OUTBOX_MAX_ATTEMPTS, OUTBOX_RETRY_BACKOFF_SECONDS } from "./channel-outbox.retry.js";
 import {
   AUTH_OUTBOUND_MIN_REMAINING_SECONDS,
@@ -477,4 +486,63 @@ export class PostgresChannelOutboundMessageRepository implements ChannelOutbound
       ) SELECT id FROM held`, [id, input.processing_token, input.reason, input.provider_message_id??null]);
     return result.rows.length === 1;
   }
+
+  async findByProviderMessageId(provider: string, providerMessageId: string): Promise<ChannelOutboundMessageRecord | null> {
+    const result = await this.execute<ChannelOutboundMessageRow>(
+      `SELECT ${channelOutboundMessageColumns} FROM channel_outbound_messages
+       WHERE provider = $1 AND provider_message_id = $2
+       LIMIT 1`,
+      [provider, providerMessageId],
+    );
+    return result.rows[0] ? toChannelOutboundMessageRecord(result.rows[0]) : null;
+  }
+
+  async recordReceipt(
+    input: RecordChannelOutboundReceiptInput,
+    fingerprint: string,
+    outboundMessageId: string,
+  ): Promise<RecordReceiptResult> {
+    const inserted = await this.execute<{ id: string; outbound_message_id: string; normalized_status: ChannelOutboundReceiptNormalizedStatus }>(
+      `INSERT INTO channel_outbound_receipts (
+         outbound_message_id, provider, provider_message_id, provider_status,
+         normalized_status, provider_event_at, provider_error_code, provider_error_reason,
+         event_fingerprint
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (event_fingerprint) DO NOTHING
+       RETURNING id, outbound_message_id, normalized_status`,
+      [
+        outboundMessageId,
+        input.provider,
+        input.provider_message_id,
+        input.provider_status,
+        input.normalized_status,
+        input.provider_event_at ? new Date(input.provider_event_at) : null,
+        input.provider_error_code ?? null,
+        input.provider_error_reason ?? null,
+        fingerprint,
+      ],
+    );
+    if (inserted.rows[0]) {
+      return {
+        receiptId: inserted.rows[0].id,
+        outboundMessageId: inserted.rows[0].outbound_message_id,
+        normalizedStatus: inserted.rows[0].normalized_status,
+        duplicate: false,
+      };
+    }
+    const existing = await this.execute<{ id: string; outbound_message_id: string; normalized_status: ChannelOutboundReceiptNormalizedStatus }>(
+      `SELECT id, outbound_message_id, normalized_status FROM channel_outbound_receipts
+       WHERE event_fingerprint = $1`,
+      [fingerprint],
+    );
+    const row = existing.rows[0];
+    if (!row) throw new Error("Receipt record conflict resolution failed");
+    return {
+      receiptId: row.id,
+      outboundMessageId: row.outbound_message_id,
+      normalizedStatus: row.normalized_status,
+      duplicate: true,
+    };
+  }
 }
+

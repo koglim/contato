@@ -346,14 +346,64 @@ jobs:
           END $$;
           SQL
 
+      - name: Verify migration 030 before integrations
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='030_add_outbound_delivery_receipts')
+              OR to_regclass('channel_outbound_receipts') IS NULL
+              OR to_regclass('channel_outbound_receipts_outbound_id_idx') IS NULL
+              OR to_regclass('channel_outbound_receipts_provider_msg_id_idx') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'channel_outbound_receipts_no_update_or_delete')
+              OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'channel_outbound_receipts_no_truncate')
+            THEN RAISE EXCEPTION 'migration 030 incomplete'; END IF;
+          END $$;
+          SQL
+
       - name: Test PostgreSQL integrations
         run: pnpm --filter @contatocerto/api test:integration
+
+      - name: Verify migration 030 protected rollback
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_030_protected'
+          protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_030_protected'
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+          psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
+          INSERT INTO channel_inbound_messages (id, provider, provider_message_id, phone_e164, raw_text)
+          VALUES ('00000000-0000-0000-0030-000000000001', 'evolution', 'inst:inbound030', '+5566900000030', 'inbound text');
+          INSERT INTO channel_outbound_messages (id, channel_inbound_message_id, provider, recipient_phone_e164, message_type, text_content, status, provider_message_id)
+          VALUES ('00000000-0000-0000-0030-000000000002', '00000000-0000-0000-0030-000000000001', 'evolution', '+5566900000030', 'text', 'outbound text', 'sent', 'inst:wamid030');
+          INSERT INTO channel_outbound_receipts (outbound_message_id, provider, provider_message_id, provider_status, normalized_status, event_fingerprint)
+          VALUES ('00000000-0000-0000-0030-000000000002', 'evolution', 'inst:wamid030', 'DELIVERY_ACK', 'delivered', repeat('c', 64));
+          SQL
+          set +e
+          rollback_output=$(DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL 2>&1)
+          rollback_status=$?
+          set -e
+          echo "$rollback_output"
+          test "$rollback_status" -ne 0
+          echo "$rollback_output" | grep -q 'OUTBOUND_RECEIPT_ROLLBACK_BLOCKED'
+          echo "$rollback_output" | grep -q 'P0030'
+          psql -v ON_ERROR_STOP=1 'postgresql://contatocerto:contatocerto-test@localhost:5432/postgres' -c 'DROP DATABASE contatocerto_030_protected'
+
+      - name: Roll back migration 030 with compatible data
+        run: |
+          node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          DO $$ BEGIN
+            IF to_regclass('channel_outbound_receipts') IS NOT NULL
+              OR EXISTS (SELECT 1 FROM pgmigrations WHERE name='030_add_outbound_delivery_receipts')
+            THEN RAISE EXCEPTION 'migration 030 remained after compatible rollback'; END IF;
+          END $$;
+          SQL
 
       - name: Verify migration 029 protected rollback
         run: |
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_029_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_029_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
+          # Roll back migration 030 first so the protected test targets 029
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
           INSERT INTO customers (id, phone_e164) VALUES ('00000000-0000-0000-0029-000000000001', '+5566900000029');
           INSERT INTO customer_last_locations (customer_id, latitude, longitude, label, source, confirmed_at)
@@ -388,7 +438,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_028_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_028_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
-          # Roll back migration 029 first so the protected test targets 028
+          # Roll back migrations 030 and 029 first so the protected test targets 028
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
           INSERT INTO customers (id, phone_e164) VALUES ('00000000-0000-0000-0028-000000000001', '+5566900000028');
@@ -431,7 +482,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_027_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_027_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
-          # Roll back migrations 029 and 028 first so the protected test targets 027
+          # Roll back migrations 030, 029 and 028 first so the protected test targets 027
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           psql -v ON_ERROR_STOP=1 "$protected_url" <<'SQL'
@@ -460,7 +512,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_027_v2_protected'
           v2_protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_027_v2_protected'
           DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
-          # Roll back migrations 029 and 028 first so the protected test targets 027
+          # Roll back migrations 030, 029 and 028 first so the protected test targets 027
+          DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$v2_protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           psql -v ON_ERROR_STOP=1 "$v2_protected_url" <<'SQL'
@@ -501,7 +554,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_026_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_026_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
-          # Roll back migrations 029, 028 and 027 first so the protected test targets 026
+          # Roll back migrations 030, 029, 028 and 027 first so the protected test targets 026
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
@@ -542,7 +596,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_025_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_025_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
-          # Roll back migrations 029, 028, 027 and 026 first so the protected test targets 025
+          # Roll back migrations 030, 029, 028, 027 and 026 first so the protected test targets 025
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
@@ -700,7 +755,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_024_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_024_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
-          # Roll back migrations 029, 028, 027, 026 and 025 first so the protected test targets 024
+          # Roll back migrations 030, 029, 028, 027, 026 and 025 first so the protected test targets 024
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
@@ -739,7 +795,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'CREATE DATABASE contatocerto_023_protected'
           protected_url='postgresql://contatocerto:contatocerto-test@localhost:5432/contatocerto_023_protected'
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
-          # Roll back migrations 029, 028, 027, 026, 025 and 024 so the protected test targets 023
+          # Roll back migrations 030, 029, 028, 027, 026, 025 and 024 so the protected test targets 023
+          DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
           DATABASE_URL="$protected_url" node node_modules/node-pg-migrate/bin/node-pg-migrate.js down --single-transaction -m database/migrations --database-url-var DATABASE_URL
@@ -1086,10 +1143,10 @@ jobs:
           $$;
           SQL
 
-      - name: Reapply migrations 008 through 029
+      - name: Reapply migrations 008 through 030
         run: node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m database/migrations --database-url-var DATABASE_URL up
 
-      - name: Verify migrations 025 through 029 present after reapply
+      - name: Verify migrations 025 through 030 present after reapply
         run: |
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
           DO $$ BEGIN
@@ -1128,7 +1185,13 @@ jobs:
               OR to_regclass('customer_last_locations') IS NULL
               OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channel_inbound_messages' AND column_name='latitude')
               OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='search_conversations' AND column_name='pin_latitude')
-            THEN RAISE EXCEPTION 'migration 025, 026, 027, 028 or 029 missing or incomplete after reapply'; END IF;
+              OR NOT EXISTS (SELECT 1 FROM pgmigrations WHERE name='030_add_outbound_delivery_receipts')
+              OR to_regclass('channel_outbound_receipts') IS NULL
+              OR to_regclass('channel_outbound_receipts_outbound_id_idx') IS NULL
+              OR to_regclass('channel_outbound_receipts_provider_msg_id_idx') IS NULL
+              OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'channel_outbound_receipts_no_update_or_delete')
+              OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'channel_outbound_receipts_no_truncate')
+            THEN RAISE EXCEPTION 'migration 025, 026, 027, 028, 029 or 030 missing or incomplete after reapply'; END IF;
           END $$;
           SQL
 

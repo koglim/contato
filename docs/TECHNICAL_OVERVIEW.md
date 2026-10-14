@@ -57,12 +57,22 @@ flowchart TD
 * **Recuperação de Fila (Recovery):** `POST /internal/channel/inbound/next/process`
 * **Reivindicação de Saída (Outbound Claim):** `POST /internal/channel/outbound/next/claim` (e `/internal/channel/outbound/:id/claim`)
 * **Confirmação de Despacho:** `POST /internal/channel/outbound/:id/sent`, `/failed`, `/hold`
+* **Recibos de Entrega Assíncronos (Delivery Receipts — WP-B):** `POST /internal/channel/outbound/receipts`
 
 ### Fronteiras de Responsabilidade e Invariantes
 
-* **n8n (Orquestração de Integração e Transporte):** Responsável pelo transporte de entrada/saída, conversão de payloads de mensageria, retries de rede e execução de workflows externos de transcrição de áudio (reivindicação de mídias, chamada Groq com fallback para OpenAI e persistência do resultado). O n8n **não detém lógica de negócio**, não toma decisões de autorização e não é a fonte da verdade de dados.
-* **ContatoCerto API (Autoridade de Negócio e Domínio):** O backend Fastify é a autoridade absoluta sobre resolução de serviços, elegibilidade, criação de buscas, ranking espacial, consentimento, geração de contatos bilaterais e ciclo de vida de atendimentos.
-* **PostgreSQL / PostGIS (Persistência Canônica):** Camada de dados única e centralizada. É a guardiã das transações, tabelas de fila (`channel_inbound_messages`, `channel_outbound_messages`), locks concorrentes (`FOR UPDATE`) e do catálogo geográfico.
+* **n8n (Orquestração de Integração e Transporte):** Responsável pelo transporte de entrada/saída, conversão de payloads de mensageria, retries de rede e execução de workflows externos de transcrição de áudio. No pipeline de recibos de entrega, o Gateway (`gateway.json`) recebe eventos assíncronos `messages.update` / `messages_update`, normaliza o status (`accepted`, `delivered`, `read`, `failed`, `unknown`) e despacha para a API via `POST /internal/channel/outbound/receipts`. O n8n **não detém lógica de negócio**, não toma decisões de autorização e não altera o ciclo de vida do outbox.
+* **ContatoCerto API (Autoridade de Negócio e Domínio):** O backend Fastify é a autoridade absoluta sobre resolução de serviços, elegibilidade, criação de buscas, ranking espacial, consentimento, geração de contatos bilaterais, ciclo de vida de atendimentos e persistência idempotente de recibos de entrega.
+* **PostgreSQL / PostGIS (Persistência Canônica):** Camada de dados única e centralizada. É a guardiã das transações, tabelas de fila (`channel_inbound_messages`, `channel_outbound_messages`), recibos de entrega auditáveis e imutáveis (`channel_outbound_receipts`), locks concorrentes (`FOR UPDATE`) e do catálogo geográfico.
+
+### Observabilidade de Recibos de Entrega Assíncronos (CURRENT — WP-B / Migration 030)
+
+O ContatoCerto implementa separação estrita entre o aceite síncrono pelo provedor e o ciclo assíncrono de entrega:
+
+* **Semântica Invariante de `status = 'sent'`:** Na tabela `channel_outbound_messages`, o estado `'sent'` expressa única e exclusivamente que o provedor aceitou o payload e retornou um identificador autoritativo (`wamid`). Ele **não** significa que a mensagem chegou ao aparelho do destinatário.
+* **Tabela Imutável de Recibos (`channel_outbound_receipts`):** Cada evento de atualização de status recebido da Evolution/Meta é persistido como registro autônomo, vinculado à mensagem correspondente através de `outbound_message_id`. Triggers em nível de linha e comando bloqueiam qualquer `UPDATE`, `DELETE` ou `TRUNCATE` (`OUTBOUND_RECEIPT_IMMUTABLE`, código `P0030`), e o rollback da migration é protegido (`OUTBOUND_RECEIPT_ROLLBACK_BLOCKED`, código `P0030`).
+* **Idempotência Criptográfica:** Um fingerprint SHA-256 é calculado deterministamente a partir de `(provider, provider_message_id, provider_status, normalized_status, provider_event_at, provider_error_code)`, garantindo deduplicação atômica no banco sem efeitos colaterais caso a Meta reenvie webhooks.
+* **Ausência de Efeitos Colaterais no Domínio:** Nenhum recibo assíncrono altera o campo `status` da tabela `channel_outbound_messages`, nem reinicia retentativas de envio. Falhas assíncronas (como o erro Meta `131047` — janela de 24h fechada) são registradas estritamente para observabilidade e auditoria, sem invalidar ou reemitir challenges de OTP automaticamente.
 
 ### Autoridade Compartilhada de Domínio Pós-Conexão (CURRENT — WP6.3)
 
