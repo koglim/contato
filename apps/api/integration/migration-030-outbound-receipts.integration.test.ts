@@ -650,7 +650,7 @@ test("Professional auth challenge: async FAILED receipt preserves outbox status 
          purpose, expires_at
        ) VALUES (
          $1, NULL, 'evolution', $2,
-         'interactive', '[auth template: contatocerto_auth_otp_v1]', 'sent', $3, NOW(),
+         'text', '[auth template: contatocerto_auth_otp_v1]', 'sent', $3, NOW(),
          'professional_auth_challenge', NOW() + INTERVAL '5 minutes'
        )`,
       [outboundId, phone, wamid],
