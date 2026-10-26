@@ -44,7 +44,11 @@ Decisões de engenharia e produto que moldam os invariantes do sistema estão re
 * [**ADR-001**](decisions/ADR-001-github-documentation-source-of-truth.md): Governança documental e GitHub `main` como Fonte Única da Verdade.
 * [**ADR-002**](decisions/ADR-002-ai-interpretation-vs-deterministic-domain-authority.md): Fronteiras estritas entre interpretação por IA e autoridade de domínio determinística.
 * [**ADR-003**](decisions/ADR-003-billing-provider-decision-frozen.md): Congelamento formal de provedores e fluxos de checkout/cobrança.
-* [**ADR-004**](decisions/ADR-004-connection-lifecycle-v2-direction.md): Direção de produto para o Ciclo de Conexão v2 (*Aceito / Não implementado no código*).
+* [**ADR-004**](decisions/ADR-004-connection-lifecycle-v2-direction.md): Direção de produto para o Ciclo de Conexão v2 (*Aceito / Implementado no PR #17*).
+* [**ADR-005**](decisions/ADR-005-soft-expiry-resumable-presentation.md): Soft Expiry e apresentação retomável de lista de profissionais (*Implementado no PR #30*).
+* [**ADR-006**](decisions/ADR-006-interactive-actions-button-first.md): Ações interativas e experiência button-first no WhatsApp (*Implementado e homologado no Gate B*).
+* [**ADR-007**](decisions/ADR-007-location-v2-native-pins-and-confirmed-memory.md): Pinos nativos de WhatsApp e memória confirmada de localização (*Implementado e homologado no PR #45 / PR #47*).
+* [**ADR-008**](decisions/ADR-008-direct-meta-and-bullmq-transactional-migration.md): Migração do caminho crítico transacional para Meta WhatsApp Cloud API direta e fila BullMQ/Redis (*Aceito / Target congelado no WP-DM0*).
 
 ---
 
