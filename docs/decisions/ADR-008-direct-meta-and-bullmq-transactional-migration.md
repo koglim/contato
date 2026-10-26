@@ -14,14 +14,24 @@
 
 ## 1. Contexto
 
-Durante as fases iniciais de validação (MVP V1 até o Gate B — WP6.9), a combinação entre **Evolution API** (instância Baileys/WhatsApp-Business) e **n8n** desempenhou papel crucial para homologar rapidamente a proposta de valor do marketplace, os fluxos conversacionais e a experiência de ações interativas (*button-first* e *templates* de utilidade).
+Durante as fases iniciais de validação (MVP V1 até o Gate B — WP6.9), a combinação entre **Evolution API** e **n8n** desempenhou papel crucial para homologar rapidamente a proposta de valor do marketplace, os fluxos conversacionais e a experiência de ações interativas (*button-first* e *templates* de utilidade).
 
-Entretanto, o crescimento da plataforma e a necessidade de garantias rigorosas de entrega expuseram limitações estruturais desse arranjo intermediário no caminho crítico:
+Historicamente, o projeto utilizou em seus estágios embrionários uma conexão via Baileys (*LEGACY/HISTORICAL*). No entanto, o estado atual de produção já opera com integração oficial `WHATSAPP-BUSINESS` através da Evolution API.
+
+Apesar de utilizar a integração oficial upstream, a permanência da Evolution API e do n8n no caminho crítico transacional impõe limitações arquiteturais e operacionais estruturais que motivam esta migração:
 
 1. **Latência de Polling no Despacho:** O despachador de mensagens de saída (`outbox-dispatcher.json`) opera via ciclos de polling periódico a cada 45 segundos no n8n. Essa abordagem introduz atraso artificial de até 45 segundos na entrega de solicitações de oportunidade a profissionais e respostas a clientes.
-2. **Ponto Único de Falha e Intermediário Operacional:** A presença do n8n no *hot path* transacional adiciona múltiplos saltos de rede HTTP, complexidade na gestão de instâncias e sobrecarga de CPU em execuções de grafos JSON para tarefas de roteamento simples.
-3. **Instabilidade de Sessão no Gateway Não-Oficial:** A dependência da Evolution API implica riscos operacionais recorrentes inerentes a conexões baseadas em emulação de WhatsApp Web (desconexões de socket, bugs de normalização de 9º dígito móvel brasileiro e discrepâncias na emissão de webhooks de status).
-4. **Alinhamento com a API Oficial da Meta:** A contratação e o uso direto da **WhatsApp Cloud API (Meta Graph API)** oferecem canal oficial sem necessidade de manter sessões abertas via QR Code, garantia de alta disponibilidade global pela infraestrutura da Meta, suporte nativo a WAMIDs determinísticos e entrega em conformidade de templates de autenticação (OTP) e utilidade.
+2. **Intermediário no Hot Path Transacional:** A presença do n8n no caminho crítico transacional adiciona múltiplos saltos de rede HTTP, complexidade na gestão de instâncias e sobrecarga de CPU em execuções de grafos JSON para tarefas de roteamento simples.
+3. **Complexidade Operacional e Sobrecarga de Gateway Intermediário da Evolution:** A saída da Evolution API do caminho transacional não decorre de emulação de WhatsApp Web no estado atual de produção, mas sim das seguintes razões arquiteturais concretas:
+   * **Camada Intermediária Adicional:** Camada extra entre o ContatoCerto e a Meta, gerando latência e processamento redundante;
+   * **Runtime e Container Adicionais:** Necessidade de manter um contêiner e processo operacional adicional no cluster (EasyPanel);
+   * **Acompanhamento de Versões da Graph API Upstream:** Sobrecarga de compatibilizar a Evolution com as evoluções da Graph API da Meta;
+   * **Transformação e Normalização Redundante de Payloads:** Tradução bidirecional de formatos entre a API do ContatoCerto, a Evolution e a Meta;
+   * **Forwarding de Statuses e Erros:** Redirecionamento e mapeamento de webhooks de status de entrega (`sent`, `delivered`, `read`, `failed`) e erros da Meta através de formatos proprietários da Evolution, sujeitos a atrasos ou divergências de payload;
+   * **Domínio de Falha Adicional (*Failure Domain*):** Ponto extra de suscetibilidade a falhas de rede, reinicializações ou degradação de serviço entre os sistemas;
+   * **Manutenção de Fork / Imagem Customizada:** Necessidade de manter forks ou imagens customizadas do gateway quando o comportamento upstream não satisfaz os contratos estritos exigidos pelo ContatoCerto (conforme evidenciado pelo PR #8 da Evolution);
+   * **Maior Complexidade Operacional e Observacional:** Dificuldade adicional na depuração e correlação distribuída de ponta a ponta.
+4. **Comunicação Direta com a Meta WhatsApp Cloud API Oficial:** O acesso direto à **WhatsApp Cloud API (Graph API direta)** elimina intermediários, operando sobre a **infraestrutura da Cloud API operada pela Meta**, com suporte nativo a **identificadores WAMID emitidos pelo provedor** e entrega direta em conformidade de templates de autenticação (OTP) e utilidade.
 
 ---
 
@@ -31,21 +41,27 @@ Fica estabelecida como arquitetura-alvo canônica (**TARGET**) do ContatoCerto:
 
 $$\mathbf{Meta\ WhatsApp\ Cloud\ API} \iff \mathbf{ContatoCerto\ API\ (Fastify)} \iff \mathbf{PostgreSQL\ (PostGIS)} + \mathbf{Redis\ /\ BullMQ} \iff \mathbf{ContatoCerto\ Workers}$$
 
-### 2.1. Classificação dos Componentes Legados
+### 2.1. Estados da Arquitetura e Relação entre Provedores
 
-* **Evolution API:**
-  $$\mathbf{TEMPORARY\_FALLBACK\_THEN\_DECOMMISSION}$$
-  A Evolution API permanecerá provisionada e configurada estritamente como mecanismo de contingência (*fallback*) durante as fases de transição e homologação da Meta Cloud API. Uma vez concluído o dreno de mensagens e a validação de estabilidade, a Evolution será integralmente descomissionada.
-* **n8n:**
+Para eliminar ambiguidades quanto à exclusividade do transporte e à contingência temporária da Evolution, definem-se dois estados formais de governança:
+
+* **Estado de Transição (`TRANSITION_STATE`):**
+  * **Evolution API como Fallback Controlado (`TEMPORARY_FALLBACK_THEN_DECOMMISSION`):** A Evolution API permanece provisionada e configurada exclusivamente como mecanismo de contingência e salvaguarda operacional durante os pacotes de transição e homologação da Meta Cloud API.
+  * **Exclusão Mútua de Despacho:** Fica expressamente vedado que a Meta Cloud API e a Evolution API despachem simultaneamente a mesma Outbox. Apenas um único provedor estará ativo por vez para envio transacional em produção, controlado de forma unívoca pela variável `WHATSAPP_PROVIDER`.
+* **Estado de Regime Permanente (`TARGET_STEADY_STATE`):**
+  * Após a conclusão do cutover de produção (WP-DM7), o dreno e esgotamento das filas legadas (WP-DM8) e a validação de estabilidade operacional, a Evolution API será integralmente descomissionada (`DECOMMISSION` em WP-DM9).
+  * No estado de regime permanente (*steady state*), o caminho crítico transacional do ContatoCerto utilizará direta e exclusivamente a **Meta WhatsApp Cloud API**, sem nenhuma dependência, contêiner ou presença da Evolution API.
+* **Classificação do n8n:**
   $$\mathbf{REMOVED\_FROM\_TRANSACTIONAL\_HOT\_PATH\ /\ RETAINED\_FOR\_AUXILIARY\_AUTOMATIONS}$$
-  O n8n deixará de receber webhooks de clientes/profissionais e não realizará mais o polling ou envio de mensagens transacionais da Outbox. Ele será mantido no ecossistema exclusivamente para fluxos auxiliares, relatórios analíticos, alertas operacionais (Slack/Telegram) e integrações de backoffice não críticas.
+  * O n8n deixará de receber webhooks de mensagens de entrada de clientes/profissionais e não realizará mais polling ou despacho de mensagens da Outbox.
+  * O n8n é mantido no ecossistema exclusivamente para fluxos auxiliares, relatórios analíticos, alertas operacionais (Slack/Telegram) e integrações de backoffice não críticas.
 
 ---
 
 ## 3. Cláusulas Mandatórias do Contrato Arquitetural
 
 ### Cláusula A — Meta WhatsApp Cloud API Oficial e Versão da Graph API
-* A comunicação com o WhatsApp ocorrerá exclusivamente através da **Meta WhatsApp Cloud API (Graph API direta)** via chamadas HTTPS autenticadas por Bearer Token.
+* No regime permanente (`TARGET_STEADY_STATE`), a comunicação com o WhatsApp ocorrerá diretamente através da **Meta WhatsApp Cloud API (Graph API direta)** via chamadas HTTPS autenticadas por Bearer Token, sem gateways intermediários. No estado transitório (`TRANSITION_STATE`), a Evolution API atua apenas como contingência sob controle estrito de `WHATSAPP_PROVIDER`.
 * A versão da Graph API deve ser explicitamente configurável por variável de ambiente: `META_GRAPH_API_VERSION`.
 * **Versão inicial homologada e aprovada:** **`v26.0`**.
 * **Proibição de Defaults Silenciosos:** Fica expressamente vedado o uso de defaults silenciosos legados (como `v22.0`). Os ambientes de homologação e produção devem definir explicitamente `META_GRAPH_API_VERSION=v26.0`.
@@ -142,12 +158,31 @@ $$\mathbf{Meta\ WhatsApp\ Cloud\ API} \iff \mathbf{ContatoCerto\ API\ (Fastify)}
 * Rotinas periódicas e cron jobs no BullMQ (como o sweeper de reconciliação de outbox) devem utilizar a API moderna de **Job Schedulers** (`Queue.upsertJobScheduler`).
 * É vedado o uso da API legada de Repeatable Jobs (`queue.add(..., { repeat: ... })`), descontinuada nas versões recentes do BullMQ.
 
-### Cláusula M — Transactional Outbox e Prevenção de Dual-Write
-* Fica vedada a criação de tabelas secundárias de outbox. A tabela `channel_outbound_messages` permanece como o registro durável canônico existente.
-* O padrão arquitetural adotado para mitigar o problema do *Dual-Write* (PostgreSQL vs Redis) é:
+### Cláusula M — Transactional Outbox, Sweeper e Princípio de Autorização de Envio
+
+* **Outbox Canônica Única:** Fica expressamente vedada a criação de tabelas secundárias de outbox. A tabela existente `channel_outbound_messages` permanece como o único registro durável e canônico de saída.
+* **Padrão de Mitigação de Dual-Write:**
   1. O serviço de domínio insere a mensagem em `channel_outbound_messages` com `status = 'pending'` **dentro da mesma transação ACID de negócio**;
-  2. Imediatamente após a confirmação do `COMMIT`, é disparado um enqueue não bloqueante do job `outbound-<outboundId>` no BullMQ;
-  3. **Safety Net (Sweeper de Reconciliação):** Um BullMQ Job Scheduler leve (executado a cada 30 segundos) consulta o PostgreSQL via query com lock não bloqueante (`FOR UPDATE SKIP LOCKED`) por mensagens em `pending` criadas há mais de 15 segundos que não foram consumidas, reinjetando seus IDs na fila de execução.
+  2. Imediatamente após a confirmação do `COMMIT` no banco de dados, é disparado um enqueue assíncrono e não bloqueante do job `outbound-<outboundId>` na fila BullMQ `whatsapp-outbound`;
+  3. **Safety Net (Sweeper de Reconciliação):** Um BullMQ Job Scheduler periódico descobre mensagens pendentes/elegíveis que eventualmente não foram enfileiradas por instabilidade transitória do Redis após o commit e reintroduz seus IDs na fila de execução.
+
+* **Princípio Fundamental de Autoridade:**
+  $$\mathbf{BULLMQ\_WAKES\_THE\_WORKER} = \mathbf{TRUE}$$
+  $$\mathbf{POSTGRES\_AUTHORIZES\_THE\_SEND} = \mathbf{TRUE}$$
+  * O **BullMQ / scheduler NÃO é autoridade de elegibilidade para envio**. Sua função é estritamente notificar/despertar o worker (*wake-up*) e despachar o identificador do registro.
+  * O scheduler/sweeper atua exclusivamente descobrindo e re-enfileirando IDs candidatos. O sweeper **nunca pode contornar hold, retry schedule, expiry ou sequencing**.
+  * **Aquisição Obrigatória de Claim Transacional:** ANTES DE QUALQUER ENVIO EXTERNO à Meta Graph API, o worker deve obrigatoriamente adquirir o *claim* canônico no PostgreSQL através da transação atômica já consolidada no repositório (`PostgresChannelOutboundMessageRepository.claim`), preservando e validando rigorosamente:
+    * `delivery_hold_reason IS NULL` (bloqueio inegociável para itens com retenção operacional ou desfecho incerto);
+    * `administrative_closed_at IS NULL` (mensagens canceladas ou encerradas administrativamente nunca são enviadas);
+    * `attempt_count` estritamente abaixo do limite (`attempt_count < OUTBOX_MAX_ATTEMPTS`);
+    * `next_attempt_at` maturado (`next_attempt_at IS NULL OR next_attempt_at <= clock_timestamp()`);
+    * Leases e fencing determinístico (`status = 'processing'`, `processing_token`, `processing_started_at`);
+    * Expiração e validade temporal específica do `purpose` (ex.: janela de expiração para `customer_reply`);
+    * Elegibilidade de challenge para autenticação de profissionais (`professional_auth_challenges` válidos, não consumidos e não expirados);
+    * Expiração de customer replies (`customer_reply_expiry`);
+    * Ordenação de turnos por destinatário e FIFO (`recipientTurnSql` prevenindo ultrapassagem de mensagens anteriores para o mesmo número);
+    * Demais invariantes e constraints existentes no repository.
+  * **Proibição de Duplicação de Regras:** Nenhuma dessas regras de negócio deve ser duplicada dentro do BullMQ ou no payload do job. Se ao receber o job o worker não obtiver sucesso no *claim* do PostgreSQL (devido a hold, lease ativo, retry agendado para o futuro ou encerramento), o job é finalizado imediatamente sem qualquer tentativa de despacho externo.
 
 ### Cláusula N — Compatibilidade Integral da Migration 030 (`channel_outbound_receipts`)
 * `MIGRATION_030_REUSABLE_WITH_DIRECT_META=YES`.
@@ -171,13 +206,13 @@ $$\mathbf{Meta\ WhatsApp\ Cloud\ API} \iff \mathbf{ContatoCerto\ API\ (Fastify)}
 
 1. **Postgres Primeiro:** Nenhuma mensagem (inbound ou outbound) é processada ou despachada sem estar previamente persistida de forma durável no PostgreSQL.
 2. **Sem Fila como Fonte Única:** Nenhum dado crítico de negócio existirá exclusivamente no Redis.
-3. **Fencing Obrigatório:** Nenhuma mensagem outbound é despachada externamente sem reserva transacional com lock determinístico no banco (`FOR UPDATE SKIP LOCKED`).
-4. **Zero Blind Resend:** Resultados incertos ou timeouts de rede em chamadas à Meta nunca autorizam reenvio automático cego.
+3. **Fencing e Claim Obrigatório:** Nenhuma mensagem outbound é despachada externamente sem reserva transacional atômica com lock no PostgreSQL (`claim`), respeitando `delivery_hold_reason IS NULL`, `administrative_closed_at IS NULL`, maturação de `next_attempt_at`, teto de tentativas, ordenação FIFO por destinatário e regras de expiração de propósito.
+4. **Zero Blind Resend:** Resultados incertos ou timeouts de rede em chamadas à Meta nunca autorizam reenvio automático cego, exigindo transição para `delivery_hold_reason = 'transport_outcome_unknown'`.
 5. **Barreira de Autenticidade:** Webhooks sem assinatura válida comprovada via HMAC SHA-256 são descartados na borda e jamais alcançam a camada de domínio.
-6. **WAMID Canônico:** O identificador oficial da Meta (`wamid`) é persistido fielmente como `provider_message_id`.
+6. **WAMID Canônico:** O identificador oficial da Meta (`wamid`) emitido pelo provedor é persistido fielmente como `provider_message_id`.
 7. **Recibos Observacionais:** Recibos assíncronos (`channel_outbound_receipts`) são puramente de telemetria e auditoria; nunca reiniciam retentativas ou mutam o status de disparo da outbox.
-8. **Exclusão Mútua de Provedores:** Evolution e Meta nunca podem despachar simultaneamente mensagens da mesma Outbox.
-9. **Chave Única de Envio:** Apenas um provedor outbound ativo estará habilitado por vez em produção (`WHATSAPP_PROVIDER`).
+8. **Exclusão Mútua de Provedores:** Evolution e Meta nunca podem despachar simultaneamente mensagens da mesma Outbox. Apenas um provedor outbound ativo estará habilitado por vez em produção (`WHATSAPP_PROVIDER`).
+9. **BullMQ Desperta, Postgres Autoriza:** O BullMQ é exclusivamente um mecanismo de notificação e wake-up (`BULLMQ_WAKES_THE_WORKER = TRUE`); a autorização, elegibilidade e validação de invariantes residem 100% no PostgreSQL (`POSTGRES_AUTHORIZES_THE_SEND = TRUE`). O sweeper nunca contorna hold, retry schedule, expiry ou sequencing.
 
 ---
 
@@ -217,7 +252,7 @@ A auditoria no monorepo confirmou que os contratos em `packages/shared/src/schem
 
 ### Positivas
 * **Eliminação de Latência:** Redução drástica do atraso de envio (de ~45 segundos para centenas de milissegundos).
-* **Resiliência e Confiabilidade:** Eliminação de desconexões de sessão do WhatsApp Web e garantia oficial de entrega pela Meta.
+* **Resiliência e Confiabilidade:** Eliminação de intermediários adicionais de transporte e dependência direta da infraestrutura da Cloud API operada pela Meta com identificadores WAMID emitidos pelo provedor.
 * **Simplificação Operacional:** Remoção do n8n do caminho crítico de transações, reduzindo o número de contêineres acoplados à jornada de busca do cliente.
 * **Segurança Reforçada:** Verificação criptográfica nativa de todos os webhooks com `X-Hub-Signature-256` em tempo constante.
 
