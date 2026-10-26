@@ -15,6 +15,7 @@ Este diretório contém os **Architecture Decision Records (ADRs)** do **Contato
 | [**ADR-005**](ADR-005-soft-expiry-resumable-presentation.md) | Soft Expiry / Apresentação Retomável de Lista de Profissionais | 2026-10-02 | **IMPLEMENTED IN PR #30 (AUTOMATED VALIDATION)** |
 | [**ADR-006**](ADR-006-interactive-actions-button-first.md) | Ações Interativas e Experiência Button-First no WhatsApp | 2026-10-02 | **IMPLEMENTED (WP6.1-WP6.9 / GATE B CLOSED)** |
 | [**ADR-007**](ADR-007-location-v2-native-pins-and-confirmed-memory.md) | Localização v2 — Pinos Nativos de WhatsApp, Coordenadas Exatas e Memória Confirmada de Localização | 2026-10-09 | **IMPLEMENTED & HOMOLOGATED IN PRODUCTION (PR #45 / PR #47)** |
+| [**ADR-008**](ADR-008-direct-meta-and-bullmq-transactional-migration.md) | Migração do Caminho Crítico Transacional para Meta WhatsApp Cloud API Direta e Fila BullMQ/Redis | 2026-10-26 | **ACCEPTED / TARGET (WP-DM0 ARCHITECTURE CONTRACT FROZEN)** |
 
 ---
 

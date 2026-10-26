@@ -53,6 +53,7 @@ Funcionalidades planejadas para a sequência imediata após a conclusão do bloc
 * **Homologação de Carga e Resiliência de Transporte:** Testes de estresse com alta concorrência de números simultâneos e injeção de falhas controladas no provedor de mensageria.
 * **Automação de Testes E2E Web:** Cobertura de fluxos do painel via Playwright.
 * **Endurecimento de Confiabilidade:** Estratégias de backup/restore testadas, tolerância a particionamento de rede e observabilidade aprimorada com tracing distribuído.
+* **Migração do Caminho Crítico Transacional para Meta Cloud API e BullMQ (WP-DM0 a WP-DM9 — [ADR-008](decisions/ADR-008-direct-meta-and-bullmq-transactional-migration.md)):** Substituição progressiva do polling via n8n e da Evolution API por integração direta com a Meta WhatsApp Cloud API (Graph API v26.0) e fila BullMQ/Redis como camada de execução assíncrona de alta velocidade, mantendo o PostgreSQL como autoridade canônica e fonte única da verdade.
 
 ---
 
